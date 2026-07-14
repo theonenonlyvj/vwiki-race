@@ -37,6 +37,9 @@ interface WikipediaQueryResponse {
   };
 }
 
+const WIKIMEDIA_API_USER_AGENT =
+  "VWiki Race/0.0 (https://vwikirace.pages.dev; contact: https://github.com/theonenonlyvj/vwiki-race)";
+
 export function createWikipediaChallengeValidator(options: {
   fetchImpl?: typeof fetch;
   endpoint?: string;
@@ -78,7 +81,11 @@ export function createWikipediaChallengeValidator(options: {
 
     let response: Response;
     try {
-      response = await fetchImpl(url);
+      response = await fetchImpl(url.toString(), {
+        headers: {
+          "Api-User-Agent": WIKIMEDIA_API_USER_AGENT,
+        },
+      });
     } catch {
       throw new ApiError(
         "wikipedia_validation_failed",

@@ -27,6 +27,31 @@ describe("Wikipedia challenge validator", () => {
     });
   });
 
+  it("uses a string request URL with a Wikimedia API user-agent header", async () => {
+    const fetchImpl = vi.fn(async () =>
+      queryResponse({ pageid: 1, ns: 0, title: "Moon" }),
+    );
+    const validator = createWikipediaChallengeValidator({ fetchImpl });
+
+    await expect(
+      validator.validateChallengeArticles({
+        startTitle: "Moon",
+        targetTitle: "https://en.wikipedia.org/wiki/Moon",
+      }),
+    ).rejects.toMatchObject({
+      code: "same_challenge_article",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      expect.stringContaining("https://en.wikipedia.org/w/api.php?"),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Api-User-Agent": expect.stringContaining("VWiki Race"),
+        }),
+      }),
+    );
+  });
+
   it("rejects missing articles", async () => {
     const validator = createWikipediaChallengeValidator({
       fetchImpl: vi.fn(async () =>
