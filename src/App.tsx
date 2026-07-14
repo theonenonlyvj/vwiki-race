@@ -54,8 +54,10 @@ type AuthPromptIntent =
       };
     };
 
+const defaultFetch: typeof fetch = (input, init) => globalThis.fetch(input, init);
+
 export default function App({
-  fetchImpl = globalThis.fetch.bind(globalThis),
+  fetchImpl = defaultFetch,
   now = () => Date.now(),
   storage = globalThis.localStorage,
   apiClient: injectedApiClient,

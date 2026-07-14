@@ -31,6 +31,20 @@ describe("VWiki Race app", () => {
     expect(screen.queryByText(/enter vwiki race/i)).toBeNull();
   });
 
+  it("does not reload the challenge catalog on every render with the default fetch", async () => {
+    const fetchImpl = createFetchMock();
+    vi.stubGlobal("fetch", fetchImpl);
+
+    render(<App storage={memoryStorage()} />);
+
+    expect(
+      await screen.findByRole("button", { name: /start challenge #1/i }),
+    ).toBeVisible();
+    await waitFor(() => {
+      expect(challengeCatalogCalls(fetchImpl)).toBe(1);
+    });
+  });
+
   it("prompts for identity before starting when no session exists", async () => {
     const storage = memoryStorage();
     const fetchImpl = createFetchMock();
@@ -495,6 +509,14 @@ function jsonResponse(body: unknown): Response {
 
 function readJsonBody(init?: RequestInit): unknown {
   return JSON.parse(String(init?.body ?? "{}"));
+}
+
+function challengeCatalogCalls(fetchImpl: ReturnType<typeof createFetchMock>): number {
+  return fetchImpl.mock.calls.filter(
+    ([input, init]) =>
+      String(input) === "/api/challenges" &&
+      (init?.method === undefined || init.method === "GET"),
+  ).length;
 }
 
 function createDeferredResponse(body: unknown): {
