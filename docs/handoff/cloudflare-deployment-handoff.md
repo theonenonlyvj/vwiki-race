@@ -6,9 +6,9 @@ Date: 2026-07-14
 
 - GitHub repo: `https://github.com/theonenonlyvj/vikipedia.git`
 - Production branch: `main`
-- Last pushed app commit before this handoff: `64772e4`
-- Current local implementation: VGames identity + D1 tracking is complete but
-  must be committed/pushed before Cloudflare can deploy it
+- Latest pushed app commit for this handoff: `09a30b1`
+- Current implementation: VGames identity + D1 tracking is pushed to
+  `main`
 - Deployment status: not deployed yet
 - Intended host: Cloudflare Pages
 - Intended identity: VGames identity worker
@@ -69,7 +69,8 @@ Implemented locally:
 
 VGames-side change made locally in `/Users/vijayram/Cursor/viota`: `vikipedia`
 was added to the allowed `origin_game` values and covered by
-`packages/worker/test/accounts.test.ts`.
+`packages/worker/test/accounts.test.ts`. That viota worker change still needs
+to be committed, pushed, and deployed before the production Vikipedia launch.
 
 ## Step 2: Create D1
 
@@ -234,10 +235,9 @@ Do not commit Cloudflare tokens or VGames secrets.
 
 ## Recommended Next Work
 
-1. Commit and push the Vikipedia changes.
-2. Commit and push/deploy the viota worker origin-game allowlist change.
-3. Create/apply the Vikipedia D1 database migration.
-4. Deploy to Cloudflare Pages using the checklist above.
-5. Verify guest play, secure-name claim, `/api/challenges`, and a full run in
+1. Commit and push/deploy the viota worker origin-game allowlist change.
+2. Create/apply the Vikipedia D1 database migration.
+3. Deploy to Cloudflare Pages using the checklist above.
+4. Verify guest play, secure-name claim, `/api/challenges`, and a full run in
    production.
-6. Add a custom domain if Vijay wants one.
+5. Add a custom domain if Vijay wants one.
