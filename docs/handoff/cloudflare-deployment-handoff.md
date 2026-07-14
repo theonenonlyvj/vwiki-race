@@ -6,7 +6,7 @@ Date: 2026-07-14
 
 - GitHub repo: `https://github.com/theonenonlyvj/vikipedia.git`
 - Production branch: `main`
-- Latest pushed app commit for this handoff: `09a30b1`
+- VGames/D1 implementation commit: `09a30b1`
 - Current implementation: VGames identity + D1 tracking is pushed to
   `main`
 - Deployment status: not deployed yet
@@ -67,10 +67,11 @@ Implemented locally:
 7. Guest stats remain claimable when the guest later secures or logs into an
    account.
 
-VGames-side change made locally in `/Users/vijayram/Cursor/viota`: `vikipedia`
-was added to the allowed `origin_game` values and covered by
-`packages/worker/test/accounts.test.ts`. That viota worker change still needs
-to be committed, pushed, and deployed before the production Vikipedia launch.
+VGames-side change in `/Users/vijayram/Cursor/viota`: `vikipedia` was added to
+the allowed `origin_game` values and covered by
+`packages/worker/test/accounts.test.ts`. That change is pushed to viota `main`
+as `629c794`, but the viota worker still needs to be deployed before the
+production Vikipedia launch.
 
 ## Step 2: Create D1
 
@@ -235,7 +236,7 @@ Do not commit Cloudflare tokens or VGames secrets.
 
 ## Recommended Next Work
 
-1. Commit and push/deploy the viota worker origin-game allowlist change.
+1. Deploy the viota worker origin-game allowlist change.
 2. Create/apply the Vikipedia D1 database migration.
 3. Deploy to Cloudflare Pages using the checklist above.
 4. Verify guest play, secure-name claim, `/api/challenges`, and a full run in
