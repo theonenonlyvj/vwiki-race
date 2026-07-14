@@ -13,6 +13,7 @@ player id and display name.
 - [Game Principles and Rules](docs/game-principles-and-rules.md)
 - [Server-Tracked V0 Spec](docs/superpowers/specs/2026-07-14-server-tracked-v0-design.md)
 - [Server-Tracked V0 Plan](docs/superpowers/plans/2026-07-14-server-tracked-v0.md)
+- [Cloudflare Deployment Handoff](docs/handoff/cloudflare-deployment-handoff.md)
 
 ## V0 Product Shape
 
