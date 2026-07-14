@@ -7,6 +7,7 @@ import type { Article, ArticleLink } from "../domain/types";
 
 const DEFAULT_ENDPOINT = "https://en.wikipedia.org/w/api.php";
 const REMOVE_SELECTORS = [
+  ".toc",
   ".navbox",
   ".vertical-navbox",
   ".metadata",
@@ -17,6 +18,13 @@ const REMOVE_SELECTORS = [
   ".ambox",
   ".sistersitebox",
 ];
+const REMOVE_SECTION_TITLES = new Set([
+  "external links",
+  "further reading",
+  "notes",
+  "references",
+  "see also",
+]);
 
 export interface WikipediaGateway {
   getArticle(title: string): Promise<Article>;
@@ -123,6 +131,8 @@ function sanitizeArticleHtml(
   for (const element of root.querySelectorAll(REMOVE_SELECTORS.join(","))) {
     element.remove();
   }
+  removeRuleExcludedSections(root);
+  normalizeMediaUrls(root);
 
   const links: ArticleLink[] = [];
   for (const anchor of root.querySelectorAll("a")) {
@@ -159,6 +169,84 @@ function sanitizeArticleHtml(
     html: root.innerHTML,
     links,
   };
+}
+
+function removeRuleExcludedSections(root: Element) {
+  const headings = [...root.querySelectorAll("h2, .mw-heading2")];
+  for (const heading of headings) {
+    if (!REMOVE_SECTION_TITLES.has(normalizeSectionLabel(heading.textContent ?? ""))) {
+      continue;
+    }
+
+    removeSectionFrom(heading);
+  }
+}
+
+function removeSectionFrom(sectionStart: Element) {
+  const start =
+    sectionStart.classList.contains("mw-heading2") ||
+    sectionStart.parentElement?.classList.contains("mw-parser-output")
+      ? sectionStart
+      : sectionStart.parentElement ?? sectionStart;
+  let sibling = start.nextElementSibling;
+  while (sibling && !isTopLevelSectionHeading(sibling)) {
+    const next = sibling.nextElementSibling;
+    sibling.remove();
+    sibling = next;
+  }
+  start.remove();
+}
+
+function isTopLevelSectionHeading(element: Element): boolean {
+  return element.matches("h2, .mw-heading2");
+}
+
+function normalizeSectionLabel(value: string): string {
+  return value.trim().replace(/\[edit\]/gi, "").replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizeMediaUrls(root: Element) {
+  for (const image of root.querySelectorAll("img")) {
+    rewriteUrlAttribute(image, "src");
+    rewriteSrcSet(image);
+  }
+}
+
+function rewriteUrlAttribute(element: Element, attribute: string) {
+  const value = element.getAttribute(attribute);
+  if (!value) {
+    return;
+  }
+
+  element.setAttribute(attribute, absolutizeMediaUrl(value));
+}
+
+function rewriteSrcSet(image: Element) {
+  const srcset = image.getAttribute("srcset");
+  if (!srcset) {
+    return;
+  }
+
+  image.setAttribute(
+    "srcset",
+    srcset
+      .split(",")
+      .map((candidate) => {
+        const [url, ...descriptor] = candidate.trim().split(/\s+/);
+        return [absolutizeMediaUrl(url), ...descriptor].join(" ");
+      })
+      .join(", "),
+  );
+}
+
+function absolutizeMediaUrl(url: string): string {
+  if (url.startsWith("//")) {
+    return `https:${url}`;
+  }
+  if (url.startsWith("/")) {
+    return `https://en.wikipedia.org${url}`;
+  }
+  return url;
 }
 
 function closestSectionTitle(anchor: Element): string | undefined {

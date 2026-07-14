@@ -15,6 +15,12 @@ export interface ArticleRef {
   pageId?: number;
 }
 
+export interface ChallengeCreator {
+  accountId: string;
+  displayName: string;
+  identityStatus: AccountStatus;
+}
+
 export interface Challenge {
   id: string;
   label?: string;
@@ -26,6 +32,7 @@ export interface Challenge {
   target: ArticleRef;
   ruleset: Ruleset;
   source: "curated";
+  createdBy?: ChallengeCreator;
 }
 
 export interface ArticleLink {

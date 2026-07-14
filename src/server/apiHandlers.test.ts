@@ -15,6 +15,11 @@ function fakeRepository(): TrackingRepository {
       target: { title: targetTitle },
       ruleset: "ranked_classic" as const,
       source: "curated" as const,
+      createdBy: {
+        accountId: "acc-1",
+        displayName: "Vijay",
+        identityStatus: "claimed" as const,
+      },
     })),
     upsertAccountProfile: vi.fn(async ({ publicName }) => ({
       accountId: "acc-1",
@@ -101,6 +106,9 @@ describe("api handlers", () => {
       handlers.createChallenge({
         startTitle: "  Mars  ",
         targetTitle: "  Water  ",
+        creatorAccountId: "acc-1",
+        creatorDisplayName: "  Vijay  ",
+        creatorIdentityStatus: "claimed",
       }),
     ).resolves.toEqual({
       challenge: {
@@ -113,12 +121,20 @@ describe("api handlers", () => {
         target: { title: "Water" },
         ruleset: "ranked_classic",
         source: "curated",
+        createdBy: {
+          accountId: "acc-1",
+          displayName: "Vijay",
+          identityStatus: "claimed",
+        },
       },
     });
 
     expect(repository.createChallenge).toHaveBeenCalledWith({
       startTitle: "Mars",
       targetTitle: "Water",
+      creatorAccountId: "acc-1",
+      creatorDisplayName: "Vijay",
+      creatorIdentityStatus: "claimed",
     });
     expect(validateChallengeArticles).toHaveBeenCalledWith({
       startTitle: "Mars",
@@ -130,7 +146,13 @@ describe("api handlers", () => {
     const handlers = createApiHandlers(fakeRepository());
 
     await expect(
-      handlers.createChallenge({ startTitle: "", targetTitle: "Gravity" }),
+      handlers.createChallenge({
+        startTitle: "",
+        targetTitle: "Gravity",
+        creatorAccountId: "acc-1",
+        creatorDisplayName: "Vijay",
+        creatorIdentityStatus: "claimed",
+      }),
     ).rejects.toMatchObject({
       code: "invalid_start_title",
       status: 400,
@@ -153,6 +175,9 @@ describe("api handlers", () => {
       handlers.createChallenge({
         startTitle: "asdfasdf",
         targetTitle: "asdfasdfa",
+        creatorAccountId: "acc-1",
+        creatorDisplayName: "Vijay",
+        creatorIdentityStatus: "claimed",
       }),
     ).rejects.toMatchObject({
       code: "invalid_start_article",

@@ -154,6 +154,35 @@ describe("VWiki Race app", () => {
     });
   });
 
+  it("shows immediate navigation feedback after clicking an article link", async () => {
+    const fruitArticle = createDeferredResponse(fruitParseResponse);
+    const fetchImpl = createFetchMock({ delayedFruitArticle: fruitArticle.promise });
+    const user = userEvent.setup();
+    const storage = memoryStorage();
+    storage.setItem(
+      "vwiki-race:vgames-session",
+      JSON.stringify({
+        accountId: "acc-1",
+        displayName: "Vijay",
+        token: "jwt-claimed",
+        status: "claimed",
+      }),
+    );
+
+    render(<App fetchImpl={fetchImpl} storage={storage} />);
+
+    await user.click(
+      await screen.findByRole("button", { name: /start challenge #1/i }),
+    );
+    expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
+
+    await user.click(await screen.findByRole("link", { name: /fruit/i }));
+
+    expect(await screen.findByText(/opening fruit/i)).toBeVisible();
+    fruitArticle.resolve();
+    expect(await screen.findByRole("heading", { name: "Fruit" })).toBeVisible();
+  });
+
   it("creates the next numbered challenge from the Challenges tab", async () => {
     const storage = memoryStorage();
     storage.setItem(
@@ -189,7 +218,11 @@ describe("VWiki Race app", () => {
           headers: expect.objectContaining({
             Authorization: "Bearer jwt-claimed",
           }),
-          body: JSON.stringify({ startTitle: "Mars", targetTitle: "Water" }),
+          body: JSON.stringify({
+            startTitle: "Mars",
+            targetTitle: "Water",
+            creatorDisplayName: "Vijay",
+          }),
         }),
       );
     });
@@ -269,6 +302,7 @@ function createFetchMock(options?: {
     ruleset: string;
     source: string;
   }>;
+  delayedFruitArticle?: Promise<Response>;
 }) {
   let completed = false;
   let challenges = options?.challenges ?? [
@@ -293,6 +327,7 @@ function createFetchMock(options?: {
       expect(readJsonBody(init)).toEqual({
         startTitle: "Mars",
         targetTitle: "Water",
+        creatorDisplayName: "Vijay",
       });
       const challenge = {
         id: "challenge-0002",
@@ -304,6 +339,11 @@ function createFetchMock(options?: {
         target: { title: "Water" },
         ruleset: "ranked_classic",
         source: "curated",
+        createdBy: {
+          accountId: "acc-1",
+          displayName: "Vijay",
+          identityStatus: "claimed",
+        },
       };
       challenges = [...challenges, challenge];
       return jsonResponse({ challenge });
@@ -435,6 +475,10 @@ function createFetchMock(options?: {
       });
     }
 
+    if (url.includes("page=Fruit") && options?.delayedFruitArticle) {
+      return options.delayedFruitArticle;
+    }
+
     const body = url.includes("page=Fruit")
       ? fruitParseResponse
       : appleParseResponse;
@@ -451,4 +495,17 @@ function jsonResponse(body: unknown): Response {
 
 function readJsonBody(init?: RequestInit): unknown {
   return JSON.parse(String(init?.body ?? "{}"));
+}
+
+function createDeferredResponse(body: unknown): {
+  promise: Promise<Response>;
+  resolve: () => void;
+} {
+  let resolvePromise!: (response: Response) => void;
+  return {
+    promise: new Promise<Response>((resolve) => {
+      resolvePromise = resolve;
+    }),
+    resolve: () => resolvePromise(jsonResponse(body)),
+  };
 }

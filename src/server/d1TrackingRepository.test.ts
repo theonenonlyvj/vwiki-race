@@ -17,6 +17,9 @@ class MemoryD1 implements D1DatabaseLike {
       sort_order: 1,
       is_active: 1,
       created_at: "2026-07-14T00:00:00.000Z",
+      created_by_account_id: "acc-vijay",
+      created_by_display_name: "theonenonlyvj",
+      created_by_identity_status: "claimed",
     },
   ];
   readonly accountProfiles = new Map<
@@ -82,6 +85,9 @@ class MemoryStatement implements D1PreparedStatementLike {
         sortOrder,
         isActive,
         createdAt,
+        creatorAccountId,
+        creatorDisplayName,
+        creatorIdentityStatus,
       ] = this.values;
       this.db.challenges.push({
         id: String(id),
@@ -92,6 +98,9 @@ class MemoryStatement implements D1PreparedStatementLike {
         sort_order: Number(sortOrder),
         is_active: Number(isActive),
         created_at: String(createdAt),
+        created_by_account_id: String(creatorAccountId),
+        created_by_display_name: String(creatorDisplayName),
+        created_by_identity_status: String(creatorIdentityStatus),
       });
       return;
     }
@@ -301,12 +310,20 @@ describe("D1 tracking repository", () => {
       repository.createChallenge({
         startTitle: "Mars",
         targetTitle: "Water",
+        creatorAccountId: "acc-1",
+        creatorDisplayName: "Vijay",
+        creatorIdentityStatus: "claimed",
       }),
     ).resolves.toMatchObject({
       id: "challenge-0002",
       label: "Challenge #2",
       start: { title: "Mars" },
       target: { title: "Water" },
+      createdBy: {
+        accountId: "acc-1",
+        displayName: "Vijay",
+        identityStatus: "claimed",
+      },
     });
   });
 

@@ -29,6 +29,9 @@ export interface TrackingRepository {
   createChallenge(input: {
     startTitle: string;
     targetTitle: string;
+    creatorAccountId: string;
+    creatorDisplayName: string;
+    creatorIdentityStatus: AccountStatus;
   }): Promise<Challenge>;
   upsertAccountProfile(input: {
     accountId: string;

@@ -13,6 +13,7 @@ export interface ChallengesResponse {
 export interface CreateChallengeRequest {
   startTitle: string;
   targetTitle: string;
+  creatorDisplayName?: string;
 }
 
 export interface CreateChallengeResponse {

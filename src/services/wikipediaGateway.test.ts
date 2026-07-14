@@ -27,11 +27,21 @@ describe("wikipedia gateway", () => {
     expect(article.links.map((link) => link.title)).toEqual([
       "Fruit",
       "Apple tree",
+      "Orchard",
     ]);
     expect(article.html).toContain('data-vwiki-race-title="Fruit"');
+    expect(article.html).toContain('data-vwiki-race-title="Orchard"');
+    expect(article.html).toContain(
+      'src="https://upload.wikimedia.org/wikipedia/commons/thumb/apple.jpg/220px-apple.jpg"',
+    );
+    expect(article.html).toContain(
+      'srcset="https://upload.wikimedia.org/wikipedia/commons/thumb/apple.jpg/440px-apple.jpg 2x"',
+    );
     expect(article.html).toContain("history section");
     expect(article.html).not.toContain('data-vwiki-race-title="Apple"');
     expect(article.html).not.toContain("Category:Apples");
+    expect(article.html).not.toContain("See also");
+    expect(article.html).not.toContain("Pear");
     expect(article.html).not.toContain("Seed shortcut");
     expect(article.attribution).toContain("Wikipedia");
   });

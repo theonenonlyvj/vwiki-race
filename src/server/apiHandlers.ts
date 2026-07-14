@@ -16,10 +16,13 @@ import type {
 } from "./contracts";
 import type { TrackingRepository } from "./trackingRepository";
 import type { ValidateChallengeArticles } from "./wikipediaChallengeValidator";
+import type { AccountStatus } from "../domain/types";
 
 export interface ApiHandlers {
   listChallenges(): Promise<ChallengesResponse>;
-  createChallenge(input: CreateChallengeRequest): Promise<CreateChallengeResponse>;
+  createChallenge(
+    input: CreateChallengeHandlerRequest,
+  ): Promise<CreateChallengeResponse>;
   startRun(input: StartRunRequest): Promise<StartRunResponse>;
   recordClick(
     runId: string,
@@ -41,6 +44,12 @@ export interface ApiHandlers {
 
 export interface ApiHandlerOptions {
   validateChallengeArticles?: ValidateChallengeArticles;
+}
+
+export interface CreateChallengeHandlerRequest extends CreateChallengeRequest {
+  creatorAccountId: string;
+  creatorDisplayName: string;
+  creatorIdentityStatus: AccountStatus;
 }
 
 export function createApiHandlers(
@@ -68,6 +77,19 @@ export function createApiHandlers(
         "invalid_target_title",
         "Enter a target article title.",
       );
+      const creatorAccountId = requiredString(
+        input.creatorAccountId,
+        "invalid_creator_account",
+        "A VGames account is required.",
+      );
+      const creatorDisplayName = requiredString(
+        input.creatorDisplayName,
+        "invalid_creator_name",
+        "Enter a display name before creating a challenge.",
+      ).slice(0, 24);
+      const creatorIdentityStatus = readIdentityStatus(
+        input.creatorIdentityStatus,
+      );
       const validatedArticles = await validateChallengeArticles({
         startTitle,
         targetTitle,
@@ -77,6 +99,9 @@ export function createApiHandlers(
         challenge: await repository.createChallenge({
           startTitle: validatedArticles.start.title,
           targetTitle: validatedArticles.target.title,
+          creatorAccountId,
+          creatorDisplayName,
+          creatorIdentityStatus,
         }),
       };
     },

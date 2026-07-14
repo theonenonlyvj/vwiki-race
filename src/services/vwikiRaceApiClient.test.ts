@@ -156,7 +156,11 @@ describe("VWiki Race API client", () => {
 
     await expect(
       client.createChallenge(
-        { startTitle: "Mars", targetTitle: "Water" },
+        {
+          startTitle: "Mars",
+          targetTitle: "Water",
+          creatorDisplayName: "Vijay",
+        },
         "jwt-claimed",
       ),
     ).resolves.toMatchObject({
@@ -172,7 +176,11 @@ describe("VWiki Race API client", () => {
         headers: expect.objectContaining({
           Authorization: "Bearer jwt-claimed",
         }),
-        body: JSON.stringify({ startTitle: "Mars", targetTitle: "Water" }),
+        body: JSON.stringify({
+          startTitle: "Mars",
+          targetTitle: "Water",
+          creatorDisplayName: "Vijay",
+        }),
       }),
     );
   });

@@ -79,6 +79,9 @@ export default function App({
   const [serverRun, setServerRun] = useState<RunRecordResponse | null>(null);
   const [session, setSession] = useState<GameSession | null>(null);
   const [article, setArticle] = useState<Article | null>(null);
+  const [pendingNavigationTitle, setPendingNavigationTitle] = useState<
+    string | null
+  >(null);
   const [leaderboard, setLeaderboard] = useState<RankedLeaderboardRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -199,7 +202,10 @@ export default function App({
     setError(null);
     try {
       const challenge = await apiClient.createChallenge(
-        input,
+        {
+          ...input,
+          creatorDisplayName: sessionForRequest.displayName,
+        },
         sessionForRequest.token,
       );
       setChallenges((current) =>
@@ -249,6 +255,7 @@ export default function App({
 
     setError(null);
     setModeState("loading");
+    setPendingNavigationTitle(null);
     setLeaderboard([]);
     setSelectedChallengeId(challenge.id);
     syncChallengeUrl(challenge.id);
@@ -428,12 +435,14 @@ export default function App({
       !session ||
       !serverRun ||
       !identitySession ||
-      session.status !== "active"
+      session.status !== "active" ||
+      pendingNavigationTitle
     ) {
       return;
     }
 
     setError(null);
+    setPendingNavigationTitle(anchorText || title);
     setModeState("loading");
 
     try {
@@ -448,6 +457,16 @@ export default function App({
         },
         timestamp: clickedAt,
       });
+      setArticle(nextArticle);
+      setSession(nextSession);
+      setServerRun({
+        ...serverRun,
+        clickCount: nextSession.clicks,
+      });
+      setPendingNavigationTitle(null);
+      setModeState(
+        nextSession.status === "completed" ? "complete" : "playing",
+      );
 
       const clickResponse = await apiClient.recordClick(
         serverRun.id,
@@ -466,7 +485,6 @@ export default function App({
         ...nextSession,
         clicks: clickResponse.clickCount,
       };
-      setArticle(nextArticle);
       setSession(trackedSession);
 
       if (trackedSession.status === "completed") {
@@ -495,6 +513,7 @@ export default function App({
         setModeState("playing");
       }
     } catch (caught) {
+      setPendingNavigationTitle(null);
       setModeState("playing");
       setError(errorMessage(caught, "Could not load that article."));
     }
@@ -607,7 +626,7 @@ export default function App({
       </nav>
 
       {error ? <p className="error-banner">{error}</p> : null}
-      {modeState === "loading" ? (
+      {modeState === "loading" && !pendingNavigationTitle ? (
         <p className="loading-text">Loading article...</p>
       ) : null}
 
@@ -621,6 +640,7 @@ export default function App({
             modeState={modeState}
             onCreateChallenge={createChallenge}
             onSelectChallenge={(challengeId) => void selectChallenge(challengeId)}
+            pendingNavigationTitle={pendingNavigationTitle}
             selectedChallenge={selectedChallenge}
             session={session}
           />
@@ -920,6 +940,7 @@ function PlayPanel({
   modeState,
   onCreateChallenge,
   onSelectChallenge,
+  pendingNavigationTitle,
   selectedChallenge,
   session,
 }: {
@@ -933,13 +954,23 @@ function PlayPanel({
     targetTitle: string;
   }) => Promise<void>;
   onSelectChallenge: (challengeId: string) => void;
+  pendingNavigationTitle: string | null;
   selectedChallenge: Challenge | null;
   session: GameSession | null;
 }) {
   if (session && article) {
     return (
       <section className="game-layout">
-        <article className="article-panel" onClick={handleArticleClick}>
+        <article
+          aria-busy={Boolean(pendingNavigationTitle)}
+          className="article-panel"
+          onClick={handleArticleClick}
+        >
+          {pendingNavigationTitle ? (
+            <div className="article-navigation-pending" role="status">
+              Opening {pendingNavigationTitle}...
+            </div>
+          ) : null}
           <div className="article-heading">
             <span>{session.challenge.label ?? session.challenge.mode}</span>
             <h2>{article.canonicalTitle}</h2>
@@ -1079,6 +1110,9 @@ function ChallengeBrowser({
                 <strong>
                   {challenge.start.title} {"->"} {challenge.target.title}
                 </strong>
+                {challenge.createdBy ? (
+                  <em>Created by {challenge.createdBy.displayName}</em>
+                ) : null}
               </button>
             </li>
           ))}

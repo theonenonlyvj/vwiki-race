@@ -16,6 +16,11 @@ import type {
   RunRecordResponse,
 } from "../server/trackingRepository";
 
+const API_BASE_URL = (import.meta.env.VITE_VWIKI_RACE_API_URL ?? "").replace(
+  /\/+$/,
+  "",
+);
+
 export interface StartTrackedRunRequest {
   challengeId: string;
   publicName: string;
@@ -136,7 +141,7 @@ async function apiRequest<T>(
   path: string,
   options: { method?: string; body?: unknown; token?: string } = {},
 ): Promise<T> {
-  const response = await fetchImpl(path, {
+  const response = await fetchImpl(`${API_BASE_URL}${path}`, {
     method: options.method ?? "GET",
     headers: createHeaders(options),
     body: options.body === undefined ? undefined : JSON.stringify(options.body),

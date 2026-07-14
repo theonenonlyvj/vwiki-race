@@ -187,6 +187,11 @@ describe("Cloudflare API routes", () => {
         target: { title: "Water" },
         ruleset: "ranked_classic",
         source: "curated",
+        createdBy: {
+          accountId: "acc-claimed",
+          displayName: "Vijay",
+          identityStatus: "claimed",
+        },
       },
     });
     const route = await import("./challenges");
@@ -196,7 +201,11 @@ describe("Cloudflare API routes", () => {
         new Request("https://example.com/api/challenges", {
           method: "POST",
           headers: { Authorization: "Bearer jwt-claimed" },
-          body: JSON.stringify({ startTitle: "Mars", targetTitle: "Water" }),
+          body: JSON.stringify({
+            startTitle: "Mars",
+            targetTitle: "Water",
+            creatorDisplayName: "Vijay",
+          }),
         }),
       ),
     );
@@ -210,6 +219,9 @@ describe("Cloudflare API routes", () => {
     expect(mockState.handlers.createChallenge).toHaveBeenCalledWith({
       startTitle: "Mars",
       targetTitle: "Water",
+      creatorAccountId: "acc-claimed",
+      creatorDisplayName: "Vijay",
+      creatorIdentityStatus: "claimed",
     });
     expect(mockState.authorize).toHaveBeenCalled();
   });

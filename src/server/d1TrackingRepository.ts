@@ -39,7 +39,17 @@ export function createD1TrackingRepository(options: {
     async listChallenges() {
       const { results } = await db
         .prepare(
-          `SELECT id, label, start_title, target_title, ruleset, sort_order, is_active
+          `SELECT
+             id,
+             label,
+             start_title,
+             target_title,
+             ruleset,
+             sort_order,
+             is_active,
+             created_by_account_id,
+             created_by_display_name,
+             created_by_identity_status
            FROM challenges
            WHERE is_active = 1
            ORDER BY sort_order`,
@@ -65,8 +75,20 @@ export function createD1TrackingRepository(options: {
       await db
         .prepare(
           `INSERT INTO challenges
-             (id, label, start_title, target_title, ruleset, sort_order, is_active, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+             (
+               id,
+               label,
+               start_title,
+               target_title,
+               ruleset,
+               sort_order,
+               is_active,
+               created_at,
+               created_by_account_id,
+               created_by_display_name,
+               created_by_identity_status
+             )
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(
           id,
@@ -77,6 +99,9 @@ export function createD1TrackingRepository(options: {
           sortOrder,
           1,
           createdAt,
+          input.creatorAccountId,
+          input.creatorDisplayName,
+          input.creatorIdentityStatus,
         )
         .run();
 
@@ -90,6 +115,11 @@ export function createD1TrackingRepository(options: {
         target: { title: input.targetTitle },
         ruleset: "ranked_classic",
         source: "curated",
+        createdBy: {
+          accountId: input.creatorAccountId,
+          displayName: input.creatorDisplayName,
+          identityStatus: input.creatorIdentityStatus,
+        },
       };
     },
 
@@ -462,6 +492,17 @@ async function insertRunEvent(
 }
 
 function mapChallengeRow(row: ChallengeRow): Challenge {
+  const createdBy =
+    row.created_by_account_id &&
+    row.created_by_display_name &&
+    row.created_by_identity_status
+      ? {
+          accountId: row.created_by_account_id,
+          displayName: row.created_by_display_name,
+          identityStatus: row.created_by_identity_status,
+        }
+      : undefined;
+
   return {
     id: row.id,
     label: row.label,
@@ -472,6 +513,7 @@ function mapChallengeRow(row: ChallengeRow): Challenge {
     target: { title: row.target_title },
     ruleset: "ranked_classic",
     source: "curated",
+    createdBy,
   };
 }
 
@@ -520,6 +562,9 @@ interface ChallengeRow {
   ruleset: string;
   sort_order: number;
   is_active: number | boolean;
+  created_by_account_id?: string | null;
+  created_by_display_name?: string | null;
+  created_by_identity_status?: AccountStatus | null;
 }
 
 interface RunRow {

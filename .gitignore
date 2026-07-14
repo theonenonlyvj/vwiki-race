@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .superpowers/
+.wrangler/
 .env
 .env.local
 .env.*.local

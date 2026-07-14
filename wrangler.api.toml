@@ -1,5 +1,5 @@
-name = "vwikirace"
-pages_build_output_dir = "./dist"
+name = "vwikirace-api"
+main = "src/server/worker.ts"
 compatibility_date = "2026-07-08"
 
 [[d1_databases]]

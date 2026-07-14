@@ -18,6 +18,28 @@ export const appleParseResponse = {
             <a href="https://example.com">External</a>
             <a href="/w/index.php?title=Apple&action=edit">Edit</a>
           </p>
+          <table class="infobox">
+            <tbody>
+              <tr>
+                <td>
+                  <a href="./Orchard" title="Orchard">orchard</a>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <img
+                    alt="Apple"
+                    src="//upload.wikimedia.org/wikipedia/commons/thumb/apple.jpg/220px-apple.jpg"
+                    srcset="//upload.wikimedia.org/wikipedia/commons/thumb/apple.jpg/440px-apple.jpg 2x"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <h2><span id="See_also">See also</span></h2>
+          <ul>
+            <li><a href="/wiki/Pear" title="Pear">Pear</a></li>
+          </ul>
           <div class="navbox">
             <a href="/wiki/Seed" title="Seed">Seed shortcut</a>
           </div>

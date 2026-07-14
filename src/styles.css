@@ -459,11 +459,25 @@ h1 {
 }
 
 .article-panel {
+  position: relative;
   overflow: hidden;
   border: 1px solid #a2a9b1;
   background: #ffffff;
   color: #202122;
   min-height: 70vh;
+}
+
+.article-navigation-pending {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  border-bottom: 1px solid #a2a9b1;
+  background: rgba(248, 249, 250, 0.96);
+  color: #202122;
+  font-family: sans-serif;
+  font-size: 0.92rem;
+  font-weight: 700;
+  padding: 10px 18px;
 }
 
 .article-heading {
@@ -658,6 +672,13 @@ h1 {
 
 .challenge-list strong {
   overflow-wrap: anywhere;
+}
+
+.challenge-list em {
+  color: #9fb8bd;
+  font-size: 0.76rem;
+  font-style: normal;
+  font-weight: 750;
 }
 
 .leaderboard li {

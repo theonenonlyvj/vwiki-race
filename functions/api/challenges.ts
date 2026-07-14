@@ -12,14 +12,18 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const tracking = createTrackingContext(context.env);
   try {
-    await tracking.authorize(context.request);
+    const account = await tracking.authorize(context.request);
+    const input = (await tracking.readJson(context.request)) as {
+      startTitle: string;
+      targetTitle: string;
+      creatorDisplayName: string;
+    };
     return tracking.json(
-      await tracking.handlers.createChallenge(
-        (await tracking.readJson(context.request)) as {
-          startTitle: string;
-          targetTitle: string;
-        },
-      ),
+      await tracking.handlers.createChallenge({
+        ...input,
+        creatorAccountId: account.accountId,
+        creatorIdentityStatus: account.status,
+      }),
     );
   } catch (caught) {
     return tracking.error(caught);
