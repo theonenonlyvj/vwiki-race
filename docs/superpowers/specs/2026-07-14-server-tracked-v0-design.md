@@ -11,6 +11,11 @@ VGames integration is explicitly deferred. V0 uses a separate Supabase project
 for Vikipedia while keeping data shapes compatible with migration into a shared
 game platform when that work starts.
 
+**Superseded 2026-07-14:** Vikipedia should use VGames identity from v0 while
+remaining challenge-leaderboard based and not using the VGames realtime/card
+room layer. See `2026-07-14-vgames-identity-v0-design.md` before implementing
+or deploying this spec.
+
 ## Product Scope
 
 V0 is a public web app for friends to play ranked Wikipedia navigation

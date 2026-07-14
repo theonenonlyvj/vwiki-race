@@ -9,13 +9,24 @@ Date: 2026-07-14
 - Last pushed app commit before this handoff: `64772e4`
 - Deployment status: not deployed yet
 - Intended host: Cloudflare Pages
-- Intended database: Supabase
-- VGames integration: intentionally deferred to v1/v2
+- Intended identity: VGames identity worker
+- Intended run data store: undecided; prefer Cloudflare D1 unless Supabase is
+  intentionally retained only for Vikipedia-owned run data
+- VGames realtime rooms: not needed for Vikipedia v0
 
-The current v0 is designed to be tracked from game 0. The browser stores only a
-player id and display name. Challenges, runs, clicks, completions, paths, and
-leaderboards are stored server-side through Cloudflare Pages Functions and
-Supabase.
+The current v0 is designed to be tracked from game 0. VGames owns account
+identity, including ghost guests and secured unique names. Vikipedia owns
+challenges, runs, clicks, completions, paths, and per-challenge leaderboards.
+Guest play must be claimable later into a secured VGames name without losing
+stats.
+
+## Superseding Note
+
+The earlier standalone Supabase launch path is paused. Do not create the
+Vikipedia Supabase project as the next step unless Vijay explicitly decides to
+keep Supabase only for Vikipedia-owned run data. The next implementation should
+use VGames identity from day one and remove the Vikipedia-local `players`
+namespace before public launch.
 
 ## Verified Before Handoff
 
@@ -35,31 +46,39 @@ Last known results:
 
 - Static app: Vite/React build output in `dist`
 - API layer: Cloudflare Pages Functions in `functions/api/*`
-- Database: Supabase Postgres
-- Migration: `supabase/migrations/0001_vikipedia_v0_tracking.sql`
-- Server-only secrets:
-  - `SUPABASE_URL`
-  - `SUPABASE_SERVICE_ROLE_KEY`
+- Identity: VGames worker at `https://viota-worker.theonenonlyvj.workers.dev`
+- Vikipedia data: challenge/run/click/path tables keyed by VGames `account_id`
+- Realtime rooms: not applicable
 
-Do not expose `SUPABASE_SERVICE_ROLE_KEY` to the browser. It must be configured
-as a Cloudflare Pages secret/environment value for Functions only.
+Do not duplicate VGames accounts with a standalone Vikipedia player identity.
 
-## Step 1: Prepare Supabase
+## Step 1: Fit Vikipedia To VGames Identity
 
-1. Open Supabase.
-2. Create or select the Vikipedia Supabase project.
-3. Open SQL Editor.
-4. Run the full contents of:
+Before deployment, update the app/API so:
 
-```txt
-supabase/migrations/0001_vikipedia_v0_tracking.sql
-```
+1. Guest play calls VGames `/auth/quick`.
+2. New VGames ghost accounts are created with `game: 'vikipedia'`.
+3. Securing a display name claims the current ghost through VGames
+   `/auth/set-credentials`.
+4. Existing users can use VGames `/auth/login`.
+5. Vikipedia run rows store VGames `account_id`, not a local `players.id`.
+6. Leaderboards display the secured VGames unique name/handle when available.
+7. Guest stats remain claimable when the guest later secures or logs into an
+   account.
 
-5. In Supabase Project Settings > API, copy:
-   - Project URL as `SUPABASE_URL`
-   - Service role key as `SUPABASE_SERVICE_ROLE_KEY`
+Required VGames-side change: add `vikipedia` to the allowed `origin_game`
+values in viota's identity worker before launch.
 
-## Step 2: Create Cloudflare Pages Project
+## Step 2: Choose Vikipedia Run Data Store
+
+Recommended default: Cloudflare D1, to stay aligned with VGames' Cloudflare/D1
+platform direction.
+
+Acceptable alternative: Supabase only for Vikipedia-owned challenge/run/click
+data, keyed by VGames `account_id`. Do not use Supabase for a separate player
+identity namespace.
+
+## Step 3: Create Cloudflare Pages Project
 
 1. Open Cloudflare dashboard.
 2. Go to Workers & Pages.
@@ -84,27 +103,20 @@ Functions directory: functions
 The repo root is already the Vikipedia app, so do not set a nested root
 directory.
 
-## Step 3: Add Cloudflare Environment Values
+## Step 4: Add Cloudflare Environment Values
 
-In the Cloudflare Pages project:
-
-1. Go to Settings.
-2. Open Variables and Secrets, or Environment variables depending on dashboard
-   wording.
-3. Add production values:
+Exact values depend on the implementation plan. At minimum the app needs the
+VGames identity origin:
 
 ```txt
-SUPABASE_URL = <Supabase project URL>
-SUPABASE_SERVICE_ROLE_KEY = <Supabase service role key>
+VGAMES_URL = https://viota-worker.theonenonlyvj.workers.dev
 ```
 
-Make `SUPABASE_SERVICE_ROLE_KEY` encrypted/secret if the dashboard offers a
-choice.
+If Vikipedia run data is stored in D1, bind that D1 database to the Pages
+Functions project. If it is intentionally stored in Supabase, use server-only
+Supabase secrets and do not expose the service role key to the browser.
 
-If the first deploy was started before adding these values, redeploy after
-adding them.
-
-## Step 4: Deploy
+## Step 5: Deploy
 
 Trigger the production deploy from Cloudflare Pages. Cloudflare should:
 
@@ -119,7 +131,7 @@ The first live URL should be similar to:
 https://vikipedia.pages.dev
 ```
 
-## Step 5: Smoke Test Production
+## Step 6: Smoke Test Production
 
 After deploy completes, test:
 
@@ -132,12 +144,13 @@ Expected result: JSON with at least `challenge-0001`.
 Then test the app flow:
 
 1. Open `https://vikipedia.pages.dev`.
-2. Enter a display name.
+2. Choose Secure display name / Log in, or Play as guest.
 3. Confirm `Challenge #1` shows `Moon -> Gravity`.
 4. Start the challenge.
 5. Click one Wikipedia link.
 6. Check that the click path updates.
 7. Open the Leaderboard tab.
+8. Confirm the leaderboard row is associated with the VGames identity.
 
 If API requests fail, check Cloudflare deployment logs first, then verify that
 both Supabase secrets exist in the Pages production environment.
@@ -158,9 +171,10 @@ both Supabase secrets exist in the Pages production environment.
 
 - Build fails: confirm Cloudflare is running from repo root and using
   `npm run build` with output directory `dist`.
-- `/api/challenges` returns a config error: add or fix `SUPABASE_URL` and
-  `SUPABASE_SERVICE_ROLE_KEY`, then redeploy.
-- `/api/challenges` returns a database/table error: run the Supabase migration.
+- Guest auth fails: confirm VGames worker CORS allows the Vikipedia Pages origin
+  and that `/auth/quick` accepts `game: 'vikipedia'`.
+- Leaderboard identity is wrong: confirm runs are keyed by VGames `account_id`
+  and display uses the canonical secured VGames name/handle when present.
 - The frontend loads but cannot play: inspect browser network requests to
   `/api/*` and Cloudflare Pages Function logs.
 - Leaderboard is empty: complete at least one run; localStorage alone does not
@@ -182,16 +196,17 @@ Before changing deployment code, read:
 - `README.md`
 - `AGENTS.md`
 - `docs/game-principles-and-rules.md`
+- `docs/superpowers/specs/2026-07-14-vgames-identity-v0-design.md`
 - `docs/superpowers/specs/2026-07-14-server-tracked-v0-design.md`
 - `docs/superpowers/plans/2026-07-14-server-tracked-v0.md`
 
-Do not commit real Supabase keys or Cloudflare tokens. Keep VGames integration
-out of v0 unless Vijay explicitly reopens that scope.
+Do not commit real Supabase keys, Cloudflare tokens, or VGames secrets.
 
 ## Recommended Next Work
 
-1. Deploy to Cloudflare Pages using the checklist above.
-2. Verify `/api/challenges` and a full run in production.
-3. Add a custom domain if Vijay wants one.
-4. Add basic production observability after friends start playing.
-5. Revisit VGames account integration only after the standalone v0 is playable.
+1. Update implementation to use VGames identity and remove local `players`.
+2. Decide D1 vs Supabase for Vikipedia-owned run data.
+3. Deploy to Cloudflare Pages using the checklist above.
+4. Verify guest play, secure-name claim, `/api/challenges`, and a full run in
+   production.
+5. Add a custom domain if Vijay wants one.
