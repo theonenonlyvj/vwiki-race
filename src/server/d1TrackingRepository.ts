@@ -227,6 +227,9 @@ export function createD1TrackingRepository(options: {
              AND canonical_account_id = ? AND request_fingerprint = ?
              AND outcome_status = 'pending' AND resource_id IS NULL`,
         ).bind(create.idempotencyKey, account.accountId, fingerprint),
+        // Invariant: `account_aliases` (the merge-graph joined below) holds
+        // opaque internal account UUIDs — server-to-server only, NEVER
+        // serialize aliases into any client-facing response.
         db.prepare(
           `INSERT INTO challenges
              (id, label, start_title, target_title, start_page_id, target_page_id,

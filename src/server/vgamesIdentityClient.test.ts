@@ -135,27 +135,16 @@ describe("server VGames identity client", () => {
     });
   });
 
-  it("rejects merged or malformed introspection receipts", async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValueOnce(
-        Response.json({
-          valid: true,
-          accountId: "acc-1",
-          status: "merged",
-          displayName: "Casey",
-          aliases: [],
-        }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          valid: true,
-          accountId: "acc-1",
-          status: "claimed",
-          displayName: "   ",
-          aliases: [42],
-        }),
-      );
+  it("still rejects introspection receipts with an unrecognized status", async () => {
+    const fetchImpl = vi.fn(async () =>
+      Response.json({
+        valid: true,
+        accountId: "acc-1",
+        status: "merged",
+        displayName: "Casey",
+        aliases: [],
+      }),
+    );
     const client = createVGamesIdentityClient({
       baseUrl: "https://vgames.example",
       fetchImpl,
@@ -165,9 +154,51 @@ describe("server VGames identity client", () => {
       code: "invalid_vgames_identity_response",
       status: 502,
     });
-    await expect(client.introspect("jwt-2")).rejects.toMatchObject({
-      code: "invalid_vgames_identity_response",
-      status: 502,
+  });
+
+  it("defaults a blank displayName and drops non-string aliases instead of failing", async () => {
+    const fetchImpl = vi.fn(async () =>
+      Response.json({
+        valid: true,
+        accountId: "acc-1",
+        status: "claimed",
+        displayName: "   ",
+        aliases: [42],
+      }),
+    );
+    const client = createVGamesIdentityClient({
+      baseUrl: "https://vgames.example",
+      fetchImpl,
+    });
+
+    await expect(client.introspect("jwt-1")).resolves.toEqual({
+      valid: true,
+      accountId: "acc-1",
+      status: "claimed",
+      displayName: "acc-1",
+      aliases: [],
+    });
+  });
+
+  it("accepts the live viota payload with no displayName or aliases", async () => {
+    const fetchImpl = vi.fn(async () =>
+      Response.json({
+        valid: true,
+        accountId: "acc-1",
+        status: "ghost",
+      }),
+    );
+    const client = createVGamesIdentityClient({
+      baseUrl: "https://vgames.example",
+      fetchImpl,
+    });
+
+    await expect(client.introspect("jwt-1")).resolves.toEqual({
+      valid: true,
+      accountId: "acc-1",
+      status: "ghost",
+      displayName: "acc-1",
+      aliases: [],
     });
   });
 

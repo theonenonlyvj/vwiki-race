@@ -125,31 +125,47 @@ function readIntrospectionPayload(payload: unknown): VGamesIntrospection {
   if (payload.valid === false) {
     return { valid: false };
   }
+  // Authorization keys off `valid` + a well-formed `accountId` + a recognized
+  // `status` only. Keep that validation strict. `displayName`/`aliases` are
+  // display/re-attribution metadata; tolerate their absence so this stays
+  // compatible with viota workers that don't emit them yet (alias
+  // re-attribution simply stays dormant until viota ships those fields).
   if (
     payload.valid !== true ||
     !("accountId" in payload) ||
     typeof payload.accountId !== "string" ||
     payload.accountId.trim().length === 0 ||
     !("status" in payload) ||
-    (payload.status !== "ghost" && payload.status !== "claimed") ||
-    !("displayName" in payload) ||
-    typeof payload.displayName !== "string" ||
-    payload.displayName.trim().length === 0 ||
-    !("aliases" in payload) ||
-    !Array.isArray(payload.aliases) ||
-    !payload.aliases.every(
-      (alias) => typeof alias === "string" && alias.trim().length > 0,
-    )
+    (payload.status !== "ghost" && payload.status !== "claimed")
   ) {
     throw invalidIdentityResponse();
   }
 
+  const accountId = payload.accountId;
+  const rawDisplayName =
+    "displayName" in payload ? payload.displayName : undefined;
+  const displayName =
+    typeof rawDisplayName === "string" && rawDisplayName.trim().length > 0
+      ? rawDisplayName
+      : accountId;
+
+  // Invariant: `aliases` are opaque internal merge-graph account UUIDs — they
+  // are server-to-server only and must NEVER be serialized into any
+  // client-facing response.
+  const rawAliases = "aliases" in payload ? payload.aliases : undefined;
+  const aliases = Array.isArray(rawAliases)
+    ? rawAliases.filter(
+        (alias): alias is string =>
+          typeof alias === "string" && alias.trim().length > 0,
+      )
+    : [];
+
   return {
     valid: true,
-    accountId: payload.accountId,
+    accountId,
     status: payload.status,
-    displayName: payload.displayName,
-    aliases: payload.aliases,
+    displayName,
+    aliases,
   };
 }
 
