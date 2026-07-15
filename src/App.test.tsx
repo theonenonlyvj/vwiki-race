@@ -741,6 +741,30 @@ describe("VWiki Race app", () => {
     expect(runPathCalls(fetchImpl, "run-ranked")).toBe(1);
   });
 
+  it("labels leaderboard provenance without hiding either result", async () => {
+    const storage = claimedStorage();
+    const fetchImpl = createFetchMock({
+      leaderboardRows: [
+        leaderboardRow({ protocolVersion: 1, displayName: "franelpana" }),
+        leaderboardRow({
+          rank: 2,
+          runId: "run-verified",
+          protocolVersion: 2,
+          displayName: "theonenonlyvj",
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
+
+    await user.click(await screen.findByRole("button", { name: /leaderboard/i }));
+
+    expect(await screen.findByText("franelpana")).toBeVisible();
+    expect(screen.getByText("Historical")).toBeVisible();
+    expect(screen.getByText("Verified")).toBeVisible();
+    expect(screen.getAllByText("1 click")).toHaveLength(2);
+  });
+
   it("loads account stats only from the authenticated account-stats projection", async () => {
     const storage = claimedStorage();
     const fetchImpl = createFetchMock({ accountAttempts: 7 });
@@ -1328,6 +1352,7 @@ function createFetchMock(options?: {
                 elapsedMs: 1500,
                 clickCount: 1,
                 completedAt: "2026-07-14T01:00:01.500Z",
+                protocolVersion: 2,
               },
             ]
           : []),
@@ -1487,7 +1512,7 @@ function activeRunFixture(override: Record<string, unknown> = {}) {
 }
 
 function leaderboardRow(override: Record<string, unknown> = {}) {
-  return { rank: 1, runId: "run-ranked", challengeId: "challenge-0001", accountId: "acc-1", displayName: "Vijay", elapsedMs: 1500, clickCount: 1, completedAt: "2026-07-14T01:00:01.500Z", ...override };
+  return { rank: 1, runId: "run-ranked", challengeId: "challenge-0001", accountId: "acc-1", displayName: "Vijay", elapsedMs: 1500, clickCount: 1, completedAt: "2026-07-14T01:00:01.500Z", protocolVersion: 2, ...override };
 }
 
 function twoChallenges(): Challenge[] {

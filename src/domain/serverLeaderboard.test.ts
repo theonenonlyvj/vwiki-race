@@ -15,7 +15,8 @@ const row = (
   elapsedMs,
   clickCount,
   completedAt,
-} as ServerLeaderboardRow);
+  protocolVersion: 2,
+});
 
 describe("server leaderboard ranking", () => {
   it("sorts by speed, then clicks, then completed timestamp", () => {

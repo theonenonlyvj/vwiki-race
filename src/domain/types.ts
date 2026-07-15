@@ -184,6 +184,7 @@ export interface ServerLeaderboardRow {
   elapsedMs: number;
   clickCount: number;
   completedAt: string;
+  protocolVersion: 1 | 2;
 }
 
 export interface AccountStats {

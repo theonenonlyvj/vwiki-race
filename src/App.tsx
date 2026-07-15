@@ -1598,7 +1598,19 @@ function LeaderboardPanel({
           {leaderboard.map((row) => (
             <li key={row.runId}>
               <span className="rank">#{row.rank}</span>
-              <span>{row.displayName}</span>
+              <span className="leaderboard-player">
+                <span>{row.displayName}</span>
+                <span
+                  className={`provenance-badge ${
+                    row.protocolVersion === 1 ? "historical" : "verified"
+                  }`}
+                  title={row.protocolVersion === 1
+                    ? "Recorded before verified race tracking"
+                    : "Path verified against Wikipedia during the race"}
+                >
+                  {row.protocolVersion === 1 ? "Historical" : "Verified"}
+                </span>
+              </span>
               <span>{formatElapsed(row.elapsedMs)}</span>
               <span>
                 {row.clickCount} {row.clickCount === 1 ? "click" : "clicks"}

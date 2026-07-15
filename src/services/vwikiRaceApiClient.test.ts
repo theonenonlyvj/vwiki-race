@@ -372,6 +372,30 @@ describe("VWiki Race API client", () => {
       .rejects.toMatchObject({ code: "invalid_response", status: 502 });
   });
 
+  it("requires leaderboard provenance and accepts historical runs", async () => {
+    const historical = {
+      rank: 1,
+      runId: "run-historical",
+      challengeId: "challenge-0001",
+      accountId: "account-1",
+      displayName: "franelpana",
+      elapsedMs: 413077,
+      clickCount: 14,
+      completedAt: "2026-07-14T01:06:53.077Z",
+      protocolVersion: 1,
+    };
+    const responses = [
+      Response.json({ leaderboard: [historical] }),
+      Response.json({ leaderboard: [{ ...historical, protocolVersion: undefined }] }),
+    ];
+    const fetchImpl = vi.fn(async () => responses.shift() ?? Response.json({}));
+    const client = createVWikiRaceApiClient(fetchImpl, { apiOrigin });
+
+    await expect(client.listLeaderboard("challenge-0001")).resolves.toEqual([historical]);
+    await expect(client.listLeaderboard("challenge-0001"))
+      .rejects.toMatchObject({ code: "invalid_response", status: 502 });
+  });
+
   it.each(["completed", "abandoned"] as const)(
     "rejects a %s run from start-run responses",
     async (status) => {

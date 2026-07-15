@@ -1375,12 +1375,16 @@ export function createD1TrackingRepository(options: {
           `WITH resolved AS (
              SELECT r.id, r.challenge_id,
                     coalesce(a.canonical_account_id, r.canonical_account_id, r.account_id) account_id,
-                    r.elapsed_ms, r.click_count, r.completed_at
+                    r.elapsed_ms, r.click_count, r.completed_at, r.protocol_version
              FROM runs r
              LEFT JOIN account_aliases a
                ON a.alias_account_id = coalesce(r.canonical_account_id, r.account_id)
              WHERE r.challenge_id = ? AND r.status = 'completed'
-               AND r.ranked_eligible = 1 AND r.protocol_version = 2
+               AND r.elapsed_ms IS NOT NULL AND r.completed_at IS NOT NULL
+               AND (
+                 (r.protocol_version = 2 AND r.ranked_eligible = 1)
+                 OR r.protocol_version = 1
+               )
            ), best_per_account AS (
              SELECT *, row_number() over (
                PARTITION BY account_id
@@ -1395,7 +1399,8 @@ export function createD1TrackingRepository(options: {
            )
            SELECT ranked.id, ranked.challenge_id, ranked.account_id,
                   ranked.elapsed_ms, ranked.click_count, ranked.completed_at,
-                  ranked.rank, p.public_name AS display_name
+                  ranked.protocol_version, ranked.rank,
+                  p.public_name AS display_name
            FROM ranked
            LEFT JOIN account_profiles p ON p.account_id = ranked.account_id
            ORDER BY ranked.elapsed_ms, ranked.click_count, ranked.completed_at, ranked.id
@@ -1412,6 +1417,7 @@ export function createD1TrackingRepository(options: {
         elapsedMs: Number(row.elapsed_ms),
         clickCount: Number(row.click_count),
         completedAt: row.completed_at,
+        protocolVersion: Number(row.protocol_version) as 1 | 2,
       }));
     },
 
@@ -1444,7 +1450,11 @@ export function createD1TrackingRepository(options: {
          FROM run_path_steps p
          JOIN runs r ON r.id = p.run_id
          WHERE r.id = ? AND r.status = 'completed'
-           AND r.ranked_eligible = 1 AND r.protocol_version = 2
+           AND r.elapsed_ms IS NOT NULL AND r.completed_at IS NOT NULL
+           AND (
+             (r.protocol_version = 2 AND r.ranked_eligible = 1)
+             OR r.protocol_version = 1
+           )
          ORDER BY p.step_number`,
       ).bind(runId).all<PathStepRow>();
       if (!results.length) {
@@ -2518,6 +2528,7 @@ async function legacyCompletionRow(
     elapsedMs: Number(run.elapsed_ms ?? 0),
     clickCount: Number(run.click_count),
     completedAt: run.completed_at ?? "",
+    protocolVersion: 1,
   };
 }
 
@@ -2835,6 +2846,7 @@ interface LeaderboardRunRow {
   elapsed_ms: number;
   click_count: number;
   completed_at: string;
+  protocol_version: number;
   rank: number;
   display_name?: string | null;
 }

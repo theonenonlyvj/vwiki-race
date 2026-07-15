@@ -46,6 +46,7 @@ function fakeRepository(): TrackingRepository {
       elapsedMs: 1200,
       clickCount: 1,
       completedAt: "2026-07-14T00:00:01.200Z",
+      protocolVersion: 1 as const,
       pathPreview: [],
       rank: 1,
     })),

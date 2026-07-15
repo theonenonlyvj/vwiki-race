@@ -374,7 +374,8 @@ function isLeaderboardRow(value: unknown): value is RankedLeaderboardRow {
     hasString(value, "displayName") &&
     hasNumber(value, "elapsedMs") &&
     hasNumber(value, "clickCount") &&
-    hasString(value, "completedAt");
+    hasString(value, "completedAt") &&
+    (value.protocolVersion === 1 || value.protocolVersion === 2);
 }
 
 function isPathStep(value: unknown): value is ServerPathStep {

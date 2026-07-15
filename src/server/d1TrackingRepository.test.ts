@@ -131,6 +131,8 @@ class MemoryStatement implements D1PreparedStatementLike {
         start_title: startTitle,
         target_title: targetTitle,
         final_title: null,
+        ranked_eligible: 0,
+        protocol_version: 1,
         created_at: createdAt,
         updated_at: updatedAt,
       });

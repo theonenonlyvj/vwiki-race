@@ -481,8 +481,12 @@ ROW_NUMBER() OVER (
 ```
 
 It keeps row number one, orders by the same four keys, and bounds the result to
-100 rows. Only `ranked_eligible = 1` completed runs participate. The row contains
-score metadata only; it does not perform one path query per run.
+100 rows. **Superseded by the binding no-history-reset decision dated
+2026-07-15:** verified protocol-2 completions require `ranked_eligible = 1`,
+while completed protocol-1 history remains visible using its recorded timing
+and click data. Leaderboard rows carry `protocol_version` so the client can
+label their provenance. The row contains score metadata only; it does not
+perform one path query per run.
 
 Opening a row's path disclosure calls the existing run-path endpoint once and
 caches the result in client memory. Only completed public leaderboard runs may

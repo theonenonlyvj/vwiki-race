@@ -1564,6 +1564,38 @@ describe("Task 4 D1 projections", () => {
     expect(rows[0]).not.toHaveProperty("pathPreview");
   });
 
+  it("keeps completed protocol-1 runs ranked alongside verified protocol-2 runs", async () => {
+    await insertCompletedLegacy({
+      id: "historical-fastest",
+      accountId: "historical-account",
+      elapsedMs: 4_000,
+      clickCount: 3,
+      completedAt: "2026-07-14T01:00:04.000Z",
+    });
+    await insertCompletedV2({
+      id: "verified-second",
+      accountId: "verified-account",
+      elapsedMs: 5_000,
+      completedAt: "2026-07-14T01:00:05.000Z",
+    });
+
+    const { repository } = fixture();
+    const rows = await repository.listLeaderboard("challenge-0001");
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        rank: 1,
+        runId: "historical-fastest",
+        protocolVersion: 1,
+      }),
+      expect.objectContaining({
+        rank: 2,
+        runId: "verified-second",
+        protocolVersion: 2,
+      }),
+    ]);
+  });
+
   it("exposes one public path read only for a completed ranked run", async () => {
     await insertCompletedV2({
       id: "public-path-run",
@@ -1586,6 +1618,52 @@ describe("Task 4 D1 projections", () => {
     await expect(repository.getPublicRunPath("private-path-run")).rejects.toMatchObject({
       code: "run_path_not_found", status: 404,
     });
+  });
+
+  it("keeps the recorded path of a completed protocol-1 run publicly viewable", async () => {
+    await insertCompletedLegacy({
+      id: "historical-path-run",
+      accountId: account.accountId,
+      elapsedMs: 4200,
+      clickCount: 1,
+      completedAt: "2026-07-14T01:00:04.200Z",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO run_path_steps
+         (run_id, step_number, source_title, clicked_anchor_text, destination_title,
+          destination_page_id, elapsed_since_start_ms, created_at)
+       VALUES ('historical-path-run', 1, 'Moon', 'gravity', 'Gravity', 38579, 4200,
+               '2026-07-14T01:00:04.200Z')`,
+    ).run();
+
+    const { repository } = fixture();
+    await expect(repository.getPublicRunPath("historical-path-run")).resolves.toEqual([
+      expect.objectContaining({ destinationTitle: "Gravity", stepNumber: 1 }),
+    ]);
+  });
+
+  it("does not expose a malformed protocol-1 completion as a public ranked path", async () => {
+    await insertCompletedLegacy({
+      id: "malformed-historical-path",
+      accountId: account.accountId,
+      elapsedMs: 4200,
+      clickCount: 1,
+      completedAt: "2026-07-14T01:00:04.200Z",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      "UPDATE runs SET elapsed_ms = NULL WHERE id = 'malformed-historical-path'",
+    ).run();
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO run_path_steps
+         (run_id, step_number, source_title, clicked_anchor_text, destination_title,
+          destination_page_id, elapsed_since_start_ms, created_at)
+       VALUES ('malformed-historical-path', 1, 'Moon', 'gravity', 'Gravity', 38579,
+               4200, '2026-07-14T01:00:04.200Z')`,
+    ).run();
+
+    const { repository } = fixture();
+    await expect(repository.getPublicRunPath("malformed-historical-path"))
+      .rejects.toMatchObject({ code: "run_path_not_found", status: 404 });
   });
 
   it("returns an owned active protocol-2 zero-click recovery path through the authenticated rate-limited Worker route", async () => {
@@ -1913,6 +1991,37 @@ async function insertCompletedV2(input: {
     input.completedAt,
     input.elapsedMs,
     input.elapsedMs,
+    input.completedAt,
+  ).run();
+}
+
+async function insertCompletedLegacy(input: {
+  id: string;
+  accountId: string;
+  elapsedMs: number;
+  clickCount: number;
+  completedAt: string;
+}) {
+  await env.VWIKI_RACE_DB.prepare(
+    `INSERT INTO runs
+       (id, challenge_id, account_id, canonical_account_id, status, started_at,
+        completed_at, elapsed_ms, wall_elapsed_ms, click_count, start_title,
+        target_title, final_title, start_page_id, target_page_id, last_page_id,
+        last_title, expires_at, ranked_eligible, protocol_version, created_at,
+        updated_at)
+     VALUES (?, 'challenge-0001', ?, ?, 'completed',
+             '2026-07-14T01:00:00.000Z', ?, ?, ?, ?, 'Moon', 'Gravity',
+             'Gravity', 19331, 38579, 38579, 'Gravity',
+             '2026-07-15T01:00:00.000Z', 0, 1,
+             '2026-07-14T01:00:00.000Z', ?)`,
+  ).bind(
+    input.id,
+    input.accountId,
+    input.accountId,
+    input.completedAt,
+    input.elapsedMs,
+    input.elapsedMs,
+    input.clickCount,
     input.completedAt,
   ).run();
 }
