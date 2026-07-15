@@ -12,7 +12,7 @@ database_id = "bbd89b81-078a-47e0-9db4-5d170a3f78b4"
 migrations_dir = "d1/migrations"
 
 [vars]
-VGAMES_URL = "https://viota-worker.theonenonlyvj.workers.dev"
+VGAMES_URL = "https://vgames-identity.theonenonlyvj.workers.dev"
 ALLOWED_ORIGINS = "https://vwikirace.pages.dev"
 
 [[ratelimits]]

@@ -15,7 +15,7 @@ this file is not an incident log.
 - D1 database: `vwiki-race`
 - D1 binding: `VWIKI_RACE_DB`
 - D1 database id: `bbd89b81-078a-47e0-9db4-5d170a3f78b4`
-- Identity origin: `https://viota-worker.theonenonlyvj.workers.dev`
+- Identity origin: `https://vgames-identity.theonenonlyvj.workers.dev`
 
 VGames owns identity, unique names, ghost accounts, login, and account merges.
 VWiki Race owns challenges, creator attribution, runs, accepted click events,
@@ -59,7 +59,7 @@ paths, account stats, and challenge leaderboards. Realtime rooms are not used.
 Canonical Worker variables:
 
 ```txt
-VGAMES_URL=https://viota-worker.theonenonlyvj.workers.dev
+VGAMES_URL=https://vgames-identity.theonenonlyvj.workers.dev
 ALLOWED_ORIGINS=https://vwikirace.pages.dev
 ```
 
