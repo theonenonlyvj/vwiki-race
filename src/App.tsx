@@ -16,7 +16,6 @@ import type {
   Article,
   Challenge,
   RankedLeaderboardRow,
-  ServerPathStep,
 } from "./domain/types";
 import {
   createVGamesIdentityClient,
@@ -33,6 +32,7 @@ import { createWikipediaGateway } from "./services/wikipediaGateway";
 import type { RunRecordResponse } from "./server/trackingRepository";
 
 interface AppProps {
+  apiOrigin?: string;
   fetchImpl?: typeof fetch;
   now?: () => number;
   storage?: Storage;
@@ -57,6 +57,7 @@ type AuthPromptIntent =
 const defaultFetch: typeof fetch = (input, init) => globalThis.fetch(input, init);
 
 export default function App({
+  apiOrigin,
   fetchImpl = defaultFetch,
   now = () => Date.now(),
   storage = globalThis.localStorage,
@@ -88,12 +89,12 @@ export default function App({
   const [error, setError] = useState<string | null>(null);
 
   const apiClient = useMemo(
-    () => injectedApiClient ?? createVWikiRaceApiClient(fetchImpl),
-    [fetchImpl, injectedApiClient],
+    () => injectedApiClient ?? createVWikiRaceApiClient(fetchImpl, { apiOrigin }),
+    [apiOrigin, fetchImpl, injectedApiClient],
   );
   const identityClient = useMemo(
-    () => injectedIdentityClient ?? createVGamesIdentityClient(fetchImpl),
-    [fetchImpl, injectedIdentityClient],
+    () => injectedIdentityClient ?? createVGamesIdentityClient(fetchImpl, { apiOrigin }),
+    [apiOrigin, fetchImpl, injectedIdentityClient],
   );
   const identityRepository = useMemo(
     () => injectedIdentityRepository ?? createVGamesIdentityRepository(storage),
@@ -204,10 +205,7 @@ export default function App({
     setError(null);
     try {
       const challenge = await apiClient.createChallenge(
-        {
-          ...input,
-          creatorDisplayName: sessionForRequest.displayName,
-        },
+        input,
         sessionForRequest.token,
       );
       setChallenges((current) =>
@@ -266,19 +264,17 @@ export default function App({
       const nextRun = await apiClient.startRun(
         {
           challengeId: challenge.id,
-          publicName: sessionForRun.displayName,
         },
         sessionForRun.token,
       );
       const nextArticle = await wikipediaGateway.getArticle(
         challenge.start.title,
       );
-      const startedAtMs = Date.parse(nextRun.startedAt);
       setServerRun(nextRun);
       setSession(
         createGameSession(
           challenge,
-          Number.isNaN(startedAtMs) ? now() : startedAtMs,
+          now(),
         ),
       );
       setArticle(nextArticle);
@@ -448,6 +444,10 @@ export default function App({
     setModeState("loading");
 
     try {
+      const sourcePageId = article?.pageId;
+      if (!sourcePageId) {
+        throw new Error("The current article is missing its Wikipedia page id.");
+      }
       const clickedAt = now();
       const nextArticle = await wikipediaGateway.getArticle(title);
       const nextSession = followResolvedLink(session, {
@@ -473,37 +473,34 @@ export default function App({
       const clickResponse = await apiClient.recordClick(
         serverRun.id,
         {
+          clientEventId: crypto.randomUUID(),
+          expectedStepNumber: serverRun.clickCount + 1,
           sourceTitle: session.currentPage.canonicalTitle,
+          sourcePageId,
+          sourceRevisionId: article?.revisionId,
           clickedAnchorText: anchorText,
           requestedTitle: title,
           destinationTitle: nextArticle.canonicalTitle,
           destinationPageId: nextArticle.pageId,
-          clientTimestampMs: clickedAt,
+          decisionElapsedMs: Math.max(0, clickedAt - Date.parse(serverRun.startedAt)),
+          clientObservedAt: new Date(clickedAt).toISOString(),
         },
         identitySession.token,
       );
 
       const trackedSession = {
         ...nextSession,
-        clicks: clickResponse.clickCount,
+        clicks: clickResponse.transition.clickCount,
       };
       setSession(trackedSession);
 
       if (trackedSession.status === "completed") {
-        const leaderboardRow = await apiClient.completeRun(
-          serverRun.id,
-          {
-            finalTitle: nextArticle.canonicalTitle,
-            clientTimestampMs: clickedAt,
-          },
-          identitySession.token,
-        );
         setServerRun({
           ...serverRun,
           status: "completed",
           clickCount: trackedSession.clicks,
-          completedAt: leaderboardRow.completedAt,
-          elapsedMs: leaderboardRow.elapsedMs,
+          completedAt: clickResponse.transition.completedAt,
+          elapsedMs: clickResponse.transition.elapsedMs,
         });
         await refreshLeaderboard(trackedSession.challenge.id);
         setModeState("complete");
@@ -1144,10 +1141,6 @@ function LeaderboardPanel({
               <span>
                 {row.clickCount} {row.clickCount === 1 ? "click" : "clicks"}
               </span>
-              <details>
-                <summary>Path</summary>
-                <RunPathPreview path={row.pathPreview} />
-              </details>
             </li>
           ))}
         </ol>
@@ -1155,24 +1148,6 @@ function LeaderboardPanel({
         <p className="muted">No completed runs yet.</p>
       )}
     </section>
-  );
-}
-
-function RunPathPreview({ path }: { path: ServerPathStep[] }) {
-  if (!path.length) {
-    return <p className="muted">Path not loaded.</p>;
-  }
-
-  return (
-    <ol className="path-preview">
-      {path.map((step) => (
-        <li key={step.stepNumber}>
-          <span>{step.sourceTitle}</span>
-          <strong>{step.clickedAnchorText}</strong>
-          <span>{step.destinationTitle}</span>
-        </li>
-      ))}
-    </ol>
   );
 }
 

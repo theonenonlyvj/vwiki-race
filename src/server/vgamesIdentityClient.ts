@@ -21,7 +21,13 @@ export interface VGamesIdentityClient {
 }
 
 export type VGamesIntrospection =
-  | { valid: true; accountId: string; status: "ghost" | "claimed" | "merged" }
+  | {
+      valid: true;
+      accountId: string;
+      status: "ghost" | "claimed";
+      displayName: string;
+      aliases: string[];
+    }
   | { valid: false };
 
 export function createVGamesIdentityClient(options: {
@@ -107,27 +113,43 @@ export function createVGamesIdentityClient(options: {
 
     async introspect(token) {
       const payload = await request("/auth/introspect", { token });
-      if (
-        payload &&
-        typeof payload === "object" &&
-        "valid" in payload &&
-        payload.valid === true &&
-        "accountId" in payload &&
-        typeof payload.accountId === "string" &&
-        "status" in payload &&
-        (payload.status === "ghost" ||
-          payload.status === "claimed" ||
-          payload.status === "merged")
-      ) {
-        return {
-          valid: true,
-          accountId: payload.accountId,
-          status: payload.status,
-        };
-      }
-
-      return { valid: false };
+      return readIntrospectionPayload(payload);
     },
+  };
+}
+
+function readIntrospectionPayload(payload: unknown): VGamesIntrospection {
+  if (!payload || typeof payload !== "object" || !("valid" in payload)) {
+    throw invalidIdentityResponse();
+  }
+  if (payload.valid === false) {
+    return { valid: false };
+  }
+  if (
+    payload.valid !== true ||
+    !("accountId" in payload) ||
+    typeof payload.accountId !== "string" ||
+    payload.accountId.trim().length === 0 ||
+    !("status" in payload) ||
+    (payload.status !== "ghost" && payload.status !== "claimed") ||
+    !("displayName" in payload) ||
+    typeof payload.displayName !== "string" ||
+    payload.displayName.trim().length === 0 ||
+    !("aliases" in payload) ||
+    !Array.isArray(payload.aliases) ||
+    !payload.aliases.every(
+      (alias) => typeof alias === "string" && alias.trim().length > 0,
+    )
+  ) {
+    throw invalidIdentityResponse();
+  }
+
+  return {
+    valid: true,
+    accountId: payload.accountId,
+    status: payload.status,
+    displayName: payload.displayName,
+    aliases: payload.aliases,
   };
 }
 
@@ -161,7 +183,11 @@ function readAuthPayload(payload: unknown): { accountId: string; token: string }
     };
   }
 
-  throw new ApiError(
+  throw invalidIdentityResponse();
+}
+
+function invalidIdentityResponse(): ApiError {
+  return new ApiError(
     "invalid_vgames_identity_response",
     "VGames identity response was invalid.",
     502,

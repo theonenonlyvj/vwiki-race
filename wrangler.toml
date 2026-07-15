@@ -2,10 +2,5 @@ name = "vwikirace"
 pages_build_output_dir = "./dist"
 compatibility_date = "2026-07-08"
 
-[[d1_databases]]
-binding = "VWIKI_RACE_DB"
-database_name = "vwiki-race"
-database_id = "bbd89b81-078a-47e0-9db4-5d170a3f78b4"
-
 [vars]
-VGAMES_URL = "https://viota-worker.theonenonlyvj.workers.dev"
+VWIKI_RACE_API_URL = "https://vwikirace-api.theonenonlyvj.workers.dev"

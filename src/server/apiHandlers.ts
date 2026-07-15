@@ -1,11 +1,13 @@
 import { getSortedChallenges } from "../domain/challenges";
 import { optionalNumber, requiredString } from "./http";
+import { ApiError } from "./http";
 import type {
   AbandonRunResponse,
   ChallengesResponse,
   ClickRequest,
   ClickResponse,
   CreateChallengeRequest,
+  CreateChallengeV2Request,
   CreateChallengeResponse,
   CompleteRunRequest,
   CompleteRunResponse,
@@ -14,14 +16,20 @@ import type {
   StartRunRequest,
   StartRunResponse,
 } from "./contracts";
-import type { TrackingRepository } from "./trackingRepository";
+import type { RunProtocolRepository, TrackingRepository } from "./trackingRepository";
 import type { ValidateChallengeArticles } from "./wikipediaChallengeValidator";
-import type { AccountStatus } from "../domain/types";
+import type { AccountStatus, AuthorizedAccount } from "../domain/types";
+import { fingerprintCreateChallengeRequest } from "./runProtocol";
 
 export interface ApiHandlers {
   listChallenges(): Promise<ChallengesResponse>;
   createChallenge(
     input: CreateChallengeHandlerRequest,
+  ): Promise<CreateChallengeResponse>;
+  createChallengeV2(
+    account: AuthorizedAccount,
+    input: CreateChallengeV2Request,
+    idempotencyKey: string,
   ): Promise<CreateChallengeResponse>;
   startRun(input: StartRunRequest): Promise<StartRunResponse>;
   recordClick(
@@ -102,6 +110,67 @@ export function createApiHandlers(
           creatorAccountId,
           creatorDisplayName,
           creatorIdentityStatus,
+        }),
+      };
+    },
+
+    async createChallengeV2(account, input, idempotencyKey) {
+      const startTitle = boundedRequiredString(
+        input.startTitle,
+        "invalid_start_title",
+        "Enter a start article title.",
+        2048,
+      );
+      const targetTitle = boundedRequiredString(
+        input.targetTitle,
+        "invalid_target_title",
+        "Enter a target article title.",
+        2048,
+      );
+      const cleanIdempotencyKey = boundedRequiredString(
+        idempotencyKey,
+        "invalid_idempotency_key",
+        "An idempotency key is required.",
+        200,
+      );
+      const requestFingerprint = await fingerprintCreateChallengeRequest({
+        startTitle,
+        targetTitle,
+      });
+      const protocol = repository as RunProtocolRepository;
+      const replay = await protocol.findChallengeCreationReplay(account, {
+        idempotencyKey: cleanIdempotencyKey,
+        requestFingerprint,
+      });
+      if (replay) {
+        return { challenge: replay };
+      }
+      const validatedArticles = await validateChallengeArticles({ startTitle, targetTitle });
+      if (validatedArticles.start.pageId === validatedArticles.target.pageId) {
+        throw new ApiError("same_challenge_article", "Start and target must be different Wikipedia articles.", 409);
+      }
+      if (validatedArticles.start.allowedLinkCount < 1) {
+        throw new ApiError("start_has_no_allowed_links", "The start article has no allowed links.", 409);
+      }
+      return {
+        challenge: await protocol.createChallengeV2(account, {
+          startTitle: boundedRequiredString(
+            validatedArticles.start.title,
+            "invalid_start_title",
+            "The canonical start article title is invalid.",
+            512,
+          ),
+          startPageId: validatedArticles.start.pageId,
+          startAllowedLinkCount: validatedArticles.start.allowedLinkCount,
+          targetTitle: boundedRequiredString(
+            validatedArticles.target.title,
+            "invalid_target_title",
+            "The canonical target article title is invalid.",
+            512,
+          ),
+          targetPageId: validatedArticles.target.pageId,
+          idempotencyKey: cleanIdempotencyKey,
+          requestFingerprint,
         }),
       };
     },
@@ -238,9 +307,22 @@ const defaultChallengeArticleValidation: ValidateChallengeArticles = async ({
   startTitle,
   targetTitle,
 }) => ({
-  start: { title: startTitle, pageId: 0 },
-  target: { title: targetTitle, pageId: 0 },
+  start: { title: startTitle, pageId: 1, allowedLinkCount: 1 },
+  target: { title: targetTitle, pageId: 2, allowedLinkCount: 1 },
 });
+
+function boundedRequiredString(
+  value: unknown,
+  code: string,
+  message: string,
+  maxLength: number,
+): string {
+  const result = requiredString(value, code, message);
+  if (result.length > maxLength) {
+    throw new ApiError(code, message, 400);
+  }
+  return result;
+}
 
 function readIdentityStatus(value: unknown): "ghost" | "claimed" | "merged" {
   if (value === "ghost" || value === "claimed" || value === "merged") {

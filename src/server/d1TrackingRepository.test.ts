@@ -289,6 +289,17 @@ class MemoryStatement implements D1PreparedStatementLike {
 }
 
 describe("D1 tracking repository", () => {
+  it("exposes the protocol-2 atomic run methods", () => {
+    const repository = createD1TrackingRepository({ db: new MemoryD1() });
+
+    expect(repository).toMatchObject({
+      startRunV2: expect.any(Function),
+      recordClickV2: expect.any(Function),
+      abandonRunV2: expect.any(Function),
+      findActiveRun: expect.any(Function),
+    });
+  });
+
   it("lists seeded challenges and assigns the next challenge number", async () => {
     const db = new MemoryD1();
     const repository = createD1TrackingRepository({

@@ -5,6 +5,8 @@ import {
   type StorageLike,
 } from "./vgamesIdentity";
 
+const apiOrigin = "https://vwikirace-api.example.workers.dev";
+
 function memoryStorage(): StorageLike {
   const values = new Map<string, string>();
   return {
@@ -113,7 +115,7 @@ describe("VGames identity client", () => {
         status: "ghost",
       });
     });
-    const client = createVGamesIdentityClient(fetchImpl);
+    const client = createVGamesIdentityClient(fetchImpl, { apiOrigin });
 
     await expect(
       client.playAsGuest({
@@ -128,7 +130,7 @@ describe("VGames identity client", () => {
     });
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      "/api/identity/guest",
+      `${apiOrigin}/api/v2/identity/guest`,
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -148,7 +150,7 @@ describe("VGames identity client", () => {
         status: "claimed",
       });
     });
-    const client = createVGamesIdentityClient(fetchImpl);
+    const client = createVGamesIdentityClient(fetchImpl, { apiOrigin });
 
     await expect(
       client.secureGuest({
@@ -165,7 +167,7 @@ describe("VGames identity client", () => {
     });
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      "/api/identity/secure",
+      `${apiOrigin}/api/v2/identity/secure`,
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -187,7 +189,7 @@ describe("VGames identity client", () => {
         status: "claimed",
       });
     });
-    const client = createVGamesIdentityClient(fetchImpl);
+    const client = createVGamesIdentityClient(fetchImpl, { apiOrigin });
 
     await expect(
       client.login({
@@ -203,7 +205,7 @@ describe("VGames identity client", () => {
     });
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      "/api/identity/login",
+      `${apiOrigin}/api/v2/identity/login`,
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
@@ -222,7 +224,7 @@ describe("VGames identity client", () => {
         { status: 409 },
       );
     });
-    const client = createVGamesIdentityClient(fetchImpl);
+    const client = createVGamesIdentityClient(fetchImpl, { apiOrigin });
 
     await expect(
       client.playAsGuest({
@@ -230,5 +232,17 @@ describe("VGames identity client", () => {
         displayName: "Vijay",
       }),
     ).rejects.toThrow("That name is already taken.");
+  });
+
+  it("rejects malformed successful identity responses", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ accountId: "acc-guest" }));
+    const client = createVGamesIdentityClient(fetchImpl, { apiOrigin });
+
+    await expect(
+      client.playAsGuest({
+        deviceCredential: "cred-123456789012",
+        displayName: "Casey",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_response", status: 502 });
   });
 });

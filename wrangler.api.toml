@@ -6,6 +6,18 @@ compatibility_date = "2026-07-08"
 binding = "VWIKI_RACE_DB"
 database_name = "vwiki-race"
 database_id = "bbd89b81-078a-47e0-9db4-5d170a3f78b4"
+migrations_dir = "d1/migrations"
 
 [vars]
 VGAMES_URL = "https://viota-worker.theonenonlyvj.workers.dev"
+ALLOWED_ORIGINS = "https://vwikirace.pages.dev"
+
+[[ratelimits]]
+binding = "CLICK_RATE_LIMITER"
+namespace_id = "51001"
+simple = { limit = 180, period = 60 }
+
+[[ratelimits]]
+binding = "ACCOUNT_READ_RATE_LIMITER"
+namespace_id = "51002"
+simple = { limit = 10, period = 60 }

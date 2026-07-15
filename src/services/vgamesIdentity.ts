@@ -44,6 +44,10 @@ export interface VGamesIdentityClient {
   login(input: LoginInput): Promise<VGamesIdentitySession>;
 }
 
+export interface VGamesIdentityClientOptions {
+  apiOrigin?: string;
+}
+
 const CREDENTIAL_STORAGE_KEY = "vwiki-race:vgames-device-credential";
 const SESSION_STORAGE_KEY = "vwiki-race:vgames-session";
 const LEGACY_APP_KEY = ["viki", "pedia"].join("");
@@ -110,18 +114,27 @@ export function createVGamesIdentityRepository(
   };
 }
 
+import { resolveApiOrigin } from "./apiOrigin";
+import { defaultApiFetch, requestJson } from "./apiRequest";
+
+const DEFAULT_API_ORIGIN = resolveApiOrigin(import.meta.env.VITE_VWIKI_RACE_API_URL, {
+  production: import.meta.env.PROD,
+});
+
 export function createVGamesIdentityClient(
-  fetchImpl: typeof fetch,
+  fetchImpl: typeof fetch = defaultApiFetch,
+  options: VGamesIdentityClientOptions = {},
 ): VGamesIdentityClient {
+  const apiOrigin = options.apiOrigin ?? DEFAULT_API_ORIGIN;
   return {
     playAsGuest(input) {
-      return identityRequest(fetchImpl, "/api/identity/guest", input);
+      return identityRequest(fetchImpl, `${apiOrigin}/api/v2/identity/guest`, input);
     },
     secureGuest(input) {
-      return identityRequest(fetchImpl, "/api/identity/secure", input);
+      return identityRequest(fetchImpl, `${apiOrigin}/api/v2/identity/secure`, input);
     },
     login(input) {
-      return identityRequest(fetchImpl, "/api/identity/login", input);
+      return identityRequest(fetchImpl, `${apiOrigin}/api/v2/identity/login`, input);
     },
   };
 }
@@ -131,50 +144,13 @@ async function identityRequest(
   path: string,
   body: unknown,
 ): Promise<VGamesIdentitySession> {
-  const response = await fetchImpl(path, {
+  return requestJson(fetchImpl, path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body,
+    timeoutMs: 15_000,
+    retry: "never",
+    validate: isSession,
   });
-  const payload = await readJson(response);
-
-  if (!response.ok) {
-    throw new Error(readApiError(payload, response.status));
-  }
-  if (!isSession(payload)) {
-    throw new Error("VGames identity response was invalid.");
-  }
-
-  return payload;
-}
-
-async function readJson(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return {};
-  }
-}
-
-function readApiError(payload: unknown, status: number): string {
-  if (
-    payload &&
-    typeof payload === "object" &&
-    "error" in payload &&
-    payload.error &&
-    typeof payload.error === "object" &&
-    "message" in payload.error &&
-    typeof payload.error.message === "string"
-  ) {
-    return payload.error.message;
-  }
-
-  return `VGames identity request failed with status ${status}`;
 }
 
 function isSession(value: unknown): value is VGamesIdentitySession {

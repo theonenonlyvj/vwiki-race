@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { appleParseResponse, fruitParseResponse } from "./test/fixtures";
 
+const apiOrigin = "http://localhost:8787";
+const apiUrl = (path: string) => `${apiOrigin}${path}`;
+
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
   return {
@@ -24,7 +27,7 @@ describe("VWiki Race app", () => {
   });
 
   it("shows the challenge catalog without requiring identity at page entry", async () => {
-    render(<App fetchImpl={createFetchMock()} storage={memoryStorage()} />);
+    render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={memoryStorage()} />);
 
     expect(await screen.findByRole("heading", { name: "VWiki Race" })).toBeVisible();
     expect(await screen.findByRole("button", { name: /start challenge #1/i })).toBeVisible();
@@ -35,11 +38,16 @@ describe("VWiki Race app", () => {
     const fetchImpl = createFetchMock();
     vi.stubGlobal("fetch", fetchImpl);
 
-    render(<App storage={memoryStorage()} />);
+    const storage = memoryStorage();
+    const { rerender } = render(<App apiOrigin={apiOrigin} storage={storage} />);
 
     expect(
       await screen.findByRole("button", { name: /start challenge #1/i }),
     ).toBeVisible();
+    await waitFor(() => {
+      expect(challengeCatalogCalls(fetchImpl)).toBe(1);
+    });
+    rerender(<App apiOrigin={apiOrigin} storage={storage} />);
     await waitFor(() => {
       expect(challengeCatalogCalls(fetchImpl)).toBe(1);
     });
@@ -50,7 +58,7 @@ describe("VWiki Race app", () => {
     const fetchImpl = createFetchMock();
     const user = userEvent.setup();
 
-    render(<App fetchImpl={fetchImpl} storage={storage} />);
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
 
     await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
 
@@ -79,7 +87,7 @@ describe("VWiki Race app", () => {
       }),
     );
 
-    render(<App fetchImpl={createFetchMock()} storage={storage} />);
+    render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={storage} />);
 
     await userEvent.click(await screen.findByRole("button", { name: /start challenge #1/i }));
 
@@ -104,7 +112,7 @@ describe("VWiki Race app", () => {
     const fetchImpl = createFetchMock();
     const user = userEvent.setup();
 
-    render(<App fetchImpl={fetchImpl} storage={storage} />);
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
 
     await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
 
@@ -114,7 +122,7 @@ describe("VWiki Race app", () => {
 
     expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
     expect(fetchImpl).not.toHaveBeenCalledWith(
-      "/api/identity/guest",
+      apiUrl("/api/v2/identity/guest"),
       expect.anything(),
     );
   });
@@ -136,6 +144,7 @@ describe("VWiki Race app", () => {
 
     render(
       <App
+        apiOrigin={apiOrigin}
         fetchImpl={fetchImpl}
         now={() => now}
         storage={storage}
@@ -157,7 +166,7 @@ describe("VWiki Race app", () => {
     expect(screen.getAllByText(/1\.5s/i).length).toBeGreaterThanOrEqual(1);
     await waitFor(() => {
       expect(fetchImpl).toHaveBeenCalledWith(
-        "/api/runs/run-1/complete",
+        apiUrl("/api/v2/runs/run-1/click"),
         expect.objectContaining({
           headers: expect.objectContaining({
             Authorization: "Bearer jwt-guest",
@@ -183,7 +192,7 @@ describe("VWiki Race app", () => {
       }),
     );
 
-    render(<App fetchImpl={fetchImpl} storage={storage} />);
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
 
     await user.click(
       await screen.findByRole("button", { name: /start challenge #1/i }),
@@ -211,7 +220,7 @@ describe("VWiki Race app", () => {
     const fetchImpl = createFetchMock();
     const user = userEvent.setup();
 
-    render(<App fetchImpl={fetchImpl} storage={storage} />);
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
 
     await user.click(await screen.findByRole("button", { name: /challenges/i }));
     await user.type(screen.getByLabelText(/start article/i), "Mars");
@@ -226,7 +235,7 @@ describe("VWiki Race app", () => {
     );
     await waitFor(() => {
       expect(fetchImpl).toHaveBeenCalledWith(
-        "/api/challenges",
+        apiUrl("/api/v2/challenges"),
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({
@@ -235,7 +244,6 @@ describe("VWiki Race app", () => {
           body: JSON.stringify({
             startTitle: "Mars",
             targetTitle: "Water",
-            creatorDisplayName: "Vijay",
           }),
         }),
       );
@@ -282,7 +290,7 @@ describe("VWiki Race app", () => {
     });
     const user = userEvent.setup();
 
-    render(<App fetchImpl={fetchImpl} storage={storage} />);
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
 
     expect((await screen.findAllByText(/mars -> water/i)).length).toBeGreaterThan(
       0,
@@ -291,11 +299,10 @@ describe("VWiki Race app", () => {
 
     await waitFor(() => {
       expect(fetchImpl).toHaveBeenCalledWith(
-        "/api/runs/start",
+        apiUrl("/api/v2/runs/start"),
         expect.objectContaining({
           body: JSON.stringify({
             challengeId: "challenge-0002",
-            publicName: "Vijay",
           }),
         }),
       );
@@ -334,14 +341,16 @@ function createFetchMock(options?: {
   ];
 
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
+    const requestUrl = String(input);
+    const url = requestUrl.startsWith(apiOrigin)
+      ? requestUrl.slice(apiOrigin.length)
+      : requestUrl;
     const method = init?.method ?? "GET";
 
-    if (url === "/api/challenges" && method === "POST") {
+    if (url === "/api/v2/challenges" && method === "POST") {
       expect(readJsonBody(init)).toEqual({
         startTitle: "Mars",
         targetTitle: "Water",
-        creatorDisplayName: "Vijay",
       });
       const challenge = {
         id: "challenge-0002",
@@ -363,13 +372,13 @@ function createFetchMock(options?: {
       return jsonResponse({ challenge });
     }
 
-    if (url === "/api/challenges") {
+    if (url === "/api/v2/challenges") {
       return jsonResponse({
         challenges,
       });
     }
 
-    if (url === "/api/identity/guest") {
+    if (url === "/api/v2/identity/guest") {
       const body = readJsonBody(init) as { displayName: string };
       return jsonResponse({
         accountId: "acc-guest",
@@ -379,7 +388,7 @@ function createFetchMock(options?: {
       });
     }
 
-    if (url === "/api/identity/secure") {
+    if (url === "/api/v2/identity/secure") {
       expect(readJsonBody(init)).toMatchObject({
         username: "vijay",
         password: "secret-pass",
@@ -392,7 +401,7 @@ function createFetchMock(options?: {
       });
     }
 
-    if (url === "/api/identity/login") {
+    if (url === "/api/v2/identity/login") {
       expect(readJsonBody(init)).toMatchObject({
         username: "vijay",
         password: "secret-pass",
@@ -405,9 +414,9 @@ function createFetchMock(options?: {
       });
     }
 
-    if (url === "/api/runs/start") {
-      const startBody = readJsonBody(init) as { challengeId: string; publicName: string };
-      expect(startBody.publicName).toBe("Vijay");
+    if (url === "/api/v2/runs/start") {
+      const startBody = readJsonBody(init) as { challengeId: string };
+      expect(startBody).toEqual({ challengeId: expect.any(String) });
       expect(init?.headers).toMatchObject({
         Authorization: expect.stringMatching(/^Bearer jwt-/),
       });
@@ -422,44 +431,38 @@ function createFetchMock(options?: {
           targetTitle: challenge.target.title,
           clickCount: 0,
           startedAt: "2026-07-14T01:00:00.000Z",
+          canonicalAccountId: "acc-guest",
+          protocolVersion: 2,
         },
       });
     }
 
-    if (url === "/api/runs/run-1/click") {
+    if (url === "/api/v2/runs/run-1/click") {
       expect(readJsonBody(init)).toMatchObject({
+        clientEventId: expect.any(String),
+        expectedStepNumber: 1,
         sourceTitle: "Apple",
+        sourcePageId: 18978754,
         clickedAnchorText: "fruit",
         requestedTitle: "Fruit",
         destinationTitle: "Fruit",
         destinationPageId: 10843,
-        clientTimestampMs: 2500,
+        decisionElapsedMs: 1500,
       });
-      return jsonResponse({ clickCount: 1 });
-    }
-
-    if (url === "/api/runs/run-1/complete") {
       completed = true;
-      expect(readJsonBody(init)).toEqual({
-        finalTitle: "Fruit",
-        clientTimestampMs: 2500,
-      });
       return jsonResponse({
-        leaderboardRow: {
-          rank: 1,
+        transition: {
           runId: "run-1",
-          challengeId: "challenge-0001",
-          accountId: "acc-guest",
-          displayName: "Vijay",
-          elapsedMs: 1500,
           clickCount: 1,
+          runStatus: "completed",
           completedAt: "2026-07-14T01:00:01.500Z",
-          pathPreview: [],
+          elapsedMs: 1500,
         },
+        leaderboardContext: { isPersonalBest: true, rank: 1 },
       });
     }
 
-    if (url.startsWith("/api/challenges/") && url.endsWith("/leaderboard")) {
+    if (url.startsWith("/api/v2/challenges/") && url.endsWith("/leaderboard")) {
       return jsonResponse({
         leaderboard: completed && url.includes("challenge-0001")
           ? [
@@ -472,17 +475,6 @@ function createFetchMock(options?: {
                 elapsedMs: 1500,
                 clickCount: 1,
                 completedAt: "2026-07-14T01:00:01.500Z",
-                pathPreview: [
-                  {
-                    stepNumber: 1,
-                    sourceTitle: "Apple",
-                    clickedAnchorText: "fruit",
-                    destinationTitle: "Fruit",
-                    destinationPageId: 10843,
-                    elapsedSinceStartMs: 1500,
-                    createdAt: "2026-07-14T01:00:01.500Z",
-                  },
-                ],
               },
             ]
           : [],
@@ -514,7 +506,7 @@ function readJsonBody(init?: RequestInit): unknown {
 function challengeCatalogCalls(fetchImpl: ReturnType<typeof createFetchMock>): number {
   return fetchImpl.mock.calls.filter(
     ([input, init]) =>
-      String(input) === "/api/challenges" &&
+      String(input) === apiUrl("/api/v2/challenges") &&
       (init?.method === undefined || init.method === "GET"),
   ).length;
 }

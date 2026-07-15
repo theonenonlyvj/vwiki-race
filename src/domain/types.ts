@@ -3,6 +3,34 @@ export type ChallengeMode = "solo" | "daily";
 export type Ruleset = "ranked_classic";
 export type RunStatus = "active" | "completed" | "abandoned";
 
+export interface AuthorizedAccount {
+  accountId: string;
+  displayName: string;
+  status: "ghost" | "claimed";
+  aliases: string[];
+}
+
+export interface RunTransition {
+  runId: string;
+  clickCount: number;
+  runStatus: "active" | "completed";
+  completedAt?: string;
+  elapsedMs?: number;
+}
+
+export interface LeaderboardContext {
+  isPersonalBest: boolean;
+  rank: number | null;
+}
+
+export interface AbandonRunTransition {
+  runId: string;
+  runStatus: "abandoned" | "completed";
+  completedAt?: string;
+  elapsedMs?: number;
+  outcome?: "abandoned" | "already_completed" | "legacy_recovery_abandoned";
+}
+
 export interface VGamesAccount {
   accountId: string;
   displayName: string;
@@ -46,10 +74,13 @@ export interface ArticleLink {
 export interface Article {
   pageId: number;
   canonicalTitle: string;
-  revisionId?: number;
+  revisionId: number;
+  sourceUrl: string;
+  attributionUrl: string;
+  sanitizedHtml: string;
   html: string;
   links: ArticleLink[];
-  attribution?: string;
+  attribution: string;
 }
 
 export interface PathPage {
@@ -147,7 +178,23 @@ export interface ServerLeaderboardRow {
   elapsedMs: number;
   clickCount: number;
   completedAt: string;
-  pathPreview: ServerPathStep[];
+}
+
+export interface AccountStats {
+  totals: {
+    attempts: number;
+    completed: number;
+    abandoned: number;
+    timedCompleted: number;
+    totalClicks: number;
+    bestClicks: number | null;
+    bestElapsedMs: number | null;
+    averageClicks: number;
+    averageElapsedMs: number;
+  };
+  topStarts: CountStat[];
+  topTargets: CountStat[];
+  mostVisited: CountStat[];
 }
 
 export interface RankedLeaderboardRow extends ServerLeaderboardRow {

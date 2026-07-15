@@ -1,28 +1,4 @@
-import {
-  createTrackingContext,
-  singleParam,
-  type Env,
-} from "../../../_shared/createTrackingContext";
+import { proxyCanonicalApi, type Env } from "../../../_shared/createTrackingContext";
 
-export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const tracking = createTrackingContext(context.env);
-  try {
-    const account = await tracking.authorize(context.request);
-    return tracking.json(
-      await tracking.handlers.recordClick(
-        singleParam(context.params.runId),
-        account.accountId,
-        (await tracking.readJson(context.request)) as {
-          sourceTitle: string;
-          clickedAnchorText: string;
-          requestedTitle: string;
-          destinationTitle: string;
-          destinationPageId?: number;
-          clientTimestampMs?: number;
-        },
-      ),
-    );
-  } catch (caught) {
-    return tracking.error(caught);
-  }
-};
+export const onRequestPost: PagesFunction<Env> = (context) =>
+  proxyCanonicalApi(context.request, context.env);

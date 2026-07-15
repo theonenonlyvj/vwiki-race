@@ -1,115 +1,117 @@
-import { createApiHandlers } from "../../src/server/apiHandlers";
-import { createD1TrackingRepository } from "../../src/server/d1TrackingRepository";
 import { ApiError } from "../../src/server/http";
-import { createVGamesIdentityClient } from "../../src/server/vgamesIdentityClient";
-import { createWikipediaChallengeValidator } from "../../src/server/wikipediaChallengeValidator";
-import type { AccountStatus } from "../../src/domain/types";
+
+const MAX_BODY_BYTES = 16 * 1024;
 
 export interface Env {
-  VWIKI_RACE_DB: D1Database;
-  VGAMES_URL: string;
+  VWIKI_RACE_API_URL: string;
 }
 
-export function createTrackingContext(env: Env) {
-  const repository = createD1TrackingRepository({
-    db: env.VWIKI_RACE_DB,
-  });
-  const wikipedia = createWikipediaChallengeValidator({
-    fetchImpl: fetch,
-  });
-  const handlers = createApiHandlers(repository, {
-    validateChallengeArticles: wikipedia.validateChallengeArticles,
-  });
-  const identity = createVGamesIdentityClient({
-    baseUrl: env.VGAMES_URL,
-  });
-  const authorize = (request: Request) => authorizeVGamesRequest(request, identity);
-
-  return {
-    handlers,
-    identity,
-    authorize,
-    readJson,
-    json,
-    error,
-  };
-}
-
-export interface AuthorizedVGamesAccount {
-  accountId: string;
-  status: AccountStatus;
-}
-
-export async function authorizeVGamesRequest(
+export async function proxyCanonicalApi(
   request: Request,
-  identity: Pick<ReturnType<typeof createVGamesIdentityClient>, "introspect">,
-): Promise<AuthorizedVGamesAccount> {
-  const token = readBearerToken(request);
-  const result = await identity.introspect(token);
-  if (!result.valid) {
-    throw new ApiError(
-      "unauthorized",
-      "Sign in before changing VWiki Race.",
-      401,
-    );
-  }
-
-  return {
-    accountId: result.accountId,
-    status: result.status,
-  };
-}
-
-function readBearerToken(request: Request): string {
-  const authorization = request.headers.get("Authorization") ?? "";
-  const match = authorization.match(/^Bearer\s+(.+)$/i);
-  if (!match?.[1]) {
-    throw new ApiError(
-      "unauthorized",
-      "Sign in before changing VWiki Race.",
-      401,
-    );
-  }
-  return match[1].trim();
-}
-
-export async function readJson(request: Request): Promise<unknown> {
+  env: Env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
   try {
-    return await request.json();
-  } catch {
-    throw new ApiError("invalid_json", "Request body must be valid JSON.");
-  }
-}
-
-export function json(value: unknown, init?: ResponseInit): Response {
-  return Response.json(value, {
-    ...init,
-    headers: {
-      "Cache-Control": "no-store",
-      ...(init?.headers ?? {}),
-    },
-  });
-}
-
-export function error(caught: unknown): Response {
-  if (caught instanceof ApiError) {
-    return json(
-      { error: { code: caught.code, message: caught.message } },
-      { status: caught.status },
+    const target = canonicalTarget(request, env);
+    const body = await boundedBody(request);
+    const headers = new Headers(request.headers);
+    headers.delete("Host");
+    headers.delete("Content-Length");
+    return await fetchImpl(new Request(target, {
+      method: request.method,
+      headers,
+      body,
+      redirect: "manual",
+    }));
+  } catch (caught) {
+    if (caught instanceof ApiError) {
+      return Response.json(
+        { error: { code: caught.code, message: caught.message } },
+        {
+          status: caught.status,
+          headers: {
+            "Cache-Control": "no-store",
+            ...(caught.retryAfterSeconds === null
+              ? {}
+              : { "Retry-After": String(caught.retryAfterSeconds) }),
+          },
+        },
+      );
+    }
+    return Response.json(
+      {
+        error: {
+          code: "canonical_api_unavailable",
+          message: "The canonical VWiki Race API is unavailable.",
+        },
+      },
+      { status: 502, headers: { "Cache-Control": "no-store" } },
     );
   }
-
-  return json(
-    {
-      error: {
-        code: "internal_error",
-        message: "Something went wrong.",
-      },
-    },
-    { status: 500 },
-  );
 }
 
-export function singleParam(value: string | string[] | undefined): string {
-  return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
+function canonicalTarget(request: Request, env: Env): URL {
+  let base: URL;
+  try {
+    base = new URL(env.VWIKI_RACE_API_URL);
+  } catch {
+    throw new ApiError(
+      "canonical_api_unconfigured",
+      "The canonical VWiki Race API is not configured.",
+      503,
+    );
+  }
+  if (base.protocol !== "https:" && base.protocol !== "http:") {
+    throw new ApiError(
+      "canonical_api_unconfigured",
+      "The canonical VWiki Race API is not configured.",
+      503,
+    );
+  }
+  const incoming = new URL(request.url);
+  base.pathname = incoming.pathname;
+  base.search = incoming.search;
+  base.hash = "";
+  return base;
+}
+
+async function boundedBody(request: Request): Promise<Uint8Array | undefined> {
+  if (request.method === "GET" || request.method === "HEAD" || request.body === null) {
+    return undefined;
+  }
+  const declaredLength = request.headers.get("Content-Length");
+  if (
+    declaredLength &&
+    (!/^\d+$/.test(declaredLength) || Number(declaredLength) > MAX_BODY_BYTES)
+  ) {
+    throw bodyTooLarge();
+  }
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const next = await reader.read();
+    if (next.done) break;
+    total += next.value.byteLength;
+    if (total > MAX_BODY_BYTES) {
+      await reader.cancel();
+      throw bodyTooLarge();
+    }
+    chunks.push(next.value);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
+function bodyTooLarge(): ApiError {
+  return new ApiError(
+    "body_too_large",
+    "Request body must be 16 KiB or smaller.",
+    413,
+  );
 }

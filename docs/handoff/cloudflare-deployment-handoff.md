@@ -44,7 +44,8 @@ Last known results:
 ## Deployment Architecture
 
 - Static app: Vite/React build output in `dist`
-- API layer: Cloudflare Pages Functions in `functions/api/*`
+- Canonical API layer: Cloudflare Worker in `src/server/worker.ts`
+- Compatibility API layer: bounded Pages proxies in `functions/api/*`
 - Identity: VGames worker at `https://viota-worker.theonenonlyvj.workers.dev`
 - VWiki Race data: Cloudflare D1 tables keyed by VGames `account_id`
 - Realtime rooms: not applicable
@@ -81,7 +82,7 @@ Recommended database name:
 vwiki-race
 ```
 
-Required Pages binding name:
+Required canonical Worker binding name:
 
 ```txt
 VWIKI_RACE_DB
@@ -136,18 +137,31 @@ directory.
 
 ## Step 4: Add Cloudflare Environment Values
 
-Set the VGames identity origin:
+Set the VGames identity origin and D1 binding on the canonical API Worker:
 
 ```txt
 VGAMES_URL = https://viota-worker.theonenonlyvj.workers.dev
 ```
 
-Bind the D1 database to the Pages Functions project:
+Bind the D1 database to that Worker:
 
 ```txt
 Binding name: VWIKI_RACE_DB
 Database: vwiki-race
 ```
+
+Set both frontend and retained Pages compatibility routing to the same
+canonical Worker origin:
+
+```txt
+VITE_VWIKI_RACE_API_URL = https://<vwiki-race-api-worker>
+VWIKI_RACE_API_URL = https://<vwiki-race-api-worker>
+```
+
+Do not bind D1 or `VGAMES_URL` to the Pages Functions. Retained `/api/*`
+Functions enforce the 16 KiB request limit and proxy to the Worker so stale
+clients cannot bypass canonical authorization, quotas, rate limits, or path
+disclosure policy.
 
 ## Step 5: Deploy
 
@@ -185,9 +199,9 @@ Then test the app flow:
 7. Open the Leaderboard tab.
 8. Confirm the leaderboard row is associated with the VGames identity.
 
-If API requests fail, check Cloudflare deployment logs first, then verify that
-`VGAMES_URL` and the `VWIKI_RACE_DB` binding exist in the Pages production
-environment.
+If API requests fail, check Worker and Pages deployment logs first, then verify
+that `VGAMES_URL` and `VWIKI_RACE_DB` exist on the Worker and
+`VWIKI_RACE_API_URL` exists on Pages.
 
 ## Useful Routes
 
@@ -209,8 +223,8 @@ environment.
   `npm run build` with output directory `dist`.
 - Guest auth fails: confirm `VGAMES_URL` points at the viota worker and that the
   viota worker deployment includes `game: 'vwiki-race'`.
-- D1 errors: confirm the Pages Function binding is exactly `VWIKI_RACE_DB` and
-  the migration has been applied.
+- D1 errors: confirm the canonical Worker binding is exactly `VWIKI_RACE_DB`
+  and the migration has been applied; Pages must not have direct D1 access.
 - Leaderboard identity is wrong: confirm runs are keyed by VGames `account_id`
   and display uses the canonical secured VGames name/handle when present.
 - The frontend loads but cannot play: inspect browser network requests to

@@ -1,62 +1,29 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as challenges from "./challenges";
+import * as leaderboard from "./challenges/[challengeId]/leaderboard";
+import * as guest from "./identity/guest";
+import * as login from "./identity/login";
+import * as secure from "./identity/secure";
+import * as abandon from "./runs/[runId]/abandon";
+import * as click from "./runs/[runId]/click";
+import * as complete from "./runs/[runId]/complete";
+import * as path from "./runs/[runId]/path";
+import * as start from "./runs/start";
 
-const mockState = vi.hoisted(() => ({
-  handlers: {
-    listChallenges: vi.fn(),
-    createChallenge: vi.fn(),
-    startRun: vi.fn(),
-    recordClick: vi.fn(),
-    completeRun: vi.fn(),
-    abandonRun: vi.fn(),
-    listLeaderboard: vi.fn(),
-    getRunPath: vi.fn(),
-  },
-  authorize: vi.fn(),
-  identity: {
-    quick: vi.fn(),
-    secure: vi.fn(),
-    login: vi.fn(),
-    introspect: vi.fn(),
-  },
-}));
+const canonicalOrigin = "https://canonical.example";
 
-vi.mock("../_shared/createTrackingContext", () => ({
-  createTrackingContext: () => ({
-    handlers: mockState.handlers,
-    identity: mockState.identity,
-    authorize: mockState.authorize,
-    json: (value: unknown, init?: ResponseInit) =>
-      Response.json(value, init),
-    error: (caught: unknown) => {
-      const error =
-        caught && typeof caught === "object"
-          ? (caught as { code?: unknown; message?: unknown; status?: unknown })
-          : {};
-      return Response.json(
-        {
-          error: {
-            code: typeof error.code === "string" ? error.code : "test_error",
-            message:
-              typeof error.message === "string" ? error.message : "failed",
-          },
-        },
-        { status: typeof error.status === "number" ? error.status : 500 },
-      );
-    },
-    readJson: (request: Request) => request.json(),
-  }),
-  singleParam: (value: string | string[] | undefined) =>
-    Array.isArray(value) ? (value[0] ?? "") : (value ?? ""),
-}));
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function context(
   request: Request,
-  params: Record<string, string> = {},
-): EventContext<Record<string, string>, string, unknown> {
+  env: Record<string, unknown> = { VWIKI_RACE_API_URL: canonicalOrigin },
+): EventContext<Record<string, unknown>, string, unknown> {
   return {
     request,
-    env: {},
-    params,
+    env,
+    params: {},
     waitUntil: vi.fn(),
     passThroughOnException: vi.fn(),
     next: vi.fn(),
@@ -65,340 +32,139 @@ function context(
   };
 }
 
-describe("Cloudflare API routes", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockState.authorize.mockResolvedValue({
-      accountId: "acc-claimed",
-      status: "claimed",
-    });
-  });
-
-  it("routes guest identity requests", async () => {
-    mockState.identity.quick.mockResolvedValue({
-      accountId: "acc-guest",
-      displayName: "Casey",
-      token: "jwt-guest",
-      status: "ghost",
-    });
-    const route = await import("./identity/guest");
-
-    const response = await route.onRequestPost(
-      context(
-        new Request("https://example.com/api/identity/guest", {
-          method: "POST",
-          body: JSON.stringify({
-            deviceCredential: "cred-123456789012",
-            displayName: "Casey",
-          }),
-        }),
-      ),
-    );
-
-    await expect(response.json()).resolves.toEqual({
-      accountId: "acc-guest",
-      displayName: "Casey",
-      token: "jwt-guest",
-      status: "ghost",
-    });
-    expect(mockState.identity.quick).toHaveBeenCalledWith({
-      deviceCredential: "cred-123456789012",
-      displayName: "Casey",
-    });
-  });
-
-  it("routes secure guest identity requests", async () => {
-    mockState.identity.secure.mockResolvedValue({
-      accountId: "acc-claimed",
-      displayName: "vijay",
-      token: "jwt-claimed",
-      status: "claimed",
-    });
-    const route = await import("./identity/secure");
-
-    const response = await route.onRequestPost(
-      context(
-        new Request("https://example.com/api/identity/secure", {
-          method: "POST",
-          body: JSON.stringify({
-            deviceCredential: "cred-123456789012",
-            token: "jwt-guest",
-            username: "vijay",
-            password: "secret-pass",
-          }),
-        }),
-      ),
-    );
-
-    await expect(response.json()).resolves.toEqual({
-      accountId: "acc-claimed",
-      displayName: "vijay",
-      token: "jwt-claimed",
-      status: "claimed",
-    });
-    expect(mockState.identity.secure).toHaveBeenCalledWith({
-      deviceCredential: "cred-123456789012",
-      token: "jwt-guest",
-      username: "vijay",
-      password: "secret-pass",
-    });
-  });
-
-  it("routes login identity requests", async () => {
-    mockState.identity.login.mockResolvedValue({
-      accountId: "acc-claimed",
-      displayName: "vijay",
-      token: "jwt-claimed",
-      status: "claimed",
-    });
-    const route = await import("./identity/login");
-
-    const response = await route.onRequestPost(
-      context(
-        new Request("https://example.com/api/identity/login", {
-          method: "POST",
-          body: JSON.stringify({
-            deviceCredential: "cred-123456789012",
-            username: "vijay",
-            password: "secret-pass",
-          }),
-        }),
-      ),
-    );
-
-    await expect(response.json()).resolves.toMatchObject({
-      accountId: "acc-claimed",
-      token: "jwt-claimed",
-    });
-    expect(mockState.identity.login).toHaveBeenCalledWith({
-      deviceCredential: "cred-123456789012",
-      username: "vijay",
-      password: "secret-pass",
-    });
-  });
-
-  it("routes challenge creation requests for authenticated sessions", async () => {
-    mockState.handlers.createChallenge.mockResolvedValue({
-      challenge: {
-        id: "challenge-0002",
-        label: "Challenge #2",
-        mode: "daily",
-        start: { title: "Mars" },
-        target: { title: "Water" },
-        ruleset: "ranked_classic",
-        source: "curated",
-        createdBy: {
-          accountId: "acc-claimed",
-          displayName: "Vijay",
-          identityStatus: "claimed",
+describe("retained Pages API proxy", () => {
+  it("preserves method, path, query, credentials, idempotency key, body, and response", async () => {
+    const fetchImpl = vi.fn(async (request: Request) => new Response(
+      await request.text(),
+      {
+        status: 202,
+        headers: { "Retry-After": "17", "X-Upstream": "worker" },
+      },
+    ));
+    vi.stubGlobal("fetch", fetchImpl);
+    const body = JSON.stringify({ sourceTitle: "Moon" });
+    const request = new Request(
+      "https://pages.example/api/runs/run-1/click?source=stale-client",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer legacy-token",
+          "Content-Type": "application/json",
+          "Idempotency-Key": "legacy-key",
         },
+        body,
       },
-    });
-    const route = await import("./challenges");
-
-    const response = await route.onRequestPost(
-      context(
-        new Request("https://example.com/api/challenges", {
-          method: "POST",
-          headers: { Authorization: "Bearer jwt-claimed" },
-          body: JSON.stringify({
-            startTitle: "Mars",
-            targetTitle: "Water",
-            creatorDisplayName: "Vijay",
-          }),
-        }),
-      ),
     );
 
-    await expect(response.json()).resolves.toMatchObject({
-      challenge: {
-        id: "challenge-0002",
-        label: "Challenge #2",
-      },
-    });
-    expect(mockState.handlers.createChallenge).toHaveBeenCalledWith({
-      startTitle: "Mars",
-      targetTitle: "Water",
-      creatorAccountId: "acc-claimed",
-      creatorDisplayName: "Vijay",
-      creatorIdentityStatus: "claimed",
-    });
-    expect(mockState.authorize).toHaveBeenCalled();
+    const response = await click.onRequestPost(context(request));
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get("Retry-After")).toBe("17");
+    await expect(response.text()).resolves.toBe(body);
+    const forwarded = fetchImpl.mock.calls[0]?.[0] as Request;
+    expect(forwarded.url).toBe(
+      "https://canonical.example/api/runs/run-1/click?source=stale-client",
+    );
+    expect(forwarded.method).toBe("POST");
+    expect(forwarded.headers.get("Authorization")).toBe("Bearer legacy-token");
+    expect(forwarded.headers.get("Idempotency-Key")).toBe("legacy-key");
   });
 
-  it("rejects challenge creation without a VGames session", async () => {
-    mockState.authorize.mockRejectedValue({
-      code: "unauthorized",
-      message: "Sign in before changing VWiki Race.",
-      status: 401,
-    });
-    const route = await import("./challenges");
+  it("forwards every retained stale-client route without D1 bindings", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ proxied: true }));
+    vi.stubGlobal("fetch", fetchImpl);
+    const routes: Array<[
+      (context: EventContext<Record<string, unknown>, string, unknown>) => Response | Promise<Response>,
+      "GET" | "POST",
+      string,
+    ]> = [
+      [challenges.onRequestGet, "GET", "/api/challenges"],
+      [challenges.onRequestPost, "POST", "/api/challenges"],
+      [leaderboard.onRequestGet, "GET", "/api/challenges/challenge-0001/leaderboard"],
+      [guest.onRequestPost, "POST", "/api/identity/guest"],
+      [login.onRequestPost, "POST", "/api/identity/login"],
+      [secure.onRequestPost, "POST", "/api/identity/secure"],
+      [start.onRequestPost, "POST", "/api/runs/start"],
+      [click.onRequestPost, "POST", "/api/runs/run-1/click"],
+      [complete.onRequestPost, "POST", "/api/runs/run-1/complete"],
+      [abandon.onRequestPost, "POST", "/api/runs/run-1/abandon"],
+      [path.onRequestGet, "GET", "/api/runs/run-1/path"],
+    ];
 
-    const response = await route.onRequestPost(
-      context(
-        new Request("https://example.com/api/challenges", {
-          method: "POST",
-          body: JSON.stringify({ startTitle: "Mars", targetTitle: "Water" }),
-        }),
-      ),
-    );
-
-    expect(response.status).toBe(401);
-    expect(mockState.handlers.createChallenge).not.toHaveBeenCalled();
+    for (const [handler, method, route] of routes) {
+      const response = await handler(context(new Request(`https://pages.example${route}`, {
+        method,
+        body: method === "POST" ? "{}" : undefined,
+      })));
+      expect(response.status, `${method} ${route}`).toBe(200);
+    }
+    expect(fetchImpl).toHaveBeenCalledTimes(routes.length);
   });
 
-  it("routes run starts with the authorized VGames account", async () => {
-    mockState.handlers.startRun.mockResolvedValue({
-      run: {
-        id: "run-1",
-        challengeId: "challenge-0001",
-        accountId: "acc-claimed",
-        status: "active",
-        startTitle: "Moon",
-        targetTitle: "Gravity",
-        clickCount: 0,
-        startedAt: "2026-07-14T00:00:00.000Z",
-      },
-    });
-    const route = await import("./runs/start");
-
-    const response = await route.onRequestPost(
-      context(
-        new Request("https://example.com/api/runs/start", {
-          method: "POST",
-          headers: { Authorization: "Bearer jwt-claimed" },
-          body: JSON.stringify({
-            challengeId: "challenge-0001",
-            publicName: "Vijay",
-          }),
-        }),
-      ),
-    );
-
-    await expect(response.json()).resolves.toMatchObject({
-      run: { id: "run-1", accountId: "acc-claimed" },
-    });
-    expect(mockState.handlers.startRun).toHaveBeenCalledWith({
-      challengeId: "challenge-0001",
-      accountId: "acc-claimed",
-      publicName: "Vijay",
-      identityStatus: "claimed",
-    });
-  });
-
-  it("routes run click requests with the authorized VGames account", async () => {
-    mockState.handlers.recordClick.mockResolvedValue({ clickCount: 1 });
-    const route = await import("./runs/[runId]/click");
-
-    const response = await route.onRequestPost(
-      context(
-        new Request("https://example.com/api/runs/run-1/click", {
-          method: "POST",
-          headers: { Authorization: "Bearer jwt-claimed" },
-          body: JSON.stringify({
-            sourceTitle: "Moon",
-            clickedAnchorText: "orbit",
-            requestedTitle: "Orbit",
-            destinationTitle: "Orbit",
-          }),
-        }),
-        { runId: "run-1" },
-      ),
-    );
-
-    await expect(response.json()).resolves.toEqual({ clickCount: 1 });
-    expect(mockState.handlers.recordClick).toHaveBeenCalledWith(
-      "run-1",
-      "acc-claimed",
+  it("rejects declared and observed bodies above 16 KiB before forwarding", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ bypassed: true }));
+    vi.stubGlobal("fetch", fetchImpl);
+    const declared = await challenges.onRequestPost(context(new Request(
+      "https://pages.example/api/challenges",
       {
-        sourceTitle: "Moon",
-        clickedAnchorText: "orbit",
-        requestedTitle: "Orbit",
-        destinationTitle: "Orbit",
+        method: "POST",
+        headers: { "Content-Length": String(16 * 1024 + 1) },
+        body: "{}",
       },
-    );
+    )));
+    expect(declared.status).toBe(413);
+    await expect(declared.json()).resolves.toMatchObject({
+      error: { code: "body_too_large" },
+    });
+
+    const observed = await challenges.onRequestPost(context(new Request(
+      "https://pages.example/api/challenges",
+      { method: "POST", body: "x".repeat(16 * 1024 + 1) },
+    )));
+    expect(observed.status).toBe(413);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("routes run completion with the authorized VGames account", async () => {
-    mockState.handlers.completeRun.mockResolvedValue({
-      leaderboardRow: {
-        rank: 1,
-        runId: "run-1",
-        challengeId: "challenge-0001",
-        accountId: "acc-claimed",
-        displayName: "Vijay",
-        elapsedMs: 1500,
-        clickCount: 1,
-        completedAt: "2026-07-14T00:00:01.500Z",
-        pathPreview: [],
-      },
-    });
-    const route = await import("./runs/[runId]/complete");
-
-    const response = await route.onRequestPost(
-      context(
-        new Request("https://example.com/api/runs/run-1/complete", {
-          method: "POST",
-          headers: { Authorization: "Bearer jwt-claimed" },
-          body: JSON.stringify({
-            finalTitle: "Gravity",
-            clientTimestampMs: 1784000001500,
-          }),
-        }),
-        { runId: "run-1" },
+  it("passes canonical rate and path policy errors through unchanged", async () => {
+    const responses = [
+      Response.json(
+        { error: { code: "click_rate_limited", message: "Slow down." } },
+        { status: 429, headers: { "Retry-After": "60" } },
       ),
-    );
+      Response.json(
+        { error: { code: "run_path_not_found", message: "Not found." } },
+        { status: 404, headers: { "Cache-Control": "no-store" } },
+      ),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => responses.shift() as Response));
 
+    const rate = await click.onRequestPost(context(new Request(
+      "https://pages.example/api/runs/run-1/click",
+      { method: "POST", body: "{}" },
+    )));
+    expect(rate.status).toBe(429);
+    expect(rate.headers.get("Retry-After")).toBe("60");
+
+    const hiddenPath = await path.onRequestGet(context(new Request(
+      "https://pages.example/api/runs/run-1/path",
+    )));
+    expect(hiddenPath.status).toBe(404);
+    await expect(hiddenPath.json()).resolves.toMatchObject({
+      error: { code: "run_path_not_found" },
+    });
+  });
+
+  it("fails closed when the canonical Worker origin is missing", async () => {
+    const fetchImpl = vi.fn();
+    vi.stubGlobal("fetch", fetchImpl);
+    const response = await challenges.onRequestGet(context(
+      new Request("https://pages.example/api/challenges"),
+      {},
+    ));
+    expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
-      leaderboardRow: { runId: "run-1", accountId: "acc-claimed" },
+      error: { code: "canonical_api_unconfigured" },
     });
-    expect(mockState.handlers.completeRun).toHaveBeenCalledWith(
-      "run-1",
-      "acc-claimed",
-      {
-        finalTitle: "Gravity",
-        clientTimestampMs: 1784000001500,
-      },
-    );
-  });
-
-  it("routes run abandonment with the authorized VGames account", async () => {
-    mockState.handlers.abandonRun.mockResolvedValue({ status: "abandoned" });
-    const route = await import("./runs/[runId]/abandon");
-
-    const response = await route.onRequestPost(
-      context(
-        new Request("https://example.com/api/runs/run-1/abandon", {
-          method: "POST",
-          headers: { Authorization: "Bearer jwt-claimed" },
-        }),
-        { runId: "run-1" },
-      ),
-    );
-
-    await expect(response.json()).resolves.toEqual({ status: "abandoned" });
-    expect(mockState.handlers.abandonRun).toHaveBeenCalledWith(
-      "run-1",
-      "acc-claimed",
-    );
-  });
-
-  it("routes challenge leaderboard reads with the challenge id", async () => {
-    mockState.handlers.listLeaderboard.mockResolvedValue({ leaderboard: [] });
-    const route = await import("./challenges/[challengeId]/leaderboard");
-
-    const response = await route.onRequestGet(
-      context(
-        new Request(
-          "https://example.com/api/challenges/challenge-0001/leaderboard",
-        ),
-        { challengeId: "challenge-0001" },
-      ),
-    );
-
-    await expect(response.json()).resolves.toEqual({ leaderboard: [] });
-    expect(mockState.handlers.listLeaderboard).toHaveBeenCalledWith(
-      "challenge-0001",
-    );
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

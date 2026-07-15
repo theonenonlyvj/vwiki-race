@@ -113,7 +113,13 @@ describe("server VGames identity client", () => {
 
   it("introspects VGames tokens", async () => {
     const fetchImpl = vi.fn(async () =>
-      Response.json({ valid: true, accountId: "acc-1", status: "claimed" }),
+      Response.json({
+        valid: true,
+        accountId: "acc-1",
+        status: "claimed",
+        displayName: "Casey",
+        aliases: ["old-casey"],
+      }),
     );
     const client = createVGamesIdentityClient({
       baseUrl: "https://vgames.example",
@@ -124,6 +130,44 @@ describe("server VGames identity client", () => {
       valid: true,
       accountId: "acc-1",
       status: "claimed",
+      displayName: "Casey",
+      aliases: ["old-casey"],
+    });
+  });
+
+  it("rejects merged or malformed introspection receipts", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          valid: true,
+          accountId: "acc-1",
+          status: "merged",
+          displayName: "Casey",
+          aliases: [],
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          valid: true,
+          accountId: "acc-1",
+          status: "claimed",
+          displayName: "   ",
+          aliases: [42],
+        }),
+      );
+    const client = createVGamesIdentityClient({
+      baseUrl: "https://vgames.example",
+      fetchImpl,
+    });
+
+    await expect(client.introspect("jwt-1")).rejects.toMatchObject({
+      code: "invalid_vgames_identity_response",
+      status: 502,
+    });
+    await expect(client.introspect("jwt-2")).rejects.toMatchObject({
+      code: "invalid_vgames_identity_response",
+      status: 502,
     });
   });
 

@@ -3,6 +3,7 @@ export class ApiError extends Error {
     public readonly code: string,
     message: string,
     public readonly status = 400,
+    public readonly retryAfterSeconds: number | null = null,
   ) {
     super(message);
   }
