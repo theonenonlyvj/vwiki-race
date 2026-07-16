@@ -1,5 +1,8 @@
 # Target Preview Design
 
+> Historical pre-start design. The current game also retains the already-loaded,
+> link-free blurb in a compact in-game target disclosure.
+
 Date: 2026-07-15
 Status: approved for v0 release
 

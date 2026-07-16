@@ -223,6 +223,70 @@ describe("daily challenge D1 jobs", () => {
     ).first()).resolves.toEqual({ id: "challenge-0004", daily_date: "2026-07-15" });
   });
 
+  it("uses the hourly retry trigger only to claim an existing due job", async () => {
+    const clock = { now: "2026-07-15T10:00:00.000Z" };
+    const repository = createD1TrackingRepository({
+      db: env.VWIKI_RACE_DB,
+      now: () => new Date(clock.now),
+      randomId: (() => { let index = 0; return () => `retry-${++index}`; })(),
+    });
+    await repository.ensureDailyChallengeJob("2026-07-15");
+    const first = await repository.claimDueDailyChallengeJob();
+    await repository.failDailyChallengeJob(first!, "daily_candidate_unavailable");
+    clock.now = "2026-07-15T11:17:00.000Z";
+    const findCandidate = vi.fn(async () => ({
+      startTitle: "Retry start",
+      startPageId: 501,
+      targetTitle: "Retry target",
+      targetPageId: 502,
+    }));
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: {},
+        identity: {},
+        runProtocol: repository,
+        authorize: async () => { throw new Error("not used"); },
+      } as unknown as WorkerTracking),
+      createDailyCandidateSource: () => ({ findCandidate }),
+      now: () => new Date(clock.now),
+    });
+
+    await worker.scheduled(createScheduledController({
+      scheduledTime: new Date(clock.now),
+      cron: "17 * * * *",
+    }), env as unknown as WorkerEnv);
+
+    expect(findCandidate).toHaveBeenCalledTimes(1);
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT daily_date FROM challenges WHERE start_title = 'Retry start'",
+    ).first()).resolves.toEqual({ daily_date: "2026-07-15" });
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT count(*) count FROM daily_challenge_jobs",
+    ).first()).resolves.toEqual({ count: 1 });
+  });
+
+  it("does not contact Wikipedia when the hourly retry trigger has no due job", async () => {
+    const findCandidate = vi.fn();
+    const repository = createD1TrackingRepository({ db: env.VWIKI_RACE_DB });
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: {},
+        identity: {},
+        runProtocol: repository,
+        authorize: async () => { throw new Error("not used"); },
+      } as unknown as WorkerTracking),
+      createDailyCandidateSource: () => ({ findCandidate }),
+      now: () => new Date("2026-07-15T11:17:00.000Z"),
+    });
+
+    await worker.scheduled(createScheduledController({
+      scheduledTime: new Date("2026-07-15T11:17:00.000Z"),
+      cron: "17 * * * *",
+    }), env as unknown as WorkerEnv);
+
+    expect(findCandidate).not.toHaveBeenCalled();
+  });
+
   it("leases one oldest due job, reclaims an expired lease, and accepts the next global number", async () => {
     const clock = { now: "2026-07-15T01:00:00.000Z" };
     const repository = createD1TrackingRepository({

@@ -93,6 +93,8 @@ export function useRaceController(options: RaceControllerOptions) {
   const stateRef = useRef(state);
   const requestGeneration = useRef(0);
   const operationAbort = useRef<AbortController | null>(null);
+  const prewarmAbort = useRef<AbortController | null>(null);
+  const prewarmTitle = useRef<string | null>(null);
   const mounted = useRef(false);
   stateRef.current = state;
   const timer = useElapsedDecisionTime({
@@ -107,6 +109,9 @@ export function useRaceController(options: RaceControllerOptions) {
       requestGeneration.current += 1;
       operationAbort.current?.abort();
       operationAbort.current = null;
+      prewarmAbort.current?.abort();
+      prewarmAbort.current = null;
+      prewarmTitle.current = null;
       options.gateway.clear();
     };
   }, [options.gateway]);
@@ -126,6 +131,9 @@ export function useRaceController(options: RaceControllerOptions) {
   const start = useCallback(async (challenge: Challenge, token: string): Promise<StartOutcome> => {
     if (!["idle", "completed"].includes(stateRef.current.phase)) return { status: "ignored" };
     const operation = beginOperation();
+    prewarmAbort.current?.abort();
+    prewarmAbort.current = null;
+    prewarmTitle.current = null;
     options.gateway.clear();
     commitState({ ...initialState, phase: "preparing", challenge });
     try {
@@ -163,7 +171,9 @@ export function useRaceController(options: RaceControllerOptions) {
             ...initialState,
             challenge,
             recoveryRun: activeRun,
-            error: "End the old run before starting this challenge.",
+            error: activeRun?.protocolVersion === 2
+              ? "Resume or end the active run before starting this challenge."
+              : "End the old run before starting this challenge.",
           });
           return { status: "recovery-required", challengeId: challenge.id, run: activeRun };
         } catch (recoveryError) {
@@ -261,10 +271,14 @@ export function useRaceController(options: RaceControllerOptions) {
       error: null,
     });
     try {
-      const destination = await options.gateway.getArticle(title, {
+      const destinationRequest = options.gateway.getArticle(title, {
         ruleset: snapshot.challenge.ruleset,
         signal: operation.controller.signal,
       });
+      prewarmAbort.current?.abort();
+      prewarmAbort.current = null;
+      prewarmTitle.current = null;
+      const destination = await destinationRequest;
       if (!isCurrent(operation, requestGeneration, mounted)) return { status: "stale" };
       const pending: PendingClick = {
         runId: snapshot.run.id,
@@ -316,8 +330,21 @@ export function useRaceController(options: RaceControllerOptions) {
     ) {
       return;
     }
+    const normalizedTitle = normalizeTitle(title);
+    if (
+      prewarmTitle.current === normalizedTitle &&
+      prewarmAbort.current &&
+      !prewarmAbort.current.signal.aborted
+    ) {
+      return;
+    }
+    prewarmAbort.current?.abort();
+    const controller = new AbortController();
+    prewarmAbort.current = controller;
+    prewarmTitle.current = normalizedTitle;
     void options.gateway.getArticle(title, {
       ruleset: snapshot.challenge.ruleset,
+      signal: controller.signal,
     }).catch(() => undefined);
   }, [options.gateway]);
 
@@ -473,6 +500,9 @@ export function useRaceController(options: RaceControllerOptions) {
     if (stateRef.current.phase !== "completed") return false;
     operationAbort.current?.abort();
     operationAbort.current = null;
+    prewarmAbort.current?.abort();
+    prewarmAbort.current = null;
+    prewarmTitle.current = null;
     requestGeneration.current += 1;
     options.gateway.clear();
     timer.reset(0);

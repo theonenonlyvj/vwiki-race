@@ -7,16 +7,16 @@ Every run is server-tracked from game 0 with VGames identity and a VWiki
 Race-owned Cloudflare D1 database. The game is challenge-leaderboard based; it
 does not need VGames realtime rooms or the card-game layer.
 
-## Current Docs
+## Operational Docs
 
 - [Game Principles and Rules](docs/game-principles-and-rules.md)
-- [Server-Tracked V0 Spec](docs/superpowers/specs/2026-07-14-server-tracked-v0-design.md)
-- [VGames Identity V0 Spec](docs/superpowers/specs/2026-07-14-vgames-identity-v0-design.md)
-- [VGames Identity V0 Plan](docs/superpowers/plans/2026-07-14-vgames-identity-v0.md)
 - [Cloudflare Deployment Handoff](docs/handoff/cloudflare-deployment-handoff.md)
+- [2026-07-16 Friend Release Handoff](docs/handoff/2026-07-16-friend-release-handoff.md)
 - [Backlog](docs/backlog.md)
-- [Daily Challenge Design](docs/superpowers/specs/2026-07-15-daily-challenge-design.md)
-- [Target Preview Design](docs/superpowers/specs/2026-07-15-target-preview-design.md)
+
+Dated files under `docs/superpowers/` are historical design records. Preserve
+them for provenance, but do not execute one without reconciling it against the
+current source, configuration, and operational handoffs above.
 
 ## V0 Product Shape
 
@@ -26,8 +26,9 @@ does not need VGames realtime rooms or the card-game layer.
 - Manual and daily challenges share one global transactional number sequence.
   If `#15` exists, the next accepted challenge is `#16`, regardless of date or
   creator.
-- A minute-7 hourly cron eventually creates one random, validated challenge per
-  UTC date. The date is provenance, never the challenge number.
+- A DST-safe 5:00 AM `America/Chicago` job eventually creates one random,
+  validated challenge per Central date. The date is provenance, never the
+  challenge number.
 - The unique VGames name/handle is the canonical public identity.
 - Guests can play through a VGames ghost account and claim their stats later.
 - The identity prompt appears only before Start or Create. Returning ghosts are
@@ -36,15 +37,21 @@ does not need VGames realtime rooms or the card-game layer.
   through the canonical Cloudflare Worker to D1, not localStorage.
 - The timer measures accepted player decision time. Wikipedia fetch and server
   synchronization latency are excluded.
-- Leaderboards rank by fastest decision time, then fewest clicks, then earliest
-  accepted completion. Paths load only when disclosed.
+- Every terminal run remains in D1. Public leaderboards show every eligible
+  finish plus abandons with at least one accepted click. Finishes rank by
+  fastest decision time, then fewest clicks, then earliest accepted completion;
+  meaningful abandons follow as `DNF`, and later attempts are marked
+  `Repeat run`. Zero-click abandons remain in account statistics. Paths load
+  only when disclosed.
 - Each click records source title, anchor text, requested title, resolved
   destination, page/revision identity, cumulative decision time, and timestamps.
-- The app renders a sanitized, attributed Wikipedia revision. Only displayed
-  game links can become accepted moves.
+- The official client submits only links rendered by the sanitized, attributed
+  game surface. Friend v0 does not yet prove server-side that a submitted
+  destination was an allowed edge in the recorded source revision.
 - Before a run starts, the selected target shows a short, read-only Wikipedia
   lead. Preview failure never blocks Start, and preview links cannot become
-  game moves.
+  game moves. An already-loaded link-free blurb remains available from a compact
+  target disclosure during play.
 - Challenge links use `/?challenge=challenge-000N` and remain stable.
 
 ## Local Development
@@ -61,13 +68,7 @@ Run tests:
 npm test
 ```
 
-Run the frontend only (API calls remain relative):
-
-```bash
-npm run dev -- --host 127.0.0.1
-```
-
-For a local Worker on loopback, set a development-only origin such as:
+Run the frontend against a local Worker:
 
 ```bash
 VITE_VWIKI_RACE_API_URL=http://127.0.0.1:8787 npm run dev -- --host 127.0.0.1
@@ -93,6 +94,7 @@ The canonical Worker needs:
 - `ALLOWED_ORIGINS`
 - D1 binding `VWIKI_RACE_DB`
 - rate-limit bindings `CLICK_RATE_LIMITER` and `ACCOUNT_READ_RATE_LIMITER`
+- rate-limit binding `CHALLENGE_CREATE_RATE_LIMITER`
 
 ## Identity And Data
 
@@ -109,7 +111,10 @@ prototype repositories were intentionally replaced by VGames sessions and D1.
 - `vwikirace-api` is the only canonical API and the only process with D1.
 - Retained Pages Functions are bounded compatibility proxies for old `/api/*`
   clients; they do not bind D1 or duplicate authorization logic.
-- The API Worker cron is `7 * * * *` in UTC.
+- The API Worker has `0 10 * * *` and `0 11 * * *` UTC triggers for 5:00 AM
+  Central plus `17 * * * *` for due-job retries. Only the 5:00 AM event may
+  create a new date; the retry trigger never contacts Wikipedia without a due
+  D1 job.
 
 Pages build settings:
 

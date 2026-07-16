@@ -3,7 +3,7 @@ main = "src/server/worker.ts"
 compatibility_date = "2026-07-08"
 
 [triggers]
-crons = ["0 10 * * *", "0 11 * * *"]
+crons = ["0 10 * * *", "0 11 * * *", "17 * * * *"]
 
 [[d1_databases]]
 binding = "VWIKI_RACE_DB"
@@ -27,4 +27,9 @@ simple = { limit = 180, period = 60 }
 [[ratelimits]]
 name = "ACCOUNT_READ_RATE_LIMITER"
 namespace_id = "51002"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "CHALLENGE_CREATE_RATE_LIMITER"
+namespace_id = "51003"
 simple = { limit = 10, period = 60 }

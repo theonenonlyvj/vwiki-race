@@ -608,11 +608,17 @@ describe("atomic D1 protocol-2 runs", () => {
       elapsedMs: 3000,
       completedAt: "2026-07-14T01:00:03.000Z",
     });
+    await insertCompletedV2({
+      id: "faster-repeat",
+      accountId: "account-faster",
+      elapsedMs: 3500,
+      completedAt: "2026-07-14T01:00:03.500Z",
+    });
 
     const replay = await repository.recordClickV2(account, targetClick);
     expect(replay.transition).toEqual(first.transition);
     expect(first.leaderboardContext).toEqual({ isPersonalBest: true, rank: 1 });
-    expect(replay.leaderboardContext).toEqual({ isPersonalBest: true, rank: 2 });
+    expect(replay.leaderboardContext).toEqual({ isPersonalBest: true, rank: 3 });
   });
 
   it("spans active-run uniqueness across protocols and forbids v2 clicks on protocol 1", async () => {
@@ -797,6 +803,7 @@ describe("protocol-1 compatibility adapters", () => {
         VGAMES_URL: "https://vgames.example",
         CLICK_RATE_LIMITER: { limit: async () => ({ success: true }) },
         ACCOUNT_READ_RATE_LIMITER: { limit: async () => ({ success: true }) },
+        CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
       },
     );
 
@@ -1085,6 +1092,7 @@ describe("Task 4 D1 projections", () => {
       VGAMES_URL: "https://vgames.example",
       CLICK_RATE_LIMITER: { limit: async () => ({ success: true }) },
       ACCOUNT_READ_RATE_LIMITER: { limit: async () => ({ success: true }) },
+      CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
     };
 
     const first = await worker.fetch(request("Browser Impostor"), workerEnv);
@@ -1530,6 +1538,7 @@ describe("Task 4 D1 projections", () => {
       VGAMES_URL: "https://vgames.example",
       CLICK_RATE_LIMITER: { limit: async () => ({ success: true }) },
       ACCOUNT_READ_RATE_LIMITER: { limit: async () => ({ success: true }) },
+      CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
     });
     expect(legacyResponse.status).toBe(429);
     expect(legacyResponse.headers.get("Retry-After")).toBe("90");
@@ -1635,6 +1644,35 @@ describe("Task 4 D1 projections", () => {
     });
     await expect(repository.getPublicRunPath("same-dnf")).resolves.toHaveLength(2);
     expect(rows.some((row) => row.runId === "zero-click-dnf")).toBe(false);
+  });
+
+  it("derives repeat attempts across VGames account aliases", async () => {
+    await insertCompletedV2({
+      id: "alias-first",
+      accountId: "account-before-claim",
+      elapsedMs: 3_000,
+      completedAt: "2026-07-14T00:59:03.000Z",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      `UPDATE runs SET started_at='2026-07-14T00:59:00.000Z',
+         created_at='2026-07-14T00:59:00.000Z' WHERE id='alias-first'`,
+    ).run();
+    const clock = { now: "2026-07-14T01:00:00.000Z" };
+    const { repository } = fixture(clock);
+    const claimed = { ...account, aliases: ["account-before-claim"] };
+    await repository.startRunV2(claimed, start);
+    clock.now = "2026-07-14T01:00:04.200Z";
+    await repository.recordClickV2(claimed, targetClick);
+
+    const rows = await repository.listLeaderboard("challenge-0001");
+    expect(rows.map((row) => ({
+      id: row.runId,
+      accountId: row.accountId,
+      repeat: row.isRepeatRun,
+    }))).toEqual([
+      { id: "alias-first", accountId: account.accountId, repeat: false },
+      { id: "run-1", accountId: account.accountId, repeat: true },
+    ]);
   });
 
   it("keeps completed protocol-1 runs ranked alongside verified protocol-2 runs", async () => {
@@ -1763,6 +1801,7 @@ describe("Task 4 D1 projections", () => {
       VGAMES_URL: "https://vgames.example",
       CLICK_RATE_LIMITER: { limit: async () => ({ success: true }) },
       ACCOUNT_READ_RATE_LIMITER: { limit: accountReadLimit },
+      CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
     };
 
     const unauthorized = await worker.fetch(new Request(route), workerEnv);
@@ -1792,6 +1831,7 @@ describe("Task 4 D1 projections", () => {
     }), {
       ...workerEnv,
       ACCOUNT_READ_RATE_LIMITER: { limit: async () => ({ success: false }) },
+      CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
     });
     expect(limited.status).toBe(429);
     expect(limited.headers.get("Retry-After")).toBe("60");
@@ -2154,6 +2194,7 @@ function workerEnv() {
     VGAMES_URL: "https://vgames.example",
     CLICK_RATE_LIMITER: { limit: async () => ({ success: true }) },
     ACCOUNT_READ_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
   };
 }
 

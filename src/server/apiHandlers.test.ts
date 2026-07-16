@@ -285,6 +285,7 @@ describe("Worker API route versions", () => {
       ALLOWED_ORIGINS: "https://vwikirace.pages.dev,https://preview.example",
       CLICK_RATE_LIMITER: { limit: vi.fn(async () => ({ success: true })) },
       ACCOUNT_READ_RATE_LIMITER: { limit: vi.fn(async () => ({ success: true })) },
+      CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
     };
 
     const allowedPreflight = await worker.fetch(
@@ -360,6 +361,12 @@ describe("Worker API route versions", () => {
         env,
       );
       expect(response.status, `${method} ${path}`).not.toBe(404);
+      if (method === "GET" && path.endsWith("/leaderboard")) {
+        expect(response.headers.get("Cache-Control")).toBe("no-store");
+      }
+      if (method === "GET" && path === "/api/v2/challenges") {
+        expect(response.headers.get("Cache-Control")).toBe("public, max-age=60");
+      }
     }
 
     expect(tracking.handlers.createChallengeV2).toHaveBeenCalledWith(
@@ -386,6 +393,7 @@ describe("Worker API route versions", () => {
       VGAMES_URL: "https://vgames.example",
       CLICK_RATE_LIMITER: { limit },
       ACCOUNT_READ_RATE_LIMITER: { limit: vi.fn(async () => ({ success: true })) },
+      CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
     };
 
     const created = await worker.fetch(new Request("https://worker.example/api/challenges", {
@@ -457,6 +465,21 @@ describe("Worker API route versions", () => {
       env,
     );
     expect(stats.status).toBe(503);
+
+    const challenge = await worker.fetch(new Request(
+      "https://worker.example/api/v2/challenges",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer test",
+          "Content-Type": "application/json",
+          "Idempotency-Key": "missing-limit",
+        },
+        body: JSON.stringify({ startTitle: "Moon", targetTitle: "Gravity" }),
+      },
+    ), env);
+    expect(challenge.status).toBe(503);
+    expect(tracking.handlers.createChallengeV2).not.toHaveBeenCalled();
   });
 
   it("returns typed limiter rejections with Retry-After on legacy and v2 routes", async () => {
@@ -464,11 +487,13 @@ describe("Worker API route versions", () => {
     const worker = createWorker({ createTracking: () => tracking });
     const clickLimit = vi.fn(async () => ({ success: false }));
     const readLimit = vi.fn(async () => ({ success: false }));
+    const createLimit = vi.fn(async () => ({ success: false }));
     const env = {
       VWIKI_RACE_DB: {} as D1Database,
       VGAMES_URL: "https://vgames.example",
       CLICK_RATE_LIMITER: { limit: clickLimit },
       ACCOUNT_READ_RATE_LIMITER: { limit: readLimit },
+      CHALLENGE_CREATE_RATE_LIMITER: { limit: createLimit },
     };
 
     const clickResponse = await worker.fetch(new Request(
@@ -497,6 +522,26 @@ describe("Worker API route versions", () => {
     ), env);
     expect(statsResponse.status).toBe(429);
     expect(statsResponse.headers.get("Retry-After")).toBe("60");
+
+    const challengeResponse = await worker.fetch(new Request(
+      "https://worker.example/api/v2/challenges",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer test",
+          "Content-Type": "application/json",
+          "Idempotency-Key": "rate-limited-create",
+        },
+        body: JSON.stringify({ startTitle: "Moon", targetTitle: "Gravity" }),
+      },
+    ), env);
+    expect(challengeResponse.status).toBe(429);
+    expect(challengeResponse.headers.get("Retry-After")).toBe("60");
+    await expect(challengeResponse.json()).resolves.toMatchObject({
+      error: { code: "challenge_create_rate_limited" },
+    });
+    expect(createLimit).toHaveBeenCalledWith({ key: "acc-1" });
+    expect(tracking.handlers.createChallengeV2).not.toHaveBeenCalled();
     await expect(statsResponse.json()).resolves.toMatchObject({
       error: { code: "account_read_rate_limited" },
     });
@@ -518,6 +563,7 @@ describe("Worker API route versions", () => {
       VGAMES_URL: "https://vgames.example",
       CLICK_RATE_LIMITER: { limit: vi.fn(async () => ({ success: true })) },
       ACCOUNT_READ_RATE_LIMITER: { limit: vi.fn(async () => ({ success: true })) },
+      CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
     };
     const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
       worker.fetch(new Request(`https://worker.example${path}`, {
@@ -574,6 +620,7 @@ describe("Worker API route versions", () => {
         VGAMES_URL: "https://vgames.example",
         CLICK_RATE_LIMITER: { limit: vi.fn(async () => ({ success: true })) },
         ACCOUNT_READ_RATE_LIMITER: { limit: vi.fn(async () => ({ success: true })) },
+      CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
       };
       const post = (route: string, body: unknown) => worker.fetch(new Request(
         `https://worker.example${prefix}/identity/${route}`,
@@ -639,6 +686,7 @@ describe("Worker API route versions", () => {
       VGAMES_URL: "https://vgames.example",
       CLICK_RATE_LIMITER: { limit: vi.fn(async () => ({ success: true })) },
       ACCOUNT_READ_RATE_LIMITER: { limit: vi.fn(async () => ({ success: true })) },
+      CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
     };
     const body = {
       clientEventId: "00000000-0000-4000-8000-000000000001",
@@ -680,6 +728,7 @@ describe("Worker API route versions", () => {
       VGAMES_URL: "https://vgames.example",
       CLICK_RATE_LIMITER: { limit: vi.fn(async () => ({ success: true })) },
       ACCOUNT_READ_RATE_LIMITER: { limit: vi.fn(async () => ({ success: true })) },
+      CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
     };
     const request = (value: unknown) => new Request(
       "https://worker.example/api/v2/runs/run-1/abandon",

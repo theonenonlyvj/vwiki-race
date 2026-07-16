@@ -25,6 +25,7 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
   CLICK_RATE_LIMITER: RateLimiter;
   ACCOUNT_READ_RATE_LIMITER: RateLimiter;
+  CHALLENGE_CREATE_RATE_LIMITER: RateLimiter;
 }
 
 type AuthorizedVGamesAccount = AuthorizedAccount;
@@ -85,7 +86,7 @@ export function createWorker(options: WorkerOptions = {}) {
     },
 
     async scheduled(
-      controller: Pick<ScheduledController, "scheduledTime">,
+      controller: Pick<ScheduledController, "scheduledTime" | "cron">,
       env: Env,
     ): Promise<void> {
       const scheduledAt = new Date(controller.scheduledTime);
@@ -96,7 +97,8 @@ export function createWorker(options: WorkerOptions = {}) {
         return;
       }
       const dailyDate = centralDailyDateAtFive(scheduledAt);
-      if (!dailyDate) {
+      const isRetryTrigger = controller.cron === "17 * * * *";
+      if (!dailyDate && !isRetryTrigger) {
         logDailyJob("outside_central_window", {
           scheduledAt: scheduledAt.toISOString(),
         });
@@ -105,10 +107,12 @@ export function createWorker(options: WorkerOptions = {}) {
 
       const tracking = buildTracking(env);
       const repository = protocol(tracking);
-      await repository.ensureDailyChallengeJob(dailyDate);
+      if (dailyDate) {
+        await repository.ensureDailyChallengeJob(dailyDate);
+      }
       const job = await repository.claimDueDailyChallengeJob();
       if (!job) {
-        logDailyJob("no_due_job", { dailyDate });
+        logDailyJob("no_due_job", { dailyDate: dailyDate ?? "retry" });
         return;
       }
 
@@ -153,6 +157,7 @@ async function dispatchV2(
   }
   if (request.method === "POST" && url.pathname === "/api/v2/challenges") {
     const account = await tracking.authorize(request);
+    await enforceChallengeCreateRateLimit(env, account.accountId);
     const input = challengeInput(await readJson(request));
     return json(
       await tracking.handlers.createChallengeV2(account, input, requireIdempotencyKey(request)),
@@ -210,7 +215,7 @@ async function dispatchV2(
   if (request.method === "GET" && leaderboardMatch?.[1]) {
     return json(
       await tracking.handlers.listLeaderboard(decodeURIComponent(leaderboardMatch[1])),
-      { headers: publicCacheHeaders() },
+      { headers: noStoreHeaders() },
       corsHeaders,
     );
   }
@@ -281,6 +286,7 @@ async function dispatchLegacy(
   }
   if (request.method === "POST" && url.pathname === "/api/challenges") {
     const account = await tracking.authorize(request);
+    await enforceChallengeCreateRateLimit(env, account.accountId);
     const input = challengeInput(await readJson(request));
     return json(
       await tracking.handlers.createChallengeV2(
@@ -343,7 +349,7 @@ async function dispatchLegacy(
   if (request.method === "GET" && leaderboardMatch?.[1]) {
     return json(
       await tracking.handlers.listLeaderboard(decodeURIComponent(leaderboardMatch[1])),
-      { headers: publicCacheHeaders() },
+      { headers: noStoreHeaders() },
       corsHeaders,
     );
   }
@@ -665,6 +671,28 @@ async function enforceAccountReadRateLimit(
   }
 }
 
+async function enforceChallengeCreateRateLimit(
+  env: Env,
+  accountId: string,
+): Promise<void> {
+  if (!env.CHALLENGE_CREATE_RATE_LIMITER) {
+    throw new ApiError(
+      "rate_limiter_unavailable",
+      "Challenge creation rate limiting is temporarily unavailable.",
+      503,
+    );
+  }
+  const result = await env.CHALLENGE_CREATE_RATE_LIMITER.limit({ key: accountId });
+  if (!result.success) {
+    throw new ApiError(
+      "challenge_create_rate_limited",
+      "Too many challenge validation requests. Try again shortly.",
+      429,
+      60,
+    );
+  }
+}
+
 function abandonInput(value: unknown): { recoveryProtocolVersion?: 1 } {
   const body = requireObject(value);
   if (
@@ -791,6 +819,10 @@ function legacyCompleteInput(value: unknown): {
 
 function publicCacheHeaders(): HeadersInit {
   return { "Cache-Control": "public, max-age=60" };
+}
+
+function noStoreHeaders(): HeadersInit {
+  return { "Cache-Control": "no-store" };
 }
 
 function logRequest(

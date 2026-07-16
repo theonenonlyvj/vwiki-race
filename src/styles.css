@@ -214,8 +214,9 @@ ol {
 
 .icon-button {
   display: grid;
-  width: 38px;
-  min-width: 38px;
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
   place-items: center;
   padding: 0;
 }
@@ -282,6 +283,7 @@ ol {
 .path-strip,
 .tabbar,
 .error-banner,
+.run-notice,
 .loading-text,
 .content-shell {
   width: min(1320px, 100%);
@@ -641,6 +643,15 @@ h1 {
   color: #ffd7cf;
 }
 
+.run-notice {
+  border: 1px solid rgba(13, 235, 215, 0.5);
+  background: rgba(13, 235, 215, 0.08);
+  color: #dffbfb;
+  margin-top: 10px;
+  padding: 10px 12px;
+  font-family: var(--viota-ui-font);
+}
+
 .loading-text {
   border: 1px solid var(--line);
   background: var(--ink-soft);
@@ -765,7 +776,6 @@ h1 {
   border-bottom: 1px solid #a2a9b1;
   background: #ffffff;
   padding: 14px 18px 10px;
-  scroll-margin-top: 132px;
 }
 
 .article-heading h2 {
@@ -773,6 +783,7 @@ h1 {
   color: #202122;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 2.6rem;
+  scroll-margin-top: 132px;
   font-weight: 400;
   line-height: 1.15;
 }
@@ -1133,6 +1144,9 @@ h1 {
 }
 
 .leaderboard summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
   color: #ffad9f;
   cursor: pointer;
   font-weight: 850;
@@ -1390,6 +1404,34 @@ h1 {
     display: none;
   }
 
+  .header-result .game-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .header-result .run-metrics {
+    grid-column: 2;
+    grid-row: 1;
+    gap: 4px;
+  }
+
+  .header-result .run-metrics div {
+    min-width: 44px;
+    max-width: 62px;
+    padding: 3px 5px;
+  }
+
+  .header-result .run-metrics div:last-child {
+    display: none;
+  }
+
+  .header-result .run-metrics dt {
+    font-size: 0.58rem;
+  }
+
+  .header-result .run-metrics dd {
+    font-size: 0.72rem;
+  }
+
   .header-compact .run-metrics dt {
     font-size: 0.58rem;
   }
@@ -1470,7 +1512,10 @@ h1 {
 
   .article-heading {
     padding: 11px 12px 8px;
-    scroll-margin-top: 160px;
+  }
+
+  .article-heading h2 {
+    scroll-margin-top: 176px;
   }
 
   .article-content {
@@ -1490,12 +1535,17 @@ h1 {
 
   .modal-backdrop {
     align-items: end;
+    height: 100vh;
+    height: 100dvh;
     padding: 10px;
   }
 
-  .identity-dialog {
+  .identity-dialog,
+  .end-run-dialog {
     max-height: calc(100vh - 20px);
+    max-height: calc(100dvh - 20px);
     overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .end-run-dialog {

@@ -138,6 +138,7 @@ export default function App({
   const [runPaths, setRunPaths] = useState<Record<string, ServerPathStep[]>>({});
   const [endConfirmationOpen, setEndConfirmationOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [runNotice, setRunNotice] = useState<string | null>(null);
   const identityTrigger = useRef<HTMLElement | null>(null);
   const endRunTrigger = useRef<HTMLElement | null>(null);
   const requestedPaths = useRef(new Set<string>());
@@ -399,6 +400,7 @@ export default function App({
     syncChallengeUrl(challengeId);
     setActiveTab("play");
     setError(null);
+    setRunNotice(null);
     try {
       await refreshLeaderboard(challengeId);
     } catch (caught) {
@@ -482,6 +484,7 @@ export default function App({
     }
 
     setError(null);
+    setRunNotice(null);
     setActiveTab("play");
     setLeaderboardProjection({ challengeId: challenge.id, rows: [] });
     setSelectedChallengeId(challenge.id);
@@ -705,6 +708,14 @@ export default function App({
     if (outcome.status === "completed") await refreshLeaderboard(outcome.challengeId);
   }
 
+  async function retryRecovery() {
+    if (!identitySession) return;
+    const outcome = await race.recoverActiveRun(challenges, identitySession.token);
+    if (outcome.status === "unauthorized") {
+      clearStaleIdentity();
+    }
+  }
+
   async function loadRunPath(runId: string) {
     if (requestedPaths.current.has(runId)) return;
     requestedPaths.current.add(runId);
@@ -722,12 +733,18 @@ export default function App({
   ) {
     if (!sessionForEnd) return;
     const endedChallengeId = race.recoveryRun?.challengeId ?? race.challenge?.id ?? null;
+    const acceptedClickCount = race.recoveryRun?.clickCount ?? race.session?.clicks ?? 0;
     const outcome = await race.endRun(
       sessionForEnd.token,
       race.recoveryRun?.protocolVersion === 1 ? 1 : undefined,
     );
     if (outcome.status === "abandoned" || outcome.status === "completed") {
       setEndConfirmationOpen(false);
+      setRunNotice(outcome.status === "abandoned"
+        ? acceptedClickCount > 0
+          ? "Run ended. Your DNF and path were saved."
+          : "Run ended. The attempt was saved to your stats."
+        : null);
       if (endedChallengeId) {
         await refreshLeaderboard(endedChallengeId);
       }
@@ -831,20 +848,35 @@ export default function App({
         ) : null}
 
         <div className="player-gate">
-          <button
-            type="button"
-            disabled={!selectedChallenge || authBusy || startIsLocked}
-            onClick={() => void startSelectedChallenge()}
-          >
-            {modeState === "completed" && session?.challenge.id === selectedChallenge?.id
-              ? "Play Again"
-              : `Start ${selectedChallenge?.label ?? "Challenge"}`}
-          </button>
+          {!race.recoveryRun && (!session || modeState === "completed") ? (
+            <button
+              type="button"
+              disabled={!selectedChallenge || authBusy || startIsLocked}
+              onClick={() => void startSelectedChallenge()}
+            >
+              {modeState === "completed" && session?.challenge.id === selectedChallenge?.id
+                ? "Play Again"
+                : `Start ${selectedChallenge?.label ?? "Challenge"}`}
+            </button>
+          ) : null}
+          {race.recoveryRun?.protocolVersion === 2 ? (
+            <button
+              disabled={modeState !== "idle"}
+              type="button"
+              onClick={() => void retryRecovery()}
+            >
+              Retry Resume
+            </button>
+          ) : null}
           {modeState === "active" || modeState === "syncing" || race.recoveryRun ? (
-            <button disabled={endRunIsBlocked} type="button" onClick={(event) => {
+            <button
+              disabled={endRunIsBlocked || modeState === "preparing" || modeState === "abandoning"}
+              type="button"
+              onClick={(event) => {
               endRunTrigger.current = event.currentTarget;
               setEndConfirmationOpen(true);
-            }}>
+              }}
+            >
               {race.recoveryRun ? "End Old Run" : "End Run"}
             </button>
           ) : null}
@@ -878,6 +910,9 @@ export default function App({
 
       {visibleError && !authPrompt && !endConfirmationOpen ? (
         <p className="error-banner" role="alert">{visibleError}</p>
+      ) : null}
+      {runNotice && !authPrompt && !endConfirmationOpen ? (
+        <p className="run-notice" role="status">{runNotice}</p>
       ) : null}
       {modeState === "preparing" && !pendingNavigationTitle ? (
         <p className="loading-text">Loading article...</p>
@@ -1412,6 +1447,9 @@ function PlayPanel({
             ) : (
               <p className="result-standing">Not a personal best</p>
             )}
+            {session.challenge.origin === "daily" ? (
+              <p className="result-standing">Next daily arrives at 5:00 AM Central.</p>
+            ) : null}
             <div className="result-actions">
               <button type="button" onClick={onShowLeaderboard}>
                 View leaderboard
@@ -1564,6 +1602,11 @@ const WikipediaArticlePanel = memo(function WikipediaArticlePanel({
       onFocus={onFocus}
       onPointerDown={onPointerDown}
     >
+      {pendingNavigationTitle ? (
+        <div className="article-navigation-pending" role="status">
+          Loading next article...
+        </div>
+      ) : null}
       <div aria-live="polite" className="article-heading">
         <span>{challengeLabel}</span>
         <h2 ref={articleHeadingRef} tabIndex={-1}>{article.canonicalTitle}</h2>
@@ -1572,6 +1615,7 @@ const WikipediaArticlePanel = memo(function WikipediaArticlePanel({
         aria-label="Wikipedia article"
         className="article-content"
         dangerouslySetInnerHTML={{ __html: article.sanitizedHtml }}
+        inert={Boolean(pendingNavigationTitle)}
         role="region"
         tabIndex={0}
       />
@@ -1766,10 +1810,10 @@ function LeaderboardPanel({
                     row.protocolVersion === 1 ? "historical" : "verified"
                   }`}
                   title={row.protocolVersion === 1
-                    ? "Recorded before verified race tracking"
-                    : "Path verified against Wikipedia during the race"}
+                    ? "Recorded before server-tracked race protocol"
+                    : "Identity, timing, and path continuity tracked by the server"}
                 >
-                  {row.protocolVersion === 1 ? "Historical" : "Verified"}
+                  {row.protocolVersion === 1 ? "Historical" : "Server tracked"}
                 </span>
                 {row.isRepeatRun ? (
                   <span className="provenance-badge repeat">Repeat run</span>
@@ -1815,6 +1859,14 @@ function StatsPanel({ stats }: { stats: AccountStats | null }) {
           <dd>{totals?.attempts ?? "-"}</dd>
         </div>
         <div>
+          <dt>Completed</dt>
+          <dd>{totals?.completed ?? "-"}</dd>
+        </div>
+        <div>
+          <dt>DNFs</dt>
+          <dd>{totals?.abandoned ?? "-"}</dd>
+        </div>
+        <div>
           <dt>Best speed</dt>
           <dd>{totals?.bestElapsedMs === null || totals?.bestElapsedMs === undefined ? "-" : formatElapsed(totals.bestElapsedMs)}</dd>
         </div>
@@ -1823,7 +1875,7 @@ function StatsPanel({ stats }: { stats: AccountStats | null }) {
           <dd>{totals?.bestClicks ?? "-"}</dd>
         </div>
         <div>
-          <dt>Total clicks</dt>
+          <dt>Completed clicks</dt>
           <dd>{totals?.totalClicks ?? "-"}</dd>
         </div>
       </dl>

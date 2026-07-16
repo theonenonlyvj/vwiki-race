@@ -27,7 +27,9 @@ This intentionally rejects two alternatives: keeping only personal bests cannot 
 - The catalog badge says `Today` for the current Central daily and `Daily M/D` for historical dailies. Multiple historical daily rows are expected.
 - The browser refreshes the catalog when a background tab becomes visible or the window regains focus. It does not poll, preserving Cloudflare and Wikimedia request budgets.
 - Scheduled events more than five minutes in the future relative to Worker wall time are ignored. This prevents development tools from pre-creating tomorrow's daily with a synthetic scheduled timestamp while still allowing delayed real cron delivery.
-- Two Cloudflare UTC triggers remain: `0 10 * * *` and `0 11 * * *`. The `America/Chicago` gate accepts only the trigger that is 05:00 Central.
+- The `0 10 * * *` and `0 11 * * *` UTC triggers cover 05:00 Central across
+  DST. A cheap `17 * * * *` trigger may claim only existing due retry jobs and
+  contacts Wikipedia only after winning such a lease.
 
 Random generation remains proper MediaWiki randomness: request one non-redirect mainspace page for the start and an independent page for the target. Reject missing, redirect, non-mainspace, disambiguation, duplicate, or malformed pages. Render the start and require at least one allowed game link. Try at most three pairs inside a 25-second phase, then leave the durable job pending for bounded retry. Do not replace this with a hand-maintained pseudo-random list.
 
@@ -86,4 +88,3 @@ A server-side Wikipedia edge manifest is deferred. The current protocol proves s
 - Whether DNF ordering should be removed entirely once enough volume exists for a separate activity feed.
 - Revision-keyed edge verification and replay review before prizes, public tournaments, or adversarial ranking.
 - A measured lead-only preview endpoint and bounded article-cache LRU if production timing spans show those are material.
-

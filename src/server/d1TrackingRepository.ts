@@ -2079,26 +2079,29 @@ async function loadLeaderboardContext(
        FROM runs r
        LEFT JOIN account_aliases a
          ON a.alias_account_id = coalesce(r.canonical_account_id, r.account_id)
-       WHERE r.status = 'completed' AND r.ranked_eligible = 1
-         AND r.protocol_version = 2
+       WHERE r.status = 'completed' AND r.elapsed_ms IS NOT NULL
+         AND r.completed_at IS NOT NULL AND (
+           (r.protocol_version = 2 AND r.ranked_eligible = 1)
+           OR r.protocol_version = 1
+         )
          AND r.challenge_id = (SELECT challenge_id FROM runs WHERE id = ?)
-     ), best AS (
-       SELECT *, row_number() over (
+     ), ranked AS (
+       SELECT *,
+         row_number() over (
          PARTITION BY challenge_id, owner_id
          ORDER BY elapsed_ms, click_count, completed_at, id
-       ) owner_position
-       FROM resolved
-     ), ranked AS (
-       SELECT *, row_number() over (
+         ) owner_position,
+         row_number() over (
          PARTITION BY challenge_id
          ORDER BY elapsed_ms, click_count, completed_at, id
-       ) challenge_rank
-       FROM best WHERE owner_position = 1
+         ) challenge_rank
+       FROM resolved
      )
-     SELECT challenge_rank AS rank FROM ranked WHERE id = ?`,
-  ).bind(runId, runId).first<{ rank: number }>();
+     SELECT challenge_rank AS rank, owner_position
+     FROM ranked WHERE id = ?`,
+  ).bind(runId, runId).first<{ rank: number; owner_position: number }>();
   return {
-    isPersonalBest: Boolean(row),
+    isPersonalBest: Number(row?.owner_position) === 1,
     rank: row ? Number(row.rank) : null,
   };
 }

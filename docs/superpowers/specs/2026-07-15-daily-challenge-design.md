@@ -1,5 +1,8 @@
 # Daily Challenge Design
 
+> Historical design. Scheduling/date semantics were superseded by the 5:00 AM
+> Central contract in `2026-07-16-gameplay-history-speed-mobile-design.md`.
+
 ## Goal
 
 Create one immutable numbered VWiki Race challenge for each `America/Chicago`

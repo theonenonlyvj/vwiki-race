@@ -1,6 +1,6 @@
 # VWiki Race Backlog
 
-Date: 2026-07-15
+Date: 2026-07-16
 
 The current hardening worktree covers the friend-ready v0 game loop. Items below
 are deliberately outside that launch scope unless marked as an operational
@@ -8,12 +8,11 @@ gate.
 
 ## Operational Gates
 
-- Review the completed responsive browser QA and final frontend council notes.
-- Run the complete release gate in the Cloudflare handoff.
-- Review, commit, and push the dirty hardening branch only after explicit
-  approval.
-- Apply migration `0004` before deploying the Worker that reads daily columns.
-- Deploy Worker before Pages, then run the documented production smoke test.
+- Complete responsive production browser QA and resolve any P0/P1 council
+  finding before declaring the friend release complete.
+- Run the complete release gate in the Cloudflare handoff on every shipment.
+- Deploy Worker before Pages when both changed, then run the documented
+  production smoke test.
 - Confirm Cloudflare request counts after the first scheduled day; do not
   generate repeated manual cron events.
 
@@ -28,6 +27,8 @@ gate.
 - Add challenge search/filtering once the numbered catalog becomes large.
 - Add an explicit Copy Link action; permanent links already use
   `/?challenge=challenge-000N`.
+- Add cursor pagination before any challenge approaches the current 100-row
+  public leaderboard response cap; D1 already retains the underlying attempts.
 
 ## Daily Product Choices
 
@@ -43,8 +44,9 @@ gate.
 
 - Visualize aggregate navigation as a privacy-preserving graph: common starts,
   targets, bridge pages, transitions, and semantic clusters.
-- Add per-player history, personal best progression, and challenge-by-challenge
-  attempts.
+- Add a dedicated per-player history view and personal-best progression. The
+  public challenge leaderboard already shows every completed/DNF attempt and
+  marks repeats.
 - Compare a completed path with known shortest paths only from an offline graph
   snapshot.
 - Add friend filters after VGames exposes the required social graph.

@@ -12,8 +12,11 @@ describe("production deployment configuration", () => {
     expect(config).toContain('service = "vgames-identity"');
   });
 
-  it("covers 5:00 AM Central across daylight and standard time", () => {
-    expect(config).toContain('crons = ["0 10 * * *", "0 11 * * *"]');
+  it("covers 5:00 AM Central plus bounded due-job retries", () => {
+    expect(config).toContain(
+      'crons = ["0 10 * * *", "0 11 * * *", "17 * * * *"]',
+    );
     expect(config).not.toContain('crons = ["7 * * * *"]');
+    expect(config).toContain('name = "CHALLENGE_CREATE_RATE_LIMITER"');
   });
 });

@@ -146,6 +146,17 @@ describe("VWiki Race app", () => {
     });
   });
 
+  it("refreshes the challenge catalog once when the window regains focus", async () => {
+    const fetchImpl = createFetchMock();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={memoryStorage()} />);
+    expect(await screen.findByRole("button", { name: /start challenge #1/i })).toBeVisible();
+    await waitFor(() => expect(challengeCatalogCalls(fetchImpl)).toBe(1));
+
+    act(() => window.dispatchEvent(new Event("focus")));
+
+    await waitFor(() => expect(challengeCatalogCalls(fetchImpl)).toBe(2));
+  });
+
   it("prompts for identity before starting when no session exists", async () => {
     const storage = memoryStorage();
     const fetchImpl = createFetchMock();
@@ -658,6 +669,9 @@ describe("VWiki Race app", () => {
     await waitFor(() => expect(clickRequestBodies(fetchImpl)).toHaveLength(1));
 
     expect(screen.getByRole("button", { name: /^end run$/i })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /start challenge #1/i })).toBeNull();
+    expect(screen.getByRole("region", { name: /wikipedia article/i })).toHaveAttribute("inert");
+    expect(screen.getByText(/loading next article/i)).toBeVisible();
     clickResponse.resolve();
     expect(await screen.findByText(/target reached/i)).toBeVisible();
   });
@@ -876,6 +890,7 @@ describe("VWiki Race app", () => {
     const trigger = await screen.findByRole("button", { name: /start challenge #1/i });
     await user.click(trigger);
     const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    expect(document.body.style.overflow).toBe("hidden");
     const close = screen.getByRole("button", { name: /close identity prompt/i });
     await user.click(screen.getByRole("button", { name: /^guest$/i }));
     await user.type(screen.getByLabelText(/display name/i), "Vijay");
@@ -887,6 +902,7 @@ describe("VWiki Race app", () => {
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull();
+    expect(document.body.style.overflow).toBe("");
     expect(document.activeElement).toBe(trigger);
   });
 
@@ -971,6 +987,28 @@ describe("VWiki Race app", () => {
     expect(startRunCalls(fetchImpl)).toBe(1);
   });
 
+  it("offers Retry Resume after a protocol-2 active-run conflict", async () => {
+    const storage = claimedStorage();
+    const fetchImpl = createFetchMock({
+      activeRun: activeRunFixture({ protocolVersion: 2 }),
+      activeRunAfterConflict: true,
+      startConflictOnce: true,
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
+
+    await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+
+    const retry = await screen.findByRole("button", { name: /retry resume/i });
+    expect(screen.getByRole("button", { name: /end old run/i })).toBeVisible();
+    expect(screen.getByText(/resume or end the active run/i)).toBeVisible();
+    await user.click(retry);
+
+    expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /retry resume/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /^end run$/i })).toBeVisible();
+  });
+
   it("resumes a validated protocol-2 article and accepted path with its challenge URL locked", async () => {
     const storage = claimedStorage();
     const resumableChallenge = {
@@ -1003,7 +1041,8 @@ describe("VWiki Race app", () => {
     expect(within(path).getByText("Apple")).toBeVisible();
     expect(within(path).getByText("Fruit")).toBeVisible();
     expect(window.location.search).toBe("?challenge=challenge-0001");
-    expect(screen.getByRole("button", { name: /start challenge #1/i })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /start challenge #1/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /^end run$/i })).toBeVisible();
     expect(fetchImpl).toHaveBeenCalledWith(
       apiUrl("/api/v2/runs/run-old/recovery-path"),
       expect.objectContaining({
@@ -1069,7 +1108,7 @@ describe("VWiki Race app", () => {
 
     expect(await screen.findByText("franelpana")).toBeVisible();
     expect(screen.getByText("Historical")).toBeVisible();
-    expect(screen.getByText("Verified")).toBeVisible();
+    expect(screen.getByText("Server tracked")).toBeVisible();
     expect(screen.getAllByText("1 click")).toHaveLength(2);
   });
 
@@ -1219,6 +1258,17 @@ describe("VWiki Race app", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: /end this run/i })).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it("confirms that an ended attempt was saved", async () => {
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={claimedStorage()} />);
+    await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+
+    await user.click(screen.getByRole("button", { name: /^end run$/i }));
+    await user.click(screen.getByRole("button", { name: /confirm end run/i }));
+
+    expect(await screen.findByText(/attempt was saved to your stats/i)).toBeVisible();
   });
 
   it("keeps End Run open and restores the active phase after an abandon failure", async () => {

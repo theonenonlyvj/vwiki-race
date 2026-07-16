@@ -118,10 +118,39 @@ describe("useRaceController", () => {
     act(() => { result.current.prewarmLink("Fruit"); });
     await waitFor(() => expect(gateway.getArticle).toHaveBeenCalledWith(
       "Fruit",
-      { ruleset: "ranked_classic" },
+      { ruleset: "ranked_classic", signal: expect.any(AbortSignal) },
     ));
     expect(result.current.phase).toBe("active");
     expect(result.current.article).toEqual(apple);
+  });
+
+  it("cancels a superseded indicated-link prewarm", async () => {
+    const speculativeSignals: AbortSignal[] = [];
+    const gateway: WikipediaGateway = {
+      clear: vi.fn(),
+      getArticle: vi.fn((title, options) => {
+        if (title === "Apple") return Promise.resolve(apple);
+        if (options?.signal) speculativeSignals.push(options.signal);
+        return new Promise<Article>((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => {
+            const error = new Error("aborted");
+            error.name = "AbortError";
+            reject(error);
+          }, { once: true });
+        });
+      }),
+    };
+    const { result } = renderHook(() => useRaceController({ apiClient: apiClient(), gateway }));
+    await act(async () => { await result.current.start(challenge, "token"); });
+
+    act(() => {
+      result.current.prewarmLink("Fruit");
+      result.current.prewarmLink("Water");
+    });
+
+    expect(speculativeSignals).toHaveLength(2);
+    expect(speculativeSignals[0]?.aborted).toBe(true);
+    expect(speculativeSignals[1]?.aborted).toBe(false);
   });
 
   it("aborts start article work and ignores its stale response after unmount", async () => {

@@ -1,6 +1,6 @@
 # VWiki Race Cloudflare Deployment Handoff
 
-Date: 2026-07-15
+Date: 2026-07-16
 
 Status: release procedures and production inventory for the current hardening
 release. Verify the live commit and deployment state before any future rollout;
@@ -30,18 +30,23 @@ paths, account stats, and challenge leaderboards. Realtime rooms are not used.
    for old `/api/*` clients. They do not bind D1 or duplicate game logic.
 4. VGames issues and introspects account tokens. VWiki Race stores canonical
    VGames account IDs and aliases, never a separate player namespace.
-5. The API Worker receives `0 10 * * *` and `0 11 * * *` UTC triggers, then runs
-   only the one that is 5:00 AM in `America/Chicago`. The other trigger exits
-   before D1. Only a claimed D1 daily-job lease may contact Wikipedia; accepted
-   days make no Wikipedia request.
+5. The API Worker receives `0 10 * * *` and `0 11 * * *` UTC triggers for 5:00
+   AM Central plus `17 * * * *` for due-job retries. Only the 5:00 AM event may
+   create a new date. The alternate DST trigger exits before D1; the hourly
+   retry performs one bounded D1 check and contacts Wikipedia only after
+   claiming an existing due job.
 
 ## Data And Game Guarantees
 
 - Every run is stored server-side from its accepted start.
 - Protocol 2 accepts only canonical transitions from the server-accepted current
   page and completes only through the accepted target click.
-- Leaderboards sort by active decision time, then clicks, then accepted
-  completion time.
+- Every terminal run remains in D1. Public leaderboards show every eligible
+  finish and every abandonment with at least one accepted click. Finishes sort
+  by active decision time, clicks, and accepted completion time. Meaningful
+  abandons follow as `DNF`, later attempts are marked `Repeat run`, and
+  zero-click abandons remain in account statistics. The v0 response is capped
+  at the first 100 ordered terminal rows pending cursor pagination.
 - Guest stats remain attached to the VGames ghost and survive a later claim or
   canonical account merge.
 - Challenge creation accepts a Wikipedia title or English article URL, then
@@ -72,6 +77,7 @@ VWIKI_RACE_DB -> D1 database vwiki-race
 VGAMES_IDENTITY -> Worker service vgames-identity
 CLICK_RATE_LIMITER -> configured rate-limit namespace
 ACCOUNT_READ_RATE_LIMITER -> configured rate-limit namespace
+CHALLENGE_CREATE_RATE_LIMITER -> configured rate-limit namespace
 ```
 
 Pages production environment:
@@ -87,16 +93,17 @@ origin. Loopback HTTP is allowed only for local development.
 Pages build settings:
 
 ```txt
-Production branch: main
+Git provider: none (verified 2026-07-16; pushing main does not deploy Pages)
 Root directory: /
 Build command: npm run build
 Build output directory: dist
 Functions directory: functions
+Manual deploy: npx wrangler pages deploy dist --project-name=vwikirace --branch=main
 ```
 
 ## Migrations
 
-Apply all files in order:
+Expected production migration ledger as of 2026-07-16:
 
 ```txt
 d1/migrations/0001_vwiki_race_tracking.sql
@@ -105,14 +112,21 @@ d1/migrations/0003_hardening_protocol.sql
 d1/migrations/0004_daily_challenges.sql
 ```
 
-`0003` has already been applied and must remain unchanged. `0004` adds challenge
-provenance, the shared number sequence, daily jobs, and daily-date uniqueness.
-Apply migrations before deploying Worker code that references their tables or
-columns.
+`0003` is an immutable historical artifact, not a safe populated-database
+restore script. It contains superseded cutover DML that abandons active runs,
+changes ranked eligibility, and deactivates challenges. Never edit an applied
+migration and never replay `0003` against imported production data. Correct
+history only through a new reviewed additive migration.
 
-Remote command:
+Before any rollout, list the remote ledger. Before applying a new migration,
+inspect its SQL and create a private D1 backup/export that must never be printed
+or committed. This release adds no migration and must report `0001` through
+`0004` as already applied.
+
+Remote ledger/apply commands:
 
 ```bash
+npx wrangler d1 migrations list vwiki-race --remote --config wrangler.api.toml
 npx wrangler d1 migrations apply vwiki-race --remote --config wrangler.api.toml
 ```
 
@@ -121,16 +135,20 @@ npx wrangler d1 migrations apply vwiki-race --remote --config wrangler.api.toml
 Do not reverse these steps.
 
 1. Confirm the VGames identity Worker is healthy.
-2. Run all local release gates listed below.
-3. Apply D1 migrations remotely and inspect the migration result.
+2. Run all local release gates listed below and commit the reviewed tree locally.
+3. Inspect the remote D1 migration ledger. Apply only a new reviewed additive
+   migration, after a private backup, when the ledger says it is pending.
 4. Deploy the canonical API Worker from `wrangler.api.toml`.
 5. Smoke-test the canonical Worker directly, including the v2 challenge catalog.
 6. Set both Pages API-origin environment values to that Worker origin.
-7. Deploy the Pages project from the reviewed commit.
+7. Only now push `main`, then manually deploy Pages with the recorded CLI
+   command. Re-verify the project still reports no Git provider before relying
+   on this order in a future release.
 8. Smoke-test a guest/claimed start, one click, completion, path disclosure,
    stats, direct challenge link, and challenge creation.
-9. Confirm both cron triggers are present. Do not manually fan out scheduled
-   invocations; the Central-time gate chooses the valid trigger.
+9. Confirm all three cron triggers are present. Do not manually fan out
+   scheduled invocations; the Central-time gate creates dates and minute-17 may
+   only retry due jobs.
 
 This ordering prevents a new Worker from querying columns that are not yet in
 D1 and prevents Pages from pointing at an unverified API deployment.
@@ -180,7 +198,9 @@ use v2.
 4. Confirm the start article appears only after the run is accepted and the
    timer begins at zero.
 5. Click a table/prose/infobox game link. Syncing feedback should appear
-   immediately, and the old article must remain until server acceptance.
+   immediately. The sanitized destination may render while the mutation is in
+   flight, but the official path/click count must remain unchanged until server
+   acceptance; a rejected mutation must restore the accepted article.
 6. Complete a run. Confirm speed, click count, personal-best context, and lazy
    winning-path disclosure on that challenge's leaderboard.
 7. Open Stats and confirm server totals plus top starts, targets, and visited
@@ -197,14 +217,15 @@ use v2.
 - guest/login failures: verify `VGAMES_URL` and VGames health; do not create a
   local identity fallback.
 - CORS failures: add the exact Pages origin to `ALLOWED_ORIGINS`.
-- empty leaderboard: confirm the run reached an accepted protocol-2 target click
-  and is `ranked_eligible`.
+- missing finish: confirm the run reached an accepted protocol-2 target click
+  and is `ranked_eligible`. A DNF requires at least one accepted click.
 - daily job retries: inspect structured `daily_challenge_job` and
   `daily_challenge_candidate` logs plus D1 job status. Candidate diagnostics are
   bounded to boundary/status/error metadata. Do not loop cron calls or manually
   spray Wikipedia requests.
-- unexpectedly high request count: disable the cron trigger in a reviewed Worker
-  deploy and inspect lease/job state before testing again.
+- unexpectedly high request count: remove all three scheduled triggers in one
+  reviewed Worker deploy, then inspect lease/job state. Never restore historical
+  `7 * * * *` scheduling.
 
 ## Safety
 

@@ -2,9 +2,10 @@
 
 Status: v0 ranked baseline
 
-Date: 2026-07-15
+Date: 2026-07-16
 
-Intent: define the game contract implemented by the friend-ready v0.
+Intent: define the normative game contract for friend-ready v0, subject to the
+documented server edge-verification limitation before prize-grade play.
 
 ## Research Basis
 
@@ -171,6 +172,11 @@ Disallowed:
 4. Invalid moves void the run for ranked play.
 5. Hints, escapes, backtracking, or rule exceptions must move the run to a
    separate leaderboard.
+6. Every terminal attempt remains stored. Completed attempts appear first;
+   abandons with at least one accepted click appear afterward as unranked
+   `DNF` rows. Zero-click abandons remain in account statistics.
+7. Any attempt after an account's first stored start on the same challenge is
+   labeled `Repeat run`, regardless of how the earlier attempt ended.
 
 ### Timing
 
