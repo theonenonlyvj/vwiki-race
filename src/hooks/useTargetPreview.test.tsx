@@ -92,6 +92,24 @@ describe("useTargetPreview", () => {
     unmount();
     expect(gateway.clear).toHaveBeenCalledTimes(1);
   });
+
+  it("retains an already-loaded preview as a frozen in-game reference", async () => {
+    const gateway = wikipediaGateway(vi.fn(async () => article("Target One", 11)));
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useTargetPreview({ challenge: challengeOne, enabled, gateway }),
+      { initialProps: { enabled: true } },
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    rerender({ enabled: false });
+
+    expect(result.current).toMatchObject({
+      status: "ready",
+      challengeId: "challenge-1",
+      canonicalTitle: "Target One",
+    });
+    expect(gateway.getArticle).toHaveBeenCalledTimes(1);
+  });
 });
 
 function challenge(id: string, targetTitle: string, targetPageId: number): Challenge {

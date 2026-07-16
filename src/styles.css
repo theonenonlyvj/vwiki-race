@@ -145,6 +145,7 @@ ol {
   background: rgba(3, 8, 11, 0.72);
   padding: 18px;
   backdrop-filter: blur(8px);
+  overscroll-behavior: contain;
 }
 
 .identity-dialog {
@@ -490,16 +491,25 @@ h1 {
   position: sticky;
   top: 96px;
   z-index: 15;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 320px);
   gap: 8px;
   align-items: center;
-  overflow-x: auto;
+  overflow: visible;
   border: 1px solid var(--line);
   border-top: 0;
   background: rgba(6, 16, 20, 0.96);
   padding: 8px 10px;
   backdrop-filter: blur(12px);
   font-family: var(--viota-ui-font);
+}
+
+.path-history {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+  align-items: center;
+  overflow: hidden;
 }
 
 .header-compact .path-strip {
@@ -511,7 +521,7 @@ h1 {
   top: auto;
 }
 
-.path-strip span {
+.path-history span {
   flex: 0 0 auto;
   color: #dffbfb;
   max-width: 190px;
@@ -520,15 +530,83 @@ h1 {
   white-space: nowrap;
 }
 
-.path-strip span:not(:last-child)::after {
+.path-history span:not(:last-child)::after,
+.path-history:not(:empty)::after {
   color: #4d7076;
   content: "->";
   margin-left: 8px;
 }
 
-.path-strip .path-ellipsis {
+.path-history .path-ellipsis {
   color: #ffad9f;
   font-weight: 900;
+}
+
+.target-reference {
+  position: relative;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  padding-left: 10px;
+}
+
+.target-reference summary {
+  display: grid;
+  min-height: 36px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  color: #eef7f8;
+  cursor: pointer;
+  list-style: none;
+}
+
+.target-reference summary::-webkit-details-marker {
+  display: none;
+}
+
+.target-reference summary::after {
+  color: var(--cyan);
+  content: "+";
+  grid-column: 1;
+  grid-row: 1;
+  font-weight: 900;
+}
+
+.target-reference[open] summary::after {
+  content: "-";
+}
+
+.target-reference summary small {
+  grid-column: 1;
+  grid-row: 1;
+  padding-left: 16px;
+  color: #8fb0b5;
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.target-reference summary strong {
+  grid-column: 2;
+  overflow-wrap: anywhere;
+  font-size: 0.82rem;
+  line-height: 1.15;
+}
+
+.target-reference > p {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: -10px;
+  z-index: 30;
+  width: min(420px, calc(100vw - 28px));
+  border: 1px solid var(--line-strong);
+  background: #0b1a1f;
+  color: #dffbfb;
+  padding: 12px;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.38);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 0.86rem;
+  line-height: 1.45;
 }
 
 .tabbar {
@@ -590,7 +668,7 @@ h1 {
 
 .target-preview-panel {
   display: grid;
-  min-height: 320px;
+  min-height: 260px;
   overflow: hidden;
   border: 1px solid #a2a9b1;
   background: #f8f9fa;
@@ -687,6 +765,7 @@ h1 {
   border-bottom: 1px solid #a2a9b1;
   background: #ffffff;
   padding: 14px 18px 10px;
+  scroll-margin-top: 132px;
 }
 
 .article-heading h2 {
@@ -1251,7 +1330,7 @@ h1 {
 
 @media (max-width: 640px) {
   .header-compact {
-    --compact-header-height: 104px;
+    --compact-header-height: 112px;
   }
 
   h1,
@@ -1266,7 +1345,7 @@ h1 {
 
   .header-compact .game-header {
     grid-template-columns: minmax(76px, 1fr) auto;
-    grid-template-rows: 34px 48px;
+    grid-template-rows: 44px 52px;
     height: var(--compact-header-height);
     min-height: var(--compact-header-height);
     padding: 6px 8px;
@@ -1283,7 +1362,7 @@ h1 {
   }
 
   .header-compact .player-gate button {
-    min-height: 32px;
+    min-height: 44px;
     padding: 5px 9px;
   }
 
@@ -1305,6 +1384,10 @@ h1 {
     max-width: 62px;
     align-content: center;
     padding: 3px 5px;
+  }
+
+  .header-compact .run-metrics div:last-child {
+    display: none;
   }
 
   .header-compact .run-metrics dt {
@@ -1340,8 +1423,36 @@ h1 {
     top: var(--compact-header-height);
   }
 
-  .path-strip span {
+  button,
+  .tabbar button {
+    min-height: 44px;
+  }
+
+  .path-strip {
+    grid-template-columns: minmax(0, 1fr) minmax(136px, 46%);
+    padding: 6px 8px;
+  }
+
+  .path-history span {
     max-width: 136px;
+  }
+
+  .target-reference {
+    padding-left: 7px;
+  }
+
+  .target-reference summary {
+    min-height: 44px;
+    gap: 5px;
+  }
+
+  .target-reference summary small {
+    padding-left: 13px;
+    font-size: 0.55rem;
+  }
+
+  .target-reference summary strong {
+    font-size: 0.72rem;
   }
 
   .tabbar {
@@ -1359,6 +1470,7 @@ h1 {
 
   .article-heading {
     padding: 11px 12px 8px;
+    scroll-margin-top: 160px;
   }
 
   .article-content {
@@ -1421,6 +1533,10 @@ h1 {
 
   .target-preview-copy {
     padding: 20px;
+  }
+
+  .target-preview-panel {
+    min-height: 210px;
   }
 
   .target-preview-panel h2 {

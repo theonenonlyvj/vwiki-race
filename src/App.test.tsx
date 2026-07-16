@@ -55,7 +55,7 @@ describe("VWiki Race app", () => {
     expect(screen.queryByText(/enter vwiki race/i)).toBeNull();
   });
 
-  it("shows a short read-only target preview before start and removes it during play", async () => {
+  it("shows a target preview before start and retains a compact in-game reference", async () => {
     const fetchImpl = createFetchMock();
     const user = userEvent.setup();
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
@@ -74,6 +74,9 @@ describe("VWiki Race app", () => {
     await user.click(screen.getByRole("button", { name: /start challenge #1/i }));
     expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
     expect(screen.queryByRole("region", { name: /target preview/i })).toBeNull();
+    const targetReference = screen.getByRole("group", { name: /target reference/i });
+    expect(within(targetReference).getByText("Fruit")).toBeVisible();
+    expect(within(targetReference).getByText(/seed-bearing structure/i)).toBeInTheDocument();
   });
 
   it("keeps Start enabled when the target preview is unavailable", async () => {
@@ -576,6 +579,72 @@ describe("VWiki Race app", () => {
     ).toBeVisible();
     fruitArticle.resolve();
     expect(await screen.findByRole("heading", { name: "Fruit" })).toHaveFocus();
+  });
+
+  it("scrolls to the accepted article top, not an unaccepted optimistic page", async () => {
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const clickResponse = createDeferredResponse(completedClickResponse());
+    try {
+      const fetchImpl = createFetchMock({ delayedClickResponse: clickResponse.promise });
+      const user = userEvent.setup();
+      render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+      await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+      expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
+      scrollIntoView.mockClear();
+
+      await user.click(screen.getByRole("link", { name: /fruit/i }));
+      expect(await screen.findByRole("heading", { name: "Fruit" })).toBeVisible();
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      clickResponse.resolve();
+      expect(await screen.findByText(/target reached/i)).toBeVisible();
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({
+        behavior: "auto",
+        block: "start",
+      }));
+    } finally {
+      if (originalScrollIntoView) {
+        HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+      } else {
+        delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      }
+    }
+  });
+
+  it("blocks browser Find only while a timed run is active or syncing", async () => {
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={claimedStorage()} />);
+
+    const beforeStart = new KeyboardEvent("keydown", {
+      key: "f",
+      ctrlKey: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(beforeStart);
+    expect(beforeStart.defaultPrevented).toBe(false);
+
+    await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+    expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
+    const duringRun = new KeyboardEvent("keydown", {
+      key: "f",
+      metaKey: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(duringRun);
+    expect(duringRun.defaultPrevented).toBe(true);
+
+    await user.click(screen.getByRole("link", { name: /fruit/i }));
+    expect(await screen.findByText(/target reached/i)).toBeVisible();
+    const afterFinish = new KeyboardEvent("keydown", {
+      key: "f",
+      ctrlKey: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(afterFinish);
+    expect(afterFinish.defaultPrevented).toBe(false);
   });
 
   it("keeps End Run visible but disabled while a click mutation is unresolved", async () => {

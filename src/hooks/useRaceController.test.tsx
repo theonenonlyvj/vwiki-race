@@ -1,5 +1,5 @@
 import { StrictMode, type ReactNode } from "react";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Article, Challenge, ServerPathStep } from "../domain/types";
 import { ApiRequestError } from "../services/apiRequest";
@@ -74,7 +74,7 @@ describe("useRaceController", () => {
     expect(result.current.article).toBeNull();
   });
 
-  it("syncs immediately, commits only after the accepted click, and uses one event body", async () => {
+  it("reveals a loaded destination while syncing and commits its path only after acceptance", async () => {
     const click = deferred<ReturnType<typeof activeClick>>();
     const recordClick = vi.fn(() => click.promise);
     const abandonRun = vi.fn();
@@ -91,6 +91,13 @@ describe("useRaceController", () => {
     await expect(result.current.endRun("token")).resolves.toEqual({ status: "ignored" });
     expect(abandonRun).not.toHaveBeenCalled();
 
+    await act(async () => {
+      await waitFor(() => expect(recordClick).toHaveBeenCalledTimes(1));
+    });
+    expect(result.current.phase).toBe("syncing");
+    expect(result.current.article?.canonicalTitle).toBe("Fruit");
+    expect(result.current.session?.currentPage.canonicalTitle).toBe("Apple");
+
     let outcome: Awaited<typeof navigation>;
     await act(async () => { click.resolve(activeClick()); outcome = await navigation; });
     expect(outcome!).toMatchObject({ status: "completed", challengeId: challenge.id });
@@ -98,6 +105,23 @@ describe("useRaceController", () => {
     expect((recordClick.mock.calls as unknown[][])[0]?.[1]).toMatchObject({ clientEventId: "event-1", expectedStepNumber: 1, destinationTitle: "Fruit" });
     expect(result.current.article?.canonicalTitle).toBe("Fruit");
     expect(result.current.phase).toBe("completed");
+  });
+
+  it("prewarms one indicated playable link without changing race state", async () => {
+    const gateway = wikiGateway({ Apple: apple, Fruit: fruit });
+    const { result } = renderHook(() => useRaceController({
+      apiClient: apiClient(),
+      gateway,
+    }));
+    await act(async () => { await result.current.start(challenge, "token"); });
+
+    act(() => { result.current.prewarmLink("Fruit"); });
+    await waitFor(() => expect(gateway.getArticle).toHaveBeenCalledWith(
+      "Fruit",
+      { ruleset: "ranked_classic" },
+    ));
+    expect(result.current.phase).toBe("active");
+    expect(result.current.article).toEqual(apple);
   });
 
   it("aborts start article work and ignores its stale response after unmount", async () => {

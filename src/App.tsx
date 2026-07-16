@@ -10,6 +10,8 @@ import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
+  type PointerEvent,
+  type FocusEvent,
 } from "react";
 import { getSortedChallenges } from "./domain/challenges";
 import {
@@ -221,6 +223,17 @@ export default function App({
       setUsernameDraft(suggestUsername(cachedSession.displayName));
     }
   }, [identityRepository]);
+
+  useEffect(() => {
+    if (modeState !== "active" && modeState !== "syncing") return;
+    const blockBrowserFind = (event: globalThis.KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", blockBrowserFind, { capture: true });
+    return () => window.removeEventListener("keydown", blockBrowserFind, { capture: true });
+  }, [modeState]);
 
   useEffect(() => {
     const queueCatalogRefresh = () => {
@@ -742,6 +755,13 @@ export default function App({
     }
   }
 
+  function handleArticlePrewarm(target: EventTarget | null) {
+    if (!(target instanceof Element)) return;
+    const link = target.closest<HTMLAnchorElement>("a[data-vwiki-race-title]");
+    const title = link?.dataset.vwikiRaceTitle;
+    if (title) race.prewarmLink(title);
+  }
+
   const currentPathTitles = session
     ? [
         session.challenge.start.title,
@@ -836,7 +856,7 @@ export default function App({
       </header>
 
       {session ? (
-        <PathStrip titles={visiblePath} />
+        <PathStrip targetPreview={targetPreview} titles={visiblePath} />
       ) : null}
 
       <nav className="tabbar" aria-label="VWiki Race views">
@@ -870,6 +890,7 @@ export default function App({
             challenges={challenges}
             elapsedMs={elapsedMs}
             handleArticleClick={handleArticleClick}
+            handleArticlePrewarm={handleArticlePrewarm}
             modeState={modeState}
             onCreateChallenge={createChallenge}
             onSelectChallenge={(challengeId) => void selectChallenge(challengeId)}
@@ -1248,6 +1269,14 @@ function ModalDialog({
     };
   }, [returnFocusRef]);
 
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
   function close() {
     if (busy) return;
     onClose();
@@ -1306,6 +1335,7 @@ function PlayPanel({
   challenges,
   elapsedMs,
   handleArticleClick,
+  handleArticlePrewarm,
   modeState,
   onCreateChallenge,
   onRetryPending,
@@ -1325,6 +1355,7 @@ function PlayPanel({
   challenges: Challenge[];
   elapsedMs: number;
   handleArticleClick: (event: MouseEvent<HTMLElement>) => void;
+  handleArticlePrewarm: (target: EventTarget | null) => void;
   modeState: ModeState;
   onCreateChallenge: (input: {
     startTitle: string;
@@ -1348,6 +1379,17 @@ function PlayPanel({
   const stableArticleClick = useCallback((event: MouseEvent<HTMLElement>) => {
     articleClickRef.current(event);
   }, []);
+  const articlePrewarmRef = useRef(handleArticlePrewarm);
+  articlePrewarmRef.current = handleArticlePrewarm;
+  const stableArticlePrewarm = useCallback((target: EventTarget | null) => {
+    articlePrewarmRef.current(target);
+  }, []);
+  const stableArticleFocus = useCallback((event: FocusEvent<HTMLElement>) => {
+    stableArticlePrewarm(event.target);
+  }, [stableArticlePrewarm]);
+  const stableArticlePointerDown = useCallback((event: PointerEvent<HTMLElement>) => {
+    stableArticlePrewarm(event.target);
+  }, [stableArticlePrewarm]);
 
   if (session && article) {
     return (
@@ -1394,7 +1436,10 @@ function PlayPanel({
         <WikipediaArticlePanel
           article={article}
           challengeLabel={session.challenge.label ?? session.challenge.mode}
+          acceptedPageId={session.currentPage.pageId}
           onClick={stableArticleClick}
+          onFocus={stableArticleFocus}
+          onPointerDown={stableArticlePointerDown}
           pendingNavigationTitle={pendingNavigationTitle}
         />
 
@@ -1488,26 +1533,36 @@ function TargetPreviewPanel({
 
 const WikipediaArticlePanel = memo(function WikipediaArticlePanel({
   article,
+  acceptedPageId,
   challengeLabel,
   onClick,
+  onFocus,
+  onPointerDown,
   pendingNavigationTitle,
 }: {
   article: Article;
+  acceptedPageId: number | undefined;
   challengeLabel: string;
   onClick: (event: MouseEvent<HTMLElement>) => void;
+  onFocus: (event: FocusEvent<HTMLElement>) => void;
+  onPointerDown: (event: PointerEvent<HTMLElement>) => void;
   pendingNavigationTitle: string | null;
 }) {
   const articleHeadingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
-    articleHeadingRef.current?.focus({ preventScroll: true });
-  }, [article.pageId]);
+    const heading = articleHeadingRef.current;
+    heading?.scrollIntoView?.({ behavior: "auto", block: "start" });
+    heading?.focus({ preventScroll: true });
+  }, [acceptedPageId]);
 
   return (
     <article
       aria-busy={Boolean(pendingNavigationTitle)}
       className="article-panel"
       onClick={onClick}
+      onFocus={onFocus}
+      onPointerDown={onPointerDown}
     >
       <div aria-live="polite" className="article-heading">
         <span>{challengeLabel}</span>
@@ -1541,17 +1596,38 @@ const WikipediaArticlePanel = memo(function WikipediaArticlePanel({
   );
 });
 
-function PathStrip({ titles }: { titles: string[] }) {
+function PathStrip({
+  targetPreview,
+  titles,
+}: {
+  targetPreview: TargetPreviewState;
+  titles: string[];
+}) {
+  const targetTitle = titles.at(-1) ?? "Target";
+  const visitedTitles = titles.slice(0, -1);
+  const readyPreview = targetPreview.status === "ready" ? targetPreview : null;
   return (
     <nav className="path-strip" aria-label="Run path">
-      {titles.map((title, index) => (
-        <span
-          className={title === "..." ? "path-ellipsis" : undefined}
-          key={`${title}-${index}`}
-        >
-          {title}
-        </span>
-      ))}
+      <div className="path-history">
+        {visitedTitles.map((title, index) => (
+          <span
+            className={title === "..." ? "path-ellipsis" : undefined}
+            key={`${title}-${index}`}
+          >
+            {title}
+          </span>
+        ))}
+      </div>
+      <details aria-label="Target reference" className="target-reference">
+        <summary>
+          <small>Target</small>
+          <strong>{targetTitle}</strong>
+        </summary>
+        <p>
+          {readyPreview?.preview.blurb ??
+            "The target preview was not ready when this run began."}
+        </p>
+      </details>
     </nav>
   );
 }

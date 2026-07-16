@@ -285,6 +285,14 @@ export function useRaceController(options: RaceControllerOptions) {
           clientObservedAt: observedAt(),
         },
       };
+      commitState({
+        ...snapshot,
+        phase: "syncing",
+        article: destination,
+        pendingClick: pending,
+        pendingNavigationTitle: anchorText || title,
+        error: null,
+      });
       return await acceptClick(pending, token, operation);
     } catch (caught) {
       if (!isCurrent(operation, requestGeneration, mounted)) return { status: "stale" };
@@ -297,6 +305,21 @@ export function useRaceController(options: RaceControllerOptions) {
       return { status: "failed", challengeId: snapshot.challenge.id };
     }
   }, [acceptClick, beginOperation, commitState, createEventId, observedAt, options.gateway, timer]);
+
+  const prewarmLink = useCallback((title: string): void => {
+    const snapshot = stateRef.current;
+    if (
+      snapshot.phase !== "active" ||
+      snapshot.pendingClick ||
+      !snapshot.challenge ||
+      !normalizeTitle(title)
+    ) {
+      return;
+    }
+    void options.gateway.getArticle(title, {
+      ruleset: snapshot.challenge.ruleset,
+    }).catch(() => undefined);
+  }, [options.gateway]);
 
   const retryPendingClick = useCallback(async (token: string): Promise<ClickOutcome> => {
     const snapshot = stateRef.current;
@@ -464,6 +487,7 @@ export function useRaceController(options: RaceControllerOptions) {
       : null,
     elapsedMs: state.run?.elapsedMs ?? timer.elapsedMs,
     start,
+    prewarmLink,
     followLink,
     retryPendingClick,
     recoverActiveRun,

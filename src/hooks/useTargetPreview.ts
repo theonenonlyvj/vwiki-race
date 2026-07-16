@@ -32,8 +32,15 @@ export function useTargetPreview({
   useEffect(() => () => gateway.clear(), [gateway]);
 
   useEffect(() => {
-    if (!enabled || !challenge) {
+    if (!challenge) {
       setState({ status: "idle" });
+      return;
+    }
+    if (!enabled) {
+      setState((current) =>
+        current.status === "ready" && current.challengeId === challenge.id
+          ? current
+          : { status: "idle" });
       return;
     }
 
