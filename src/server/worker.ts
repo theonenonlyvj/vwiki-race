@@ -20,6 +20,7 @@ interface RateLimiter {
 
 export interface Env {
   VWIKI_RACE_DB: D1Database;
+  VGAMES_IDENTITY?: Pick<Fetcher, "fetch">;
   VGAMES_URL: string;
   ALLOWED_ORIGINS?: string;
   CLICK_RATE_LIMITER: RateLimiter;
@@ -412,13 +413,23 @@ function createTracking(env: Env): WorkerTracking {
   const handlers = createApiHandlers(repository, {
     validateChallengeArticles: wikipedia.validateChallengeArticles,
   });
-  const identity = createVGamesIdentityClient({ baseUrl: env.VGAMES_URL });
+  const identity = createVGamesIdentityClient({
+    baseUrl: env.VGAMES_URL,
+    fetchImpl: resolveVGamesFetch(env.VGAMES_IDENTITY),
+  });
   return {
     handlers,
     identity,
     runProtocol: repository,
     authorize: (request) => authorizeVGamesRequest(request, identity),
   };
+}
+
+export function resolveVGamesFetch(
+  binding?: Pick<Fetcher, "fetch">,
+): typeof fetch {
+  if (!binding) return fetch;
+  return (input, init) => binding.fetch(input, init);
 }
 
 function utcDateKey(value: Date): string {

@@ -67,6 +67,7 @@ Canonical Worker bindings:
 
 ```txt
 VWIKI_RACE_DB -> D1 database vwiki-race
+VGAMES_IDENTITY -> Worker service vgames-identity
 CLICK_RATE_LIMITER -> configured rate-limit namespace
 ACCOUNT_READ_RATE_LIMITER -> configured rate-limit namespace
 ```
