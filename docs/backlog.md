@@ -25,8 +25,6 @@ gate.
 - Decide whether community challenges need moderation, reporting, deactivation,
   or creator-only deletion.
 - Add challenge search/filtering once the numbered catalog becomes large.
-- Add an explicit Copy Link action; permanent links already use
-  `/?challenge=challenge-000N`.
 - Add cursor pagination before any challenge approaches the current 100-row
   public leaderboard response cap; D1 already retains the underlying attempts.
 

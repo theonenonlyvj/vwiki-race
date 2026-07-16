@@ -20,26 +20,30 @@ D1. There is no realtime room layer.
 
 1. Anyone can browse the challenge catalog and open a permanent URL such as
    `/?challenge=challenge-0003` without first signing in.
-2. Start opens the identity gate only when needed. `Create New` is the default,
+2. The target preview and completed result both expose Copy challenge link,
+   which copies the permanent URL for the selected challenge and confirms the
+   action inline. If browser permissions block automatic copying, the exact URL
+   appears in a selectable field instead.
+3. Start opens the identity gate only when needed. `Create New` is the default,
    `Log In / Existing` uses a VGames account, and `Guest` preserves a VGames
    ghost. Claimed users start without another prompt; returning ghosts are
    encouraged to claim before every challenge but may continue as the same
    guest.
-3. The start page is loaded and sanitized before the server accepts the run.
+4. The start page is loaded and sanitized before the server accepts the run.
    The interactive page and zero timer appear together only after acceptance.
-4. Pointer-down or keyboard focus prewarms only the one indicated article link.
+5. Pointer-down or keyboard focus prewarms only the one indicated article link.
    Activating it freezes decision time. Once Wikipedia has returned and the
    article is sanitized, the destination appears while D1 synchronization is
    still pending. Click count, official path, and accepted current page do not
    change until the Worker accepts the transition.
-5. A failed or rejected transition restores the accepted article. Recoverable
+6. A failed or rejected transition restores the accepted article. Recoverable
    failures preserve the exact idempotent click body for Retry.
-6. Acceptance scrolls the new article heading below the sticky game chrome and
+7. Acceptance scrolls the new article heading below the sticky game chrome and
    focuses it. Ctrl/Cmd+F is blocked during active/syncing play only.
-7. The compact path shows an ellipsis plus the most recent three visited pages
+8. The compact path shows an ellipsis plus the most recent three visited pages
    when needed. A fixed target disclosure shows the full target title and the
    already-loaded, link-free target blurb.
-8. Reaching the canonical target completes the run automatically. The result,
+9. Reaching the canonical target completes the run automatically. The result,
    leaderboard, stats, and disclosed path come from server data.
 
 The Back button, direct URL entry, browser Find, Wikipedia search, external

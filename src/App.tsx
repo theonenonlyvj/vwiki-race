@@ -1454,6 +1454,7 @@ function PlayPanel({
               <button type="button" onClick={onShowLeaderboard}>
                 View leaderboard
               </button>
+              <ChallengeShareButton challengeId={session.challenge.id} />
               <button
                 className="secondary-button"
                 type="button"
@@ -1564,8 +1565,57 @@ function TargetPreviewPanel({
             </a>
           </p>
         ) : null}
+        <ChallengeShareButton challengeId={challenge.id} />
       </div>
     </section>
+  );
+}
+
+function ChallengeShareButton({ challengeId }: { challengeId: string }) {
+  const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const shareUrl = challengeShareUrl(challengeId);
+
+  useEffect(() => {
+    setStatus("idle");
+  }, [challengeId]);
+
+  async function copyChallengeLink() {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API unavailable.");
+      }
+      await navigator.clipboard.writeText(shareUrl);
+      setStatus("copied");
+    } catch {
+      setStatus(copyTextFallback(shareUrl) ? "copied" : "failed");
+    }
+  }
+
+  return (
+    <div className="challenge-share">
+      <button
+        className="secondary-button"
+        onClick={() => void copyChallengeLink()}
+        type="button"
+      >
+        Copy challenge link
+      </button>
+      {status !== "idle" ? (
+        <span aria-live="polite" role="status">
+          {status === "copied"
+            ? "Challenge link copied."
+            : "Automatic copy was blocked. Select the link below."}
+        </span>
+      ) : null}
+      {status === "failed" ? (
+        <input
+          aria-label="Challenge link"
+          onFocus={(event) => event.currentTarget.select()}
+          readOnly
+          value={shareUrl}
+        />
+      ) : null}
+    </div>
   );
 }
 
@@ -1941,6 +1991,29 @@ function syncChallengeUrl(
   }
 
   window.history.pushState({}, "", nextUrl);
+}
+
+function challengeShareUrl(challengeId: string): string {
+  const url = new URL("/", window.location.origin);
+  url.searchParams.set("challenge", challengeId);
+  return url.toString();
+}
+
+function copyTextFallback(text: string): boolean {
+  const field = document.createElement("textarea");
+  field.value = text;
+  field.setAttribute("readonly", "");
+  field.style.position = "fixed";
+  field.style.opacity = "0";
+  document.body.appendChild(field);
+  field.select();
+  try {
+    return document.execCommand?.("copy") === true;
+  } catch {
+    return false;
+  } finally {
+    field.remove();
+  }
 }
 
 function formatElapsed(ms: number): string {

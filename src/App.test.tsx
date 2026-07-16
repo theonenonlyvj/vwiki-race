@@ -1485,6 +1485,183 @@ describe("VWiki Race app", () => {
     });
     expect(window.location.search).toBe("?challenge=challenge-0002");
   });
+
+  it("copies a permanent link for the selected challenge", async () => {
+    window.history.pushState({}, "", "/?challenge=challenge-0002");
+    const user = userEvent.setup();
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    try {
+      render(
+        <App
+          apiOrigin={apiOrigin}
+          fetchImpl={createFetchMock({ challenges: twoChallenges() })}
+          storage={claimedStorage()}
+        />,
+      );
+
+      const preview = await screen.findByRole("region", { name: /target preview/i });
+      await user.click(
+        within(preview).getByRole("button", { name: /copy challenge link/i }),
+      );
+
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith(
+          `${window.location.origin}/?challenge=challenge-0002`,
+        );
+      });
+      expect(await within(preview).findByRole("status")).toHaveTextContent(
+        /challenge link copied/i,
+      );
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "clipboard");
+      }
+    }
+  });
+
+  it("copies the completed challenge link from the result screen", async () => {
+    const user = userEvent.setup();
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    try {
+      render(
+        <App
+          apiOrigin={apiOrigin}
+          fetchImpl={createFetchMock()}
+          storage={claimedStorage()}
+        />,
+      );
+
+      await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+      await user.click(await screen.findByRole("link", { name: /fruit/i }));
+
+      expect(await screen.findByText(/target reached/i)).toBeVisible();
+      await user.click(
+        screen.getByRole("button", { name: /copy challenge link/i }),
+      );
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith(
+          `${window.location.origin}/?challenge=challenge-0001`,
+        );
+      });
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "clipboard");
+      }
+    }
+  });
+
+  it("uses the legacy copy fallback when the Clipboard API is blocked", async () => {
+    const user = userEvent.setup();
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const execCommandDescriptor = Object.getOwnPropertyDescriptor(document, "execCommand");
+    const execCommand = vi.fn().mockReturnValue(true);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new DOMException("Blocked")) },
+    });
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: execCommand,
+    });
+
+    try {
+      render(
+        <App
+          apiOrigin={apiOrigin}
+          fetchImpl={createFetchMock()}
+          storage={claimedStorage()}
+        />,
+      );
+
+      const preview = await screen.findByRole("region", { name: /target preview/i });
+      await user.click(
+        within(preview).getByRole("button", { name: /copy challenge link/i }),
+      );
+
+      expect(await within(preview).findByRole("status")).toHaveTextContent(
+        /challenge link copied/i,
+      );
+      expect(execCommand).toHaveBeenCalledWith("copy");
+      expect(within(preview).queryByRole("textbox", { name: /challenge link/i })).toBeNull();
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "clipboard");
+      }
+      if (execCommandDescriptor) {
+        Object.defineProperty(document, "execCommand", execCommandDescriptor);
+      } else {
+        Reflect.deleteProperty(document, "execCommand");
+      }
+    }
+  });
+
+  it("reveals a selectable challenge link when automatic copying is blocked", async () => {
+    const user = userEvent.setup();
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const execCommandDescriptor = Object.getOwnPropertyDescriptor(document, "execCommand");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new DOMException("Blocked")) },
+    });
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn().mockReturnValue(false),
+    });
+
+    try {
+      render(
+        <App
+          apiOrigin={apiOrigin}
+          fetchImpl={createFetchMock()}
+          storage={claimedStorage()}
+        />,
+      );
+
+      const preview = await screen.findByRole("region", { name: /target preview/i });
+      await user.click(
+        within(preview).getByRole("button", { name: /copy challenge link/i }),
+      );
+
+      const fallbackLink = await within(preview).findByRole("textbox", {
+        name: /challenge link/i,
+      });
+      expect(fallbackLink).toHaveValue(
+        `${window.location.origin}/?challenge=challenge-0001`,
+      );
+      expect(within(preview).getByRole("status")).toHaveTextContent(
+        /select the link below/i,
+      );
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "clipboard");
+      }
+      if (execCommandDescriptor) {
+        Object.defineProperty(document, "execCommand", execCommandDescriptor);
+      } else {
+        Reflect.deleteProperty(document, "execCommand");
+      }
+    }
+  });
 });
 
 function createFetchMock(options?: {

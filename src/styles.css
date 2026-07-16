@@ -732,6 +732,40 @@ h1 {
   color: #36c;
 }
 
+.challenge-share {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+  font-family: var(--viota-ui-font);
+}
+
+.challenge-share span {
+  color: #3a5c63;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.challenge-share input {
+  width: min(360px, 100%);
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid #4a8a91;
+  background: #ffffff;
+  color: #202122;
+  padding: 8px 10px;
+}
+
+.result-actions .challenge-share {
+  margin-top: 0;
+}
+
+.result-actions .challenge-share span {
+  color: #dffbfb;
+}
+
 .article-panel {
   position: relative;
   overflow: hidden;
@@ -1340,6 +1374,22 @@ h1 {
   .leaderboard details {
     grid-column: 2 / -1;
   }
+
+  .result-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .result-actions > button,
+  .result-actions .challenge-share button,
+  .result-actions .challenge-share input {
+    width: 100%;
+  }
+
+  .result-actions .challenge-share {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1579,6 +1629,15 @@ h1 {
   .result-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .challenge-share {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .challenge-share input {
+    min-height: 44px;
   }
 
   .target-preview-copy {

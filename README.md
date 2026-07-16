@@ -52,7 +52,9 @@ current source, configuration, and operational handoffs above.
   lead. Preview failure never blocks Start, and preview links cannot become
   game moves. An already-loaded link-free blurb remains available from a compact
   target disclosure during play.
-- Challenge links use `/?challenge=challenge-000N` and remain stable.
+- Challenge links use `/?challenge=challenge-000N` and remain stable. The
+  selected challenge exposes a Copy challenge link action before play and on
+  the result screen.
 
 ## Local Development
 
