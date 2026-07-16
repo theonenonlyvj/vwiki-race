@@ -248,7 +248,8 @@ These are known or natural variants worth preserving as explicit modes later.
 ## Daily Challenge Contract
 
 1. The system eventually creates at most one immutable daily challenge for
-   each UTC date after Wikipedia and the database are available.
+   each `America/Chicago` calendar date after Wikipedia and the database are
+   available. Its first attempt runs at 5:00 AM Central.
 2. Start and target come from two separate English Wikipedia random-article
    requests, then pass the same canonical page and playable-link validation as
    manual challenges.
@@ -257,7 +258,7 @@ These are known or natural variants worth preserving as explicit modes later.
 4. Manual and daily challenges share one transactional global number sequence.
    The date never determines or resets the number: if `#15` is the latest
    accepted challenge, the next accepted daily challenge is `#16`.
-5. The UTC date is provenance and an idempotency key. Historical daily
+5. The Central date is provenance and an idempotency key. Historical daily
    challenges remain playable at their permanent numbered challenge URLs.
 6. Default selection order is an accepted resumable run, a valid direct
    challenge URL, today's daily challenge, then the first active challenge.

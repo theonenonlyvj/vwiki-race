@@ -2,8 +2,8 @@
 
 ## Goal
 
-Create one immutable numbered VWiki Race challenge for each UTC calendar date
-when Wikipedia and D1 are available. D1 guarantees at most one accepted row per
+Create one immutable numbered VWiki Race challenge for each `America/Chicago`
+calendar date when Wikipedia and D1 are available. D1 guarantees at most one accepted row per
 date; a durable backlog retries missing dates until one is accepted. No system
 can guarantee existence during an indefinite external outage, so the operational
 promise is eventual coverage after dependencies recover. Each endpoint is
@@ -38,12 +38,14 @@ Reference: [MediaWiki API:Random](https://www.mediawiki.org/wiki/API:Random/en).
 
 ## Scheduling And Idempotency
 
-The API Worker exposes a module `scheduled()` handler and a Wrangler cron
-trigger at minute 7 of every hour. Cloudflare schedules cron in UTC. Twenty-four
-small invocations per day are negligible compared with the prior request issue;
-only the invocation holding a generation lease may contact Wikipedia.
+The API Worker exposes a module `scheduled()` handler and two Wrangler cron
+triggers: `0 10 * * *` and `0 11 * * *`. Cloudflare schedules cron in UTC, so
+these cover 5:00 AM Central in daylight and standard time. The handler formats
+the event in `America/Chicago`; the trigger that is not exactly 5:00 AM exits
+before D1 or Wikipedia access. Only the invocation holding a generation lease
+may contact Wikipedia.
 
-Each invocation inserts the current `YYYY-MM-DD` job if absent, then attempts to
+The eligible invocation inserts the current Central `YYYY-MM-DD` job if absent, then attempts to
 claim the oldest due pending or expired job. `daily_challenge_jobs` stores date,
 status (`pending`, `claimed`, `accepted`), attempt count, next-attempt time,
 lease token/expiry, accepted challenge ID, and a redacted failure code. Claiming
@@ -51,9 +53,9 @@ is one conditional D1 mutation. A loser exits without a Wikipedia request. A
 crashed claim becomes eligible after a ten-minute lease.
 
 On candidate failure, the lease holder returns the job to pending with bounded
-backoff of one, two, four, then six hours. Past-date jobs remain in the backlog,
-so a late failure is not permanently skipped. One invocation processes at most
-one job.
+backoff of one, two, four, then six hours. Past-date jobs remain in the backlog
+and the next eligible daily invocation claims the oldest due job, so a late
+failure is not permanently skipped. One invocation processes at most one job.
 
 Acceptance is one D1 atomic operation that verifies the lease token, inserts
 the immutable challenge, and marks the job accepted. A unique nullable

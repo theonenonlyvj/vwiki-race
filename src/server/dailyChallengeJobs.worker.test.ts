@@ -23,6 +23,8 @@ describe("daily challenge D1 jobs", () => {
   it.each([
     ["summer", "2026-07-15T10:00:00.000Z", "2026-07-15"],
     ["winter", "2026-01-15T11:00:00.000Z", "2026-01-15"],
+    ["spring DST boundary", "2026-03-08T10:00:00.000Z", "2026-03-08"],
+    ["fall DST boundary", "2026-11-01T11:00:00.000Z", "2026-11-01"],
   ])("recognizes the 5:00 AM Central %s trigger", (_season, timestamp, dailyDate) => {
     expect(centralDailyDateAtFive(new Date(timestamp))).toBe(dailyDate);
   });
