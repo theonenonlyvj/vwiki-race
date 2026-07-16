@@ -219,13 +219,17 @@ To be completed after final council review and deployment:
 - Build/bundle: TypeScript, Vite production build, and bundle verification passed.
 - Dependency audit: `npm audit --omit=dev` reported zero vulnerabilities.
 - Worker dry run: passed; upload 534.17 KiB / gzip 116.40 KiB and all bindings present.
-- Source commit SHA:
+- Runtime source commit SHA: `cff86fa7e66849c50ba33f4b3370e8b665a02ad7`.
 - D1 migration ledger: remote reported no pending migrations; production audit
   found Challenges #1-#5 active, 5 abandoned + 2 active + 8 completed runs, and
   two accepted daily jobs with zero writes performed by the audit.
 - Private backup (required only for data changes/new migrations): not required;
   this release has no migration or direct data mutation.
 - Git push:
-- Worker deployment/version and UTC time:
+- Worker deployment/version and UTC time: `vwikirace-api` version
+  `d699460b-a34a-4b6d-a3c7-5139311b1f0d`, verified by direct smoke at
+  `2026-07-16T17:42:07Z`. Catalog returned all five active challenges with
+  manual=`solo`, daily=`daily`, correct dates/CORS/cache; Challenge #3 retained
+  both existing leaderboard rows and returned `Cache-Control: no-store`.
 - Pages mechanism, commit/deployment ID, URL, and UTC time:
 - Desktop/mobile production smoke:
