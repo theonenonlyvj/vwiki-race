@@ -1662,6 +1662,49 @@ describe("VWiki Race app", () => {
       }
     }
   });
+
+  it("ignores a pending copy result after another challenge is selected", async () => {
+    const user = userEvent.setup();
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn(() => new Promise<void>(() => undefined)) },
+    });
+
+    try {
+      render(
+        <App
+          apiOrigin={apiOrigin}
+          fetchImpl={createFetchMock({ challenges: twoChallenges() })}
+          storage={claimedStorage()}
+        />,
+      );
+
+      const preview = await screen.findByRole("region", { name: /target preview/i });
+      const copyButton = within(preview).getByRole("button", {
+        name: /copy challenge link/i,
+      });
+      await user.click(copyButton);
+      expect(within(preview).getByRole("status")).toHaveTextContent(
+        /copying challenge link/i,
+      );
+      expect(copyButton).toBeDisabled();
+
+      await user.click(screen.getByRole("button", { name: /challenge #2/i }));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 1_300)));
+
+      const nextPreview = screen.getByRole("region", { name: /target preview/i });
+      expect(within(nextPreview).getByRole("heading", { name: "Water" })).toBeVisible();
+      expect(within(nextPreview).queryByRole("status")).toBeNull();
+      expect(within(nextPreview).queryByRole("textbox", { name: /challenge link/i })).toBeNull();
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "clipboard");
+      }
+    }
+  });
 });
 
 function createFetchMock(options?: {

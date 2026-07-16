@@ -45,6 +45,7 @@ import {
   type VWikiRaceApiClient,
 } from "./services/vwikiRaceApiClient";
 import { createWikipediaGateway } from "./services/wikipediaGateway";
+import { writeTextWithTimeout } from "./services/challengeShare";
 import { type RacePhase, useRaceController } from "./hooks/useRaceController";
 import {
   type TargetPreviewState,
@@ -1572,22 +1573,38 @@ function TargetPreviewPanel({
 }
 
 function ChallengeShareButton({ challengeId }: { challengeId: string }) {
-  const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const [status, setStatus] = useState<"idle" | "copying" | "copied" | "failed">("idle");
+  const activeChallengeId = useRef(challengeId);
+  const copyGeneration = useRef(0);
   const shareUrl = challengeShareUrl(challengeId);
+  activeChallengeId.current = challengeId;
 
   useEffect(() => {
+    copyGeneration.current += 1;
     setStatus("idle");
   }, [challengeId]);
 
   async function copyChallengeLink() {
+    const generation = ++copyGeneration.current;
+    const requestIsCurrent = () =>
+      generation === copyGeneration.current && activeChallengeId.current === challengeId;
+    setStatus("copying");
     try {
       if (!navigator.clipboard?.writeText) {
         throw new Error("Clipboard API unavailable.");
       }
-      await navigator.clipboard.writeText(shareUrl);
+      await writeTextWithTimeout(
+        (text) => navigator.clipboard.writeText(text),
+        shareUrl,
+        1_200,
+      );
+      if (!requestIsCurrent()) return;
       setStatus("copied");
     } catch {
-      setStatus(copyTextFallback(shareUrl) ? "copied" : "failed");
+      if (!requestIsCurrent()) return;
+      const fallbackCopied = copyTextFallback(shareUrl);
+      if (!requestIsCurrent()) return;
+      setStatus(fallbackCopied ? "copied" : "failed");
     }
   }
 
@@ -1595,6 +1612,7 @@ function ChallengeShareButton({ challengeId }: { challengeId: string }) {
     <div className="challenge-share">
       <button
         className="secondary-button"
+        disabled={status === "copying"}
         onClick={() => void copyChallengeLink()}
         type="button"
       >
@@ -1602,9 +1620,11 @@ function ChallengeShareButton({ challengeId }: { challengeId: string }) {
       </button>
       {status !== "idle" ? (
         <span aria-live="polite" role="status">
-          {status === "copied"
-            ? "Challenge link copied."
-            : "Automatic copy was blocked. Select the link below."}
+          {status === "copying"
+            ? "Copying challenge link..."
+            : status === "copied"
+              ? "Challenge link copied."
+              : "Automatic copy was blocked. Select the link below."}
         </span>
       ) : null}
       {status === "failed" ? (
