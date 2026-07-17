@@ -172,16 +172,15 @@ export function createApiHandlers(
       if (validatedArticles.start.allowedLinkCount < 1) {
         throw new ApiError("start_has_no_allowed_links", "The start article has no allowed links.", 409);
       }
-      const dailyClassification = await classifyDailyChallenge(
-        options.classifyDaily,
-        {
-          startTitle: validatedArticles.start.title,
-          startPageId: validatedArticles.start.pageId,
-          startAllowedLinkCount: validatedArticles.start.allowedLinkCount,
-          targetTitle: validatedArticles.target.title,
-          targetPageId: validatedArticles.target.pageId,
-        },
-      );
+      const dailyClassification = nominateForDaily && account.status === "claimed"
+        ? await classifyDailyChallenge(options.classifyDaily, {
+            startTitle: validatedArticles.start.title,
+            startPageId: validatedArticles.start.pageId,
+            startAllowedLinkCount: validatedArticles.start.allowedLinkCount,
+            targetTitle: validatedArticles.target.title,
+            targetPageId: validatedArticles.target.pageId,
+          })
+        : unclassifiedDailyClassification();
       return normalizeCreateChallengeOutcome(await protocol.createChallengeV2(account, {
           startTitle: boundedRequiredString(
             validatedArticles.start.title,

@@ -41,6 +41,9 @@ const targetClick = {
 beforeEach(async () => {
   await env.VWIKI_RACE_DB.exec(`
     DROP TRIGGER IF EXISTS force_click_failure;
+    DELETE FROM daily_features WHERE challenge_id NOT IN ('challenge-0001', 'challenge-0002', 'challenge-0003');
+    DELETE FROM daily_queue_entries;
+    DELETE FROM daily_nominations;
     DELETE FROM operation_idempotency;
     DELETE FROM run_path_steps;
     DELETE FROM run_events;
@@ -1708,18 +1711,225 @@ describe("Task 4 D1 projections", () => {
     const created = await repository.createChallengeV2(account, input);
     await expect(repository.createChallengeV2(account, input)).resolves.toEqual(created);
     expect(created).toMatchObject({
-      id: "challenge-0004",
-      sortOrder: 4,
-      isActive: true,
-      start: { title: "Mars", pageId: 123 },
-      target: { title: "Water", pageId: 456 },
-      createdBy: { accountId: account.accountId, displayName: "Casey" },
+      disposition: "created",
+      nomination: "not_requested",
+      challenge: {
+        id: "challenge-0004",
+        sortOrder: 4,
+        isActive: true,
+        start: { title: "Mars", pageId: 123 },
+        target: { title: "Water", pageId: 456 },
+        createdBy: { accountId: account.accountId, displayName: "Casey" },
+      },
     });
     await expect(scalar("SELECT COUNT(*) FROM challenges WHERE id = 'challenge-0004'"))
       .resolves.toBe(1);
     await expect(scalar(
       "SELECT COUNT(*) FROM operation_idempotency WHERE operation = 'create_challenge'",
     )).resolves.toBe(1);
+  });
+
+  it("reuses an ordered pair without consuming a number and preserves its creator", async () => {
+    const { repository } = fixture();
+    const original = await repository.createChallengeV2(account, {
+      startTitle: "Mars",
+      startPageId: 123,
+      startAllowedLinkCount: 4,
+      targetTitle: "Water",
+      targetPageId: 456,
+      idempotencyKey: "dedupe-original",
+      nominateForDaily: false,
+    });
+    const nominator: AuthorizedAccount = {
+      accountId: "account-nominator",
+      displayName: "Nora",
+      status: "claimed",
+      aliases: [],
+    };
+
+    const duplicate = await repository.createChallengeV2(nominator, {
+      startTitle: "Mars",
+      startPageId: 123,
+      startAllowedLinkCount: 4,
+      targetTitle: "Water",
+      targetPageId: 456,
+      idempotencyKey: "dedupe-nomination",
+      nominateForDaily: true,
+    });
+    const repeatedNomination = await repository.createChallengeV2({
+      ...nominator,
+      accountId: "account-second-nominator",
+    }, {
+      startTitle: "Mars",
+      startPageId: 123,
+      startAllowedLinkCount: 4,
+      targetTitle: "Water",
+      targetPageId: 456,
+      idempotencyKey: "dedupe-second-nomination",
+      nominateForDaily: true,
+    });
+
+    expect(original).toMatchObject({
+      disposition: "created",
+      nomination: "not_requested",
+      challenge: { id: "challenge-0004", sortOrder: 4 },
+    });
+    expect(duplicate).toMatchObject({
+      disposition: "existing",
+      nomination: "pending",
+      challenge: {
+        id: "challenge-0004",
+        createdBy: { accountId: account.accountId, displayName: account.displayName },
+      },
+    });
+    expect(repeatedNomination).toMatchObject({
+      disposition: "existing",
+      nomination: "already_exists",
+      challenge: { id: "challenge-0004" },
+    });
+    await expect(scalar(
+      "SELECT next_sort_order FROM challenge_number_sequence WHERE sequence_name = 'global'",
+    )).resolves.toBe(5);
+    await expect(scalar(
+      "SELECT COUNT(*) FROM challenges WHERE start_page_id = 123 AND target_page_id = 456",
+    )).resolves.toBe(1);
+    await expect(scalar(
+      "SELECT COUNT(*) FROM daily_nominations WHERE challenge_id = 'challenge-0004'",
+    )).resolves.toBe(1);
+
+    const reverse = await repository.createChallengeV2(nominator, {
+      startTitle: "Water",
+      startPageId: 456,
+      startAllowedLinkCount: 4,
+      targetTitle: "Mars",
+      targetPageId: 123,
+      idempotencyKey: "dedupe-reverse",
+      nominateForDaily: false,
+    });
+    expect(reverse).toMatchObject({
+      disposition: "created",
+      challenge: { id: "challenge-0005", sortOrder: 5 },
+    });
+  });
+
+  it("serializes concurrent duplicate pairs into one number and one nomination", async () => {
+    const { repository } = fixture();
+    const accounts: AuthorizedAccount[] = [
+      account,
+      { accountId: "account-racer", displayName: "Riley", status: "claimed", aliases: [] },
+    ];
+    const outcomes = await Promise.all(accounts.map((creator, index) =>
+      repository.createChallengeV2(creator, {
+        startTitle: "Saturn",
+        startPageId: 777,
+        startAllowedLinkCount: 12,
+        targetTitle: "Ocean",
+        targetPageId: 888,
+        idempotencyKey: `concurrent-dedupe-${index}`,
+        nominateForDaily: true,
+      })));
+
+    expect(outcomes.map((outcome) => outcome.disposition).sort()).toEqual(["created", "existing"]);
+    expect(outcomes.map((outcome) => outcome.challenge.id)).toEqual([
+      "challenge-0004",
+      "challenge-0004",
+    ]);
+    expect(outcomes.map((outcome) => outcome.nomination).sort()).toEqual([
+      "already_exists",
+      "pending",
+    ]);
+    await expect(scalar(
+      "SELECT next_sort_order FROM challenge_number_sequence WHERE sequence_name = 'global'",
+    )).resolves.toBe(5);
+    await expect(scalar(
+      "SELECT COUNT(*) FROM daily_nominations WHERE challenge_id = 'challenge-0004'",
+    )).resolves.toBe(1);
+  });
+
+  it("does not renominate a challenge that was already featured", async () => {
+    const { repository } = fixture();
+    const created = await repository.createChallengeV2(account, {
+      startTitle: "Mercury",
+      startPageId: 901,
+      startAllowedLinkCount: 20,
+      targetTitle: "Tides",
+      targetPageId: 902,
+      idempotencyKey: "featured-original",
+      nominateForDaily: false,
+    });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, {
+      dailyDate: "2026-07-20",
+      challengeId: created.challenge.id,
+      selectionSource: "automatic",
+    });
+
+    const duplicate = await repository.createChallengeV2({
+      ...account,
+      accountId: "account-late-nominator",
+    }, {
+      startTitle: "Mercury",
+      startPageId: 901,
+      startAllowedLinkCount: 20,
+      targetTitle: "Tides",
+      targetPageId: 902,
+      idempotencyKey: "featured-duplicate",
+      nominateForDaily: true,
+    });
+
+    expect(duplicate).toMatchObject({
+      disposition: "existing",
+      nomination: "previously_featured",
+      challenge: { id: created.challenge.id },
+    });
+    await expect(scalar(
+      `SELECT COUNT(*) FROM daily_nominations WHERE challenge_id = '${created.challenge.id}'`,
+    )).resolves.toBe(0);
+    await expect(scalar(
+      "SELECT next_sort_order FROM challenge_number_sequence WHERE sequence_name = 'global'",
+    )).resolves.toBe(5);
+  });
+
+  it("creates for a guest but rejects nomination intent and replays legacy receipts", async () => {
+    const { repository } = fixture();
+    const guest: AuthorizedAccount = {
+      accountId: "account-guest",
+      displayName: "Guest name",
+      status: "ghost",
+      aliases: [],
+    };
+    const guestOutcome = await repository.createChallengeV2(guest, {
+      startTitle: "Mars",
+      startPageId: 123,
+      startAllowedLinkCount: 4,
+      targetTitle: "Water",
+      targetPageId: 456,
+      idempotencyKey: "guest-nomination",
+      nominateForDaily: true,
+    });
+    expect(guestOutcome).toMatchObject({
+      disposition: "created",
+      nomination: "account_required",
+      challenge: { id: "challenge-0004" },
+    });
+    await expect(scalar("SELECT COUNT(*) FROM daily_nominations")).resolves.toBe(0);
+
+    const legacyChallenge = (await repository.listChallenges())[0];
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO operation_idempotency
+         (operation, idempotency_key, canonical_account_id, request_fingerprint,
+          resource_id, outcome_status, response_json, created_at)
+       VALUES ('create_challenge', 'legacy-create-receipt', ?, 'legacy-fingerprint',
+               ?, 'accepted', ?, '2026-07-14T12:00:00.000Z')`,
+    ).bind(account.accountId, legacyChallenge.id, JSON.stringify(legacyChallenge)).run();
+
+    await expect(repository.findChallengeCreationReplay(account, {
+      idempotencyKey: "legacy-create-receipt",
+      requestFingerprint: "legacy-fingerprint",
+    })).resolves.toEqual({
+      challenge: legacyChallenge,
+      disposition: "created",
+      nomination: "not_requested",
+    });
   });
 
   it("serializes numeric challenge allocation and enforces the accepted daily quota", async () => {

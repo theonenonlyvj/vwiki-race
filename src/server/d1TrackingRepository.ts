@@ -1,5 +1,9 @@
 import { normalizeTitle } from "../domain/rules";
 import type {
+  CreateChallengeOutcome,
+  DailyClassification,
+} from "../domain/dailyEditorial";
+import type {
   AccountStatus,
   AccountStats,
   AbandonRunTransition,
@@ -249,6 +253,8 @@ export function createD1TrackingRepository(options: {
       const account = normalizeAuthorizedAccount(accountInput);
       const create = normalizeCreateChallengeInput(input);
       const createdAt = timestamp();
+      const nominationId = randomId();
+      const classification = create.dailyClassification!;
       await ingestAuthorizedAccount(db, account, createdAt);
 
       const fingerprint = create.requestFingerprint ?? await fingerprintCreateChallenge(create);
@@ -289,6 +295,44 @@ export function createD1TrackingRepository(options: {
               request_fingerprint, outcome_status, created_at)
            VALUES ('create_challenge', ?, ?, ?, 'pending', ?)`,
         ).bind(create.idempotencyKey, account.accountId, fingerprint, createdAt),
+        db.prepare(
+          `UPDATE operation_idempotency
+           SET resource_id = (
+                 SELECT id FROM challenges
+                 WHERE start_page_id = ? AND target_page_id = ?
+                   AND ruleset = 'ranked_classic'
+                 LIMIT 1
+               ),
+               error_code = 'existing_pair'
+           WHERE operation = 'create_challenge' AND idempotency_key = ?
+             AND canonical_account_id = ? AND request_fingerprint = ?
+             AND outcome_status = 'pending' AND resource_id IS NULL
+             AND EXISTS (
+               SELECT 1 FROM challenges
+               WHERE start_page_id = ? AND target_page_id = ?
+                 AND ruleset = 'ranked_classic'
+             )
+             AND (SELECT count(*) FROM operation_idempotency attempted
+                  WHERE attempted.operation = 'create_challenge'
+                    AND coalesce((SELECT canonical_account_id FROM account_aliases
+                                  WHERE alias_account_id = attempted.canonical_account_id),
+                                 attempted.canonical_account_id) = ?
+                    AND attempted.outcome_status <> 'pending'
+                    AND attempted.created_at > ?) < 20
+             AND (SELECT count(*) FROM operation_idempotency accepted
+                  WHERE accepted.operation = 'create_challenge'
+                    AND coalesce((SELECT canonical_account_id FROM account_aliases
+                                  WHERE alias_account_id = accepted.canonical_account_id),
+                                 accepted.canonical_account_id) = ?
+                    AND accepted.outcome_status = 'accepted'
+                    AND accepted.created_at >= substr(?, 1, 10) || 'T00:00:00.000Z') < 10`,
+        ).bind(
+          create.startPageId, create.targetPageId,
+          create.idempotencyKey, account.accountId, fingerprint,
+          create.startPageId, create.targetPageId,
+          account.accountId, new Date(Date.parse(createdAt) - 60 * 60 * 1000).toISOString(),
+          account.accountId, createdAt,
+        ),
         db.prepare(
           `UPDATE challenge_number_sequence
            SET next_sort_order = next_sort_order + 1
@@ -363,6 +407,7 @@ export function createD1TrackingRepository(options: {
            WHERE o.operation = 'create_challenge' AND o.idempotency_key = ?
              AND o.canonical_account_id = ? AND o.request_fingerprint = ?
              AND o.outcome_status = 'pending'
+             AND NOT EXISTS (SELECT 1 FROM challenges c WHERE c.id = o.resource_id)
              AND (SELECT count(*) FROM operation_idempotency attempted
                   WHERE attempted.operation = 'create_challenge'
                     AND coalesce(
@@ -389,29 +434,88 @@ export function createD1TrackingRepository(options: {
           account.accountId, createdAt,
         ),
         db.prepare(
+          `INSERT OR IGNORE INTO daily_nominations
+             (id, challenge_id, nominated_by_account_id, nominated_by_display_name,
+              status, recognizable_score, weird_score, hard_score,
+              suggested_flavor, confidence, classifier_version,
+              created_at, updated_at)
+           SELECT ?, o.resource_id, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?
+           FROM operation_idempotency o
+           WHERE o.operation = 'create_challenge' AND o.idempotency_key = ?
+             AND o.canonical_account_id = ? AND o.request_fingerprint = ?
+             AND o.outcome_status = 'pending' AND o.resource_id IS NOT NULL
+             AND ? = 1 AND ? = 'claimed'
+             AND EXISTS (SELECT 1 FROM challenges c WHERE c.id = o.resource_id)
+             AND NOT EXISTS (
+               SELECT 1 FROM daily_features f WHERE f.challenge_id = o.resource_id
+             )`,
+        ).bind(
+          nominationId,
+          account.accountId,
+          account.displayName,
+          classification.recognizableScore,
+          classification.weirdScore,
+          classification.hardScore,
+          classification.suggestedFlavor,
+          classification.confidence,
+          classification.classifierVersion,
+          createdAt,
+          createdAt,
+          create.idempotencyKey,
+          account.accountId,
+          fingerprint,
+          create.nominateForDaily ? 1 : 0,
+          account.status,
+        ),
+        db.prepare(
           `UPDATE operation_idempotency
            SET outcome_status = 'accepted',
                response_json = (
                  SELECT json_object(
-                   'id', c.id, 'label', c.label, 'sortOrder', c.sort_order,
-                   'isActive', c.is_active,
-                   'mode', CASE WHEN c.origin = 'daily' THEN 'daily' ELSE 'solo' END,
-                   'start', json_object('title', c.start_title, 'pageId', c.start_page_id),
-                   'target', json_object('title', c.target_title, 'pageId', c.target_page_id),
-                   'ruleset', c.ruleset,
-                   'origin', c.origin,
-                   'dailyDate', c.daily_date,
-                   'source', c.source,
-                   'createdBy', json_object('accountId', c.created_by_account_id,
-                     'displayName', c.created_by_display_name,
-                     'identityStatus', c.created_by_identity_status)
-                 ) FROM challenges c WHERE c.id = resource_id
+                   'challenge', json_object(
+                     'id', c.id, 'label', c.label, 'sortOrder', c.sort_order,
+                     'isActive', c.is_active,
+                     'mode', CASE WHEN c.origin = 'daily' THEN 'daily' ELSE 'solo' END,
+                     'start', json_object('title', c.start_title, 'pageId', c.start_page_id),
+                     'target', json_object('title', c.target_title, 'pageId', c.target_page_id),
+                     'ruleset', c.ruleset,
+                     'origin', c.origin,
+                     'dailyDate', c.daily_date,
+                     'source', c.source,
+                     'createdBy', json_object('accountId', c.created_by_account_id,
+                       'displayName', c.created_by_display_name,
+                       'identityStatus', c.created_by_identity_status)
+                   ),
+                   'disposition', CASE
+                     WHEN operation_idempotency.error_code = 'existing_pair'
+                       THEN 'existing'
+                     ELSE 'created'
+                   END,
+                   'nomination', CASE
+                     WHEN ? = 0 THEN 'not_requested'
+                     WHEN ? <> 'claimed' THEN 'account_required'
+                     WHEN EXISTS (
+                       SELECT 1 FROM daily_features f WHERE f.challenge_id = c.id
+                     ) THEN 'previously_featured'
+                     WHEN EXISTS (
+                       SELECT 1 FROM daily_nominations n WHERE n.id = ?
+                     ) THEN 'pending'
+                     ELSE 'already_exists'
+                   END
+                 ) FROM challenges c WHERE c.id = operation_idempotency.resource_id
                )
            WHERE operation = 'create_challenge' AND idempotency_key = ?
              AND canonical_account_id = ? AND request_fingerprint = ?
              AND outcome_status = 'pending'
              AND EXISTS (SELECT 1 FROM challenges WHERE id = resource_id)`,
-        ).bind(create.idempotencyKey, account.accountId, fingerprint),
+        ).bind(
+          create.nominateForDaily ? 1 : 0,
+          account.status,
+          nominationId,
+          create.idempotencyKey,
+          account.accountId,
+          fingerprint,
+        ),
         db.prepare(
           `UPDATE operation_idempotency
            SET outcome_status = 'rejected', error_code = CASE
@@ -1823,9 +1927,24 @@ function normalizeCreateChallengeInput(input: CreateChallengeV2Input): CreateCha
     targetTitle,
     targetPageId: input.targetPageId,
     idempotencyKey: requireValue(input.idempotencyKey, "invalid_idempotency_key"),
+    nominateForDaily: input.nominateForDaily === true,
+    dailyClassification: normalizeDailyClassification(input.dailyClassification),
     requestFingerprint: input.requestFingerprint === undefined
       ? undefined
       : requireValue(input.requestFingerprint, "invalid_request_fingerprint"),
+  };
+}
+
+function normalizeDailyClassification(
+  input: DailyClassification | undefined,
+): DailyClassification {
+  return input ?? {
+    recognizableScore: null,
+    weirdScore: null,
+    hardScore: null,
+    suggestedFlavor: null,
+    confidence: "unclassified",
+    classifierVersion: "editorial-v1",
   };
 }
 
@@ -1952,14 +2071,30 @@ async function replayCreateChallengeOperation(
   row: OperationRow,
   fingerprint: string,
   at: string,
-): Promise<Challenge> {
+): Promise<CreateChallengeOutcome> {
   await assertOperationReplay(db, account, row, fingerprint, at);
-  const challenge = parseOperationJson<
-    Omit<Challenge, "isActive"> & { isActive?: unknown }
+  const stored = parseOperationJson<
+    | (Omit<CreateChallengeOutcome, "challenge"> & {
+        challenge: Omit<Challenge, "isActive"> & { isActive?: unknown };
+      })
+    | (Omit<Challenge, "isActive"> & { isActive?: unknown })
   >(row);
+  if ("disposition" in stored && "nomination" in stored && "challenge" in stored) {
+    return {
+      ...stored,
+      challenge: {
+        ...stored.challenge,
+        isActive: Boolean(stored.challenge.isActive),
+      },
+    };
+  }
   return {
-    ...challenge,
-    isActive: Boolean(challenge.isActive),
+    challenge: {
+      ...stored,
+      isActive: Boolean(stored.isActive),
+    },
+    disposition: "created",
+    nomination: "not_requested",
   };
 }
 

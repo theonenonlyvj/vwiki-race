@@ -266,6 +266,53 @@ describe("api handlers", () => {
     );
   });
 
+  it("does not classify ordinary or guest challenge creation", async () => {
+    const repository = fakeRepository();
+    const classifyDaily = vi.fn(async () => ({
+      recognizableScore: 80,
+      weirdScore: 10,
+      hardScore: 20,
+      suggestedFlavor: "recognizable" as const,
+      confidence: "high" as const,
+      classifierVersion: "editorial-v1",
+    }));
+    Object.assign(repository, {
+      findChallengeCreationReplay: vi.fn(async () => null),
+      createChallengeV2: vi.fn(async () => ({
+        challenge: {
+          id: "challenge-0002",
+          mode: "solo" as const,
+          start: { title: "Mars", pageId: 123 },
+          target: { title: "Water", pageId: 456 },
+          ruleset: "ranked_classic" as const,
+          source: "curated" as const,
+        },
+        disposition: "created" as const,
+        nomination: "not_requested" as const,
+      })),
+    });
+    const handlers = createApiHandlers(repository, {
+      validateChallengeArticles: vi.fn(async () => ({
+        start: { title: "Mars", pageId: 123, allowedLinkCount: 1 },
+        target: { title: "Water", pageId: 456, allowedLinkCount: 1 },
+      })),
+      classifyDaily,
+    });
+
+    await handlers.createChallengeV2(
+      { accountId: "claimed", displayName: "Casey", status: "claimed", aliases: [] },
+      { startTitle: "Mars", targetTitle: "Water", nominateForDaily: false },
+      "ordinary-create",
+    );
+    await handlers.createChallengeV2(
+      { accountId: "guest", displayName: "Guest", status: "ghost", aliases: [] },
+      { startTitle: "Mars", targetTitle: "Water", nominateForDaily: true },
+      "guest-create",
+    );
+
+    expect(classifyDaily).not.toHaveBeenCalled();
+  });
+
   it("requires a public account name before starting a run", async () => {
     const handlers = createApiHandlers(fakeRepository());
 

@@ -162,9 +162,7 @@ export interface RunProtocolRepository extends TrackingRepository {
   createChallengeV2(
     account: AuthorizedAccount,
     input: CreateChallengeV2Input,
-  // The D1 implementation is upgraded in the repository half of Task 2.
-  // Keep this boundary compatible with its legacy receipt during that split.
-  ): Promise<any>;
+  ): Promise<CreateChallengeOutcome>;
   startRunLegacy(
     account: AuthorizedAccount,
     input: { challengeId: string },

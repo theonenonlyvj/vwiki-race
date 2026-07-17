@@ -125,10 +125,14 @@ describe("daily challenge D1 jobs", () => {
     const created = await repository.createChallengeV2(account, input);
     await expect(repository.createChallengeV2(account, input)).resolves.toEqual(created);
     expect(created).toMatchObject({
-      mode: "solo",
-      origin: "manual",
-      dailyDate: null,
-      source: "curated",
+      disposition: "created",
+      nomination: "not_requested",
+      challenge: {
+        mode: "solo",
+        origin: "manual",
+        dailyDate: null,
+        source: "curated",
+      },
     });
   });
 
@@ -155,7 +159,7 @@ describe("daily challenge D1 jobs", () => {
       targetTitle: "Daily target", targetPageId: 402,
     });
 
-    expect([legacy.id, v2.id, daily.id]).toEqual([
+    expect([legacy.id, v2.challenge.id, daily.id]).toEqual([
       "challenge-0004", "challenge-0005", "challenge-0006",
     ]);
     expect(daily.label).toBe("Challenge #6");
