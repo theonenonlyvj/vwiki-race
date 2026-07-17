@@ -394,7 +394,7 @@ export function createD1TrackingRepository(options: {
         // opaque internal account UUIDs — server-to-server only, NEVER
         // serialize aliases into any client-facing response.
         db.prepare(
-          `INSERT INTO challenges
+          `INSERT OR IGNORE INTO challenges
              (id, label, start_title, target_title, start_page_id, target_page_id,
               validation_status, ruleset, sort_order, is_active, created_at,
               created_by_account_id, created_by_display_name, created_by_identity_status)
@@ -432,6 +432,70 @@ export function createD1TrackingRepository(options: {
           create.idempotencyKey, account.accountId, fingerprint,
           account.accountId, new Date(Date.parse(createdAt) - 60 * 60 * 1000).toISOString(),
           account.accountId, createdAt,
+        ),
+        db.prepare(
+          `UPDATE challenge_number_sequence
+           SET next_sort_order = next_sort_order - 1
+           WHERE sequence_name = 'global'
+             AND NOT EXISTS (
+               SELECT 1 FROM challenges c
+               WHERE c.sort_order = challenge_number_sequence.next_sort_order - 1
+             )
+             AND EXISTS (
+               SELECT 1 FROM operation_idempotency o
+               WHERE o.operation = 'create_challenge' AND o.idempotency_key = ?
+                 AND o.canonical_account_id = ? AND o.request_fingerprint = ?
+                 AND o.outcome_status = 'pending'
+                 AND o.resource_id = printf(
+                   'challenge-%04d', challenge_number_sequence.next_sort_order - 1
+                 )
+                 AND NOT EXISTS (
+                   SELECT 1 FROM challenges allocated WHERE allocated.id = o.resource_id
+                 )
+                 AND EXISTS (
+                   SELECT 1 FROM challenges winner
+                   WHERE winner.start_page_id = ? AND winner.target_page_id = ?
+                     AND winner.ruleset = 'ranked_classic'
+                 )
+             )`,
+        ).bind(
+          create.idempotencyKey,
+          account.accountId,
+          fingerprint,
+          create.startPageId,
+          create.targetPageId,
+        ),
+        db.prepare(
+          `UPDATE operation_idempotency
+           SET resource_id = (
+                 SELECT id FROM challenges
+                 WHERE start_page_id = ? AND target_page_id = ?
+                   AND ruleset = 'ranked_classic'
+                 ORDER BY sort_order, id
+                 LIMIT 1
+               ),
+               error_code = 'existing_pair'
+           WHERE operation = 'create_challenge' AND idempotency_key = ?
+             AND canonical_account_id = ? AND request_fingerprint = ?
+             AND outcome_status = 'pending'
+             AND resource_id IS NOT NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM challenges allocated
+               WHERE allocated.id = operation_idempotency.resource_id
+             )
+             AND EXISTS (
+               SELECT 1 FROM challenges winner
+               WHERE winner.start_page_id = ? AND winner.target_page_id = ?
+                 AND winner.ruleset = 'ranked_classic'
+             )`,
+        ).bind(
+          create.startPageId,
+          create.targetPageId,
+          create.idempotencyKey,
+          account.accountId,
+          fingerprint,
+          create.startPageId,
+          create.targetPageId,
         ),
         db.prepare(
           `INSERT OR IGNORE INTO daily_nominations

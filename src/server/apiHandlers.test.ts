@@ -565,6 +565,7 @@ describe("Worker API route versions", () => {
       ["POST", "/api/v2/challenges", {
         startTitle: "Moon",
         targetTitle: "Gravity",
+        nominateForDaily: true,
         creatorDisplayName: "browser name is ignored",
       }],
       ["POST", "/api/v2/runs/start", {
@@ -628,7 +629,11 @@ describe("Worker API route versions", () => {
 
     expect(tracking.handlers.createChallengeV2).toHaveBeenCalledWith(
       expect.objectContaining({ accountId: "acc-1", displayName: "Casey" }),
-      expect.objectContaining({ startTitle: "Moon", targetTitle: "Gravity" }),
+      expect.objectContaining({
+        startTitle: "Moon",
+        targetTitle: "Gravity",
+        nominateForDaily: true,
+      }),
       "test-idempotency-key",
     );
     expect(tracking.runProtocol?.startRunV2).toHaveBeenCalled();

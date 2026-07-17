@@ -41,6 +41,7 @@ const targetClick = {
 beforeEach(async () => {
   await env.VWIKI_RACE_DB.exec(`
     DROP TRIGGER IF EXISTS force_click_failure;
+    DROP TRIGGER IF EXISTS force_pair_winner;
     DELETE FROM daily_features WHERE challenge_id NOT IN ('challenge-0001', 'challenge-0002', 'challenge-0003');
     DELETE FROM daily_queue_entries;
     DELETE FROM daily_nominations;
@@ -1843,6 +1844,61 @@ describe("Task 4 D1 projections", () => {
     )).resolves.toBe(5);
     await expect(scalar(
       "SELECT COUNT(*) FROM daily_nominations WHERE challenge_id = 'challenge-0004'",
+    )).resolves.toBe(1);
+  });
+
+  it("reconciles a unique-index winner that appears after the pair lookup", async () => {
+    await env.VWIKI_RACE_DB.prepare(`
+      CREATE TRIGGER force_pair_winner
+      BEFORE INSERT ON challenges
+      FOR EACH ROW
+      WHEN NEW.id <> 'challenge-race-winner'
+        AND NEW.start_page_id = 7001 AND NEW.target_page_id = 7002
+      BEGIN
+        INSERT INTO challenges
+          (id, label, start_title, target_title, start_page_id, target_page_id,
+           validation_status, ruleset, sort_order, is_active, created_at,
+           created_by_account_id, created_by_display_name,
+           created_by_identity_status)
+        VALUES
+          ('challenge-race-winner', NEW.label, NEW.start_title, NEW.target_title,
+           NEW.start_page_id, NEW.target_page_id, 'ready', 'ranked_classic',
+           NEW.sort_order, 1, NEW.created_at, 'account-race-winner',
+           'Race winner', 'claimed');
+      END;
+    `).run();
+    const { repository } = fixture();
+
+    const outcome = await repository.createChallengeV2(account, {
+      startTitle: "Race start",
+      startPageId: 7001,
+      startAllowedLinkCount: 20,
+      targetTitle: "Race target",
+      targetPageId: 7002,
+      idempotencyKey: "forced-pair-race",
+      nominateForDaily: true,
+    });
+
+    expect(outcome).toMatchObject({
+      disposition: "existing",
+      nomination: "pending",
+      challenge: {
+        id: "challenge-race-winner",
+        sortOrder: 4,
+        createdBy: {
+          accountId: "account-race-winner",
+          displayName: "Race winner",
+        },
+      },
+    });
+    await expect(scalar(
+      "SELECT next_sort_order FROM challenge_number_sequence WHERE sequence_name = 'global'",
+    )).resolves.toBe(5);
+    await expect(scalar(
+      "SELECT COUNT(*) FROM challenges WHERE start_page_id = 7001 AND target_page_id = 7002",
+    )).resolves.toBe(1);
+    await expect(scalar(
+      "SELECT COUNT(*) FROM daily_nominations WHERE challenge_id = 'challenge-race-winner'",
     )).resolves.toBe(1);
   });
 

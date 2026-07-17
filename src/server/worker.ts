@@ -600,12 +600,24 @@ function boundedInteger(value: unknown, code: string): number {
   return Number(value);
 }
 
-function challengeInput(value: unknown): { startTitle: string; targetTitle: string } {
+function challengeInput(value: unknown): {
+  startTitle: string;
+  targetTitle: string;
+  nominateForDaily?: boolean;
+} {
   const body = requireObject(value);
-  return {
+  const input: {
+    startTitle: string;
+    targetTitle: string;
+    nominateForDaily?: boolean;
+  } = {
     startTitle: boundedString(body.startTitle, "invalid_start_title", 2048),
     targetTitle: boundedString(body.targetTitle, "invalid_target_title", 2048),
   };
+  if (body.nominateForDaily !== undefined) {
+    input.nominateForDaily = body.nominateForDaily as boolean;
+  }
+  return input;
 }
 
 function startInput(value: unknown): { challengeId: string } {
