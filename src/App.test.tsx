@@ -335,6 +335,61 @@ describe("VWiki Race app", () => {
     );
   });
 
+  it("shows the app's friendly error for an invalid username instead of silently blocking submission", async () => {
+    // Regression test: the username input carries native pattern="[a-z0-9_]{3,20}",
+    // which browsers (and jsdom) use to block form submission before onSubmit runs,
+    // so the app's own validation message never rendered. The <form> needs noValidate
+    // so this handler-level check always executes.
+    const fetchImpl = createFetchMock();
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={memoryStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+    await user.type(screen.getByLabelText(/vgames username/i), "Mike Smith");
+    await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
+    await user.type(screen.getByLabelText(/confirm password/i), "secret-pass");
+    await user.click(screen.getByRole("button", { name: /create vgames account/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /use 3-20 lowercase letters, numbers, or underscores/i,
+    );
+    expect(fetchImpl).not.toHaveBeenCalledWith(
+      apiUrl("/api/v2/identity/guest"),
+      expect.anything(),
+    );
+    expect(fetchImpl).not.toHaveBeenCalledWith(
+      apiUrl("/api/v2/identity/secure"),
+      expect.anything(),
+    );
+  });
+
+  it("shows the app's friendly error for a too-short password instead of silently blocking submission", async () => {
+    // Regression test: the password/confirm-password inputs carry native minLength={6},
+    // which blocks form submission before onSubmit runs on a too-short password, so the
+    // app's own validation message never rendered. See noValidate fix on the form.
+    const fetchImpl = createFetchMock();
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={memoryStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+    await user.type(screen.getByLabelText(/vgames username/i), "vijay");
+    await user.type(screen.getByLabelText(/^password$/i), "abc");
+    await user.type(screen.getByLabelText(/confirm password/i), "abc");
+    await user.click(screen.getByRole("button", { name: /create vgames account/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /use a password between 6 and 128 characters/i,
+    );
+    expect(fetchImpl).not.toHaveBeenCalledWith(
+      apiUrl("/api/v2/identity/guest"),
+      expect.anything(),
+    );
+    expect(fetchImpl).not.toHaveBeenCalledWith(
+      apiUrl("/api/v2/identity/secure"),
+      expect.anything(),
+    );
+  });
+
   it("explains when a VGames username is already taken", async () => {
     const baseFetch = createFetchMock();
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

@@ -1157,6 +1157,7 @@ function IdentityPrompt({
         {authMode === "guest" ? (
           <form
             className="identity-form"
+            noValidate
             onSubmit={(event) => {
               event.preventDefault();
               onContinueAsGuest();
@@ -1197,6 +1198,7 @@ function IdentityPrompt({
         {authMode === "create" ? (
           <form
             className="identity-form"
+            noValidate
             onSubmit={(event) => {
               event.preventDefault();
               onCreate();
@@ -1253,6 +1255,7 @@ function IdentityPrompt({
           <form
             aria-busy={authBusy}
             className="identity-form"
+            noValidate
             onSubmit={(event) => {
               event.preventDefault();
               const form = new FormData(event.currentTarget);
