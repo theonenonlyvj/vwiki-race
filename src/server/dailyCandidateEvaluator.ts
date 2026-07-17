@@ -452,6 +452,7 @@ async function hasTwoClickShortcut(
       pltitles: target.title,
     });
     for (const page of queryPages(payload)) {
+      if (!validProxyPage(page)) throw new MalformedWikimediaResponse();
       if (page.links === undefined) continue;
       if (!Array.isArray(page.links)) throw new MalformedWikimediaResponse();
       for (const link of page.links) {
@@ -524,6 +525,13 @@ function queryPages(payload: unknown): Record<string, unknown>[] {
     records.push(page);
   }
   return records;
+}
+
+function validProxyPage(page: Record<string, unknown>): boolean {
+  return page.ns === 0 &&
+    Number.isSafeInteger(page.pageid) && Number(page.pageid) > 0 &&
+    typeof page.title === "string" && parseWikipediaArticleInput(page.title) !== null &&
+    page.missing === undefined && page.invalid === undefined;
 }
 
 interface EditorialSources {

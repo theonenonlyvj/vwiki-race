@@ -124,6 +124,7 @@ describe("daily candidate evaluator", () => {
   for (const [label, payload] of [
     ["non-array pages", { query: { pages: { "1": { pageid: 1, ns: 0, title: "Hop" } } } }],
     ["non-record page entries", { query: { pages: [null] } }],
+    ["empty page records", { query: { pages: [{}] } }],
     ["record links", { query: { pages: [{ pageid: 1, ns: 0, title: "Hop", links: {} }] } }],
     ["string links", { query: { pages: [{ pageid: 1, ns: 0, title: "Hop", links: "Target canonical" }] } }],
     ["non-record link entries", { query: { pages: [{ pageid: 1, ns: 0, title: "Hop", links: ["Target canonical"] }] } }],
