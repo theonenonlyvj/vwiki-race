@@ -1,4 +1,8 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
+import { unstable_splitSqlQuery } from "wrangler";
+import editorialMigration from "../../d1/migrations/0005_editorial_dailies.sql?raw";
 import config from "../../wrangler.api.toml?raw";
 
 const canonicalIdentityOrigin =
@@ -30,5 +34,12 @@ describe("production deployment configuration", () => {
     expect(config).toMatch(
       /\[\[ratelimits\]\]\s*name = "DAILY_ADMIN_RATE_LIMITER"\s*namespace_id = "51005"\s*simple = \{ limit = 30, period = 60 \}/,
     );
+  });
+
+  it("keeps migration 0005 compatible with Wrangler's remote SQL splitter", () => {
+    const statements = unstable_splitSqlQuery(editorialMigration);
+
+    expect(statements).toHaveLength(14);
+    expect(statements.filter((statement) => /^create trigger\b/i.test(statement))).toHaveLength(6);
   });
 });
