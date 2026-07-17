@@ -55,6 +55,15 @@ describe("VWiki Race app", () => {
     expect(screen.queryByText(/enter vwiki race/i)).toBeNull();
   });
 
+  it("explains the race in one line on the Play panel before start", async () => {
+    render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={memoryStorage()} />);
+
+    expect(await screen.findByRole("button", { name: /start challenge #1/i })).toBeVisible();
+    expect(
+      screen.getByText(/race from the start article to the target using only links inside the page/i),
+    ).toBeVisible();
+  });
+
   it("shows a target preview before start and retains a compact in-game reference", async () => {
     const fetchImpl = createFetchMock();
     const user = userEvent.setup();

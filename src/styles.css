@@ -692,6 +692,13 @@ h1 {
   align-items: start;
 }
 
+.how-to-play {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-family: var(--viota-ui-font);
+  font-size: 0.82rem;
+}
+
 .target-preview-panel {
   display: grid;
   min-height: 260px;

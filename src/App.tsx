@@ -1489,6 +1489,9 @@ function PlayPanel({
 
   return (
     <section className="home-layout">
+      <p className="how-to-play muted">
+        Race from the start article to the target using only links inside the page. Fastest time wins.
+      </p>
       {modeState === "idle" && selectedChallenge ? (
         <TargetPreviewPanel
           challenge={selectedChallenge}
