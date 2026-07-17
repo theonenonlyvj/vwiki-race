@@ -24,6 +24,21 @@ beforeEach(async () => {
 });
 
 describe("daily challenge D1 jobs", () => {
+  it("skips scheduled work while maintenance mode is active", async () => {
+    const createTracking = vi.fn();
+    const worker = createWorker({ createTracking });
+
+    await worker.scheduled(createScheduledController({
+      scheduledTime: new Date("2026-07-17T23:17:00.000Z"),
+      cron: "17 * * * *",
+    }), {
+      ...(env as unknown as WorkerEnv),
+      MAINTENANCE_MODE: "true",
+    });
+
+    expect(createTracking).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["summer", "2026-07-15T10:00:00.000Z", "2026-07-15"],
     ["winter", "2026-01-15T11:00:00.000Z", "2026-01-15"],

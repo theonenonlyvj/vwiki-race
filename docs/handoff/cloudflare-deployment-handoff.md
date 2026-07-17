@@ -157,6 +157,55 @@ npx wrangler d1 migrations list vwiki-race --remote --config wrangler.api.toml
 npx wrangler d1 migrations apply vwiki-race --remote --config wrangler.api.toml
 ```
 
+Migration `0005` contains SQLite triggers. Wrangler 4.110 may reject a remote
+`d1 migrations apply` for this file with `SQLITE_ERROR: incomplete input` even
+though the same migration passes D1 locally. The rejected migration is rolled
+back. Confirm the ledger still lists `0005`, the editorial tables are absent,
+and challenge/run counts are unchanged before using this reviewed fallback.
+
+First deploy the reviewed Worker with `MAINTENANCE_MODE=true`. Confirm a normal
+API request returns `503` with `Retry-After: 60`. This freezes user writes and
+causes every scheduled trigger to exit before opening D1. Keep maintenance mode
+enabled through schema verification, ledger repair, normal Worker deployment,
+and its smoke test. Then execute the migration through D1's import path:
+
+```bash
+npx wrangler d1 execute vwiki-race --remote --config wrangler.api.toml \
+  --file d1/migrations/0005_editorial_dailies.sql
+```
+
+Remote file execution uses D1's atomic SQL import path. After it succeeds,
+verify all of the following before recording the migration:
+
+- challenge and run counts match the pre-migration audit;
+- `daily_features`, `daily_nominations`, and `daily_queue_entries` exist;
+- `daily_features` contains one row per legacy Daily challenge;
+- nomination and queue tables are empty on this first release;
+- six `daily_*` provenance triggers exist;
+- four `daily_*` indexes exist;
+- `PRAGMA foreign_key_check` returns no rows;
+- no `daily_features` date or challenge ID appears more than once;
+- the challenge number sequence and legacy Daily backfill match the preflight.
+
+If the file command loses its connection or otherwise reports an indeterminate
+result, do not retry it. Inspect the schema first. Retry only when all `0005`
+objects are absent. Continue to verification when every expected object and
+backfill invariant is present. Stop with maintenance mode still enabled if the
+state is mixed; use the private pre-import backup/Time Travel bookmark instead
+of manually dropping objects.
+
+Only after those checks pass and the backfill mismatch query is clean, record
+the already-applied migration with a fail-closed insert:
+
+```bash
+npx wrangler d1 execute vwiki-race --remote --config wrangler.api.toml \
+  --command "INSERT INTO d1_migrations (name) VALUES ('0005_editorial_dailies.sql');"
+npx wrangler d1 migrations list vwiki-race --remote --config wrangler.api.toml
+```
+
+Do not record the ledger row before verifying the imported schema and backfill.
+Do not retry `d1 migrations apply` after the schema exists.
+
 ## Fixed Rollout Order
 
 Do not reverse these steps.

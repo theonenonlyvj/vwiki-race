@@ -645,6 +645,33 @@ describe("api handlers", () => {
 });
 
 describe("Worker API route versions", () => {
+  it("returns a retryable response without building tracking in maintenance mode", async () => {
+    const createTracking = vi.fn();
+    const worker = createWorker({ createTracking });
+    const maintenanceEnv = {
+      ALLOWED_ORIGINS: "https://vwikirace.pages.dev",
+      MAINTENANCE_MODE: "true",
+    } as unknown as WorkerEnv;
+
+    const response = await worker.fetch(new Request(
+      "https://worker.example/api/v2/challenges",
+      { headers: { Origin: "https://vwikirace.pages.dev" } },
+    ), maintenanceEnv);
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toBe("60");
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
+      "https://vwikirace.pages.dev",
+    );
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "service_unavailable",
+        message: "VWiki Race is briefly unavailable for maintenance.",
+      },
+    });
+    expect(createTracking).not.toHaveBeenCalled();
+  });
+
   it("keeps legacy routes while dispatching the complete v2 matrix", async () => {
     const tracking = fakeWorkerTracking();
     const worker = createWorker({ createTracking: () => tracking });

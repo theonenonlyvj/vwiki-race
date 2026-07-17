@@ -34,9 +34,10 @@ describe("production deployment configuration", () => {
     expect(config).toMatch(
       /\[\[ratelimits\]\]\s*name = "DAILY_ADMIN_RATE_LIMITER"\s*namespace_id = "51005"\s*simple = \{ limit = 30, period = 60 \}/,
     );
+    expect(config).toContain('MAINTENANCE_MODE = "false"');
   });
 
-  it("keeps migration 0005 compatible with Wrangler's remote SQL splitter", () => {
+  it("keeps migration 0005 compatible with Wrangler's local SQL splitter", () => {
     const statements = unstable_splitSqlQuery(editorialMigration);
 
     expect(statements).toHaveLength(14);

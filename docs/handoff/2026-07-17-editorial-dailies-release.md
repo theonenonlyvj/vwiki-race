@@ -66,7 +66,11 @@ Use the generic procedure in
    handoff and record a zero-row result. Any duplicate blocks the migration;
    never delete or merge challenge history during deployment.
 4. Make a private D1 backup/export. Never print, commit, or publish the backup.
-   Apply the reviewed migration and verify the ledger again.
+   Apply the reviewed migration and verify the ledger again. If Wrangler 4.110
+   rejects the trigger migration through `migrations apply`, use only the
+   documented atomic file-import fallback and verify schema/backfill before
+   recording its ledger row. Keep the Worker in reviewed maintenance mode from
+   immediately before the import until the normal Worker passes its smoke test.
 5. Deploy and smoke-test the API Worker from `wrangler.api.toml`.
 6. Only after the Worker is healthy, push/allow Pages deployment and smoke-test
    the frontend. Preserve Worker-before-Pages order.

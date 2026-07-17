@@ -23,6 +23,7 @@ service = "vgames-identity"
 VGAMES_URL = "https://vgames-identity.theonenonlyvj.workers.dev"
 ALLOWED_ORIGINS = "https://vwikirace.pages.dev"
 DAILY_ADMIN_ACCOUNT_IDS = "c02875a7-0470-5ef3-b87a-38abcbdcd952"
+MAINTENANCE_MODE = "false"
 
 [[ratelimits]]
 name = "CLICK_RATE_LIMITER"

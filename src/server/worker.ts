@@ -29,6 +29,7 @@ export interface Env {
   VGAMES_IDENTITY?: Pick<Fetcher, "fetch">;
   VGAMES_URL: string;
   ALLOWED_ORIGINS?: string;
+  MAINTENANCE_MODE?: string;
   CLICK_RATE_LIMITER: RateLimiter;
   ACCOUNT_READ_RATE_LIMITER: RateLimiter;
   CHALLENGE_CREATE_RATE_LIMITER: RateLimiter;
@@ -81,6 +82,25 @@ export function createWorker(options: WorkerOptions = {}) {
         return response;
       }
 
+      if (env.MAINTENANCE_MODE === "true") {
+        response = new Response(JSON.stringify({
+          error: {
+            code: "service_unavailable",
+            message: "VWiki Race is briefly unavailable for maintenance.",
+          },
+        }), {
+          status: 503,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json",
+            "Retry-After": "60",
+          },
+        });
+        response.headers.set("X-Request-Id", requestId);
+        logRequest(request, response.status, requestId, startedAt, "maintenance_mode");
+        return response;
+      }
+
       const url = new URL(request.url);
       const tracking = buildTracking(env);
 
@@ -103,6 +123,12 @@ export function createWorker(options: WorkerOptions = {}) {
       controller: Pick<ScheduledController, "scheduledTime" | "cron">,
       env: Env,
     ): Promise<void> {
+      if (env.MAINTENANCE_MODE === "true") {
+        logDailyJob("maintenance_mode", {
+          scheduledAt: new Date(controller.scheduledTime).toISOString(),
+        });
+        return;
+      }
       const scheduledAt = new Date(controller.scheduledTime);
       if (scheduledAt.getTime() > now().getTime() + 5 * 60 * 1000) {
         logDailyJob("future_trigger_ignored", {
