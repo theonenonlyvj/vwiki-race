@@ -239,18 +239,24 @@ describe("hardening migration", () => {
         challengeId: "legacy-daily-recognizable",
         flavor: "recognizable",
         selectionSource: "automatic",
+        classifierVersion: "legacy-v1",
+        createdAt: "2026-07-17T00:00:00.000Z",
       },
       {
         dailyDate: "2026-07-23",
         challengeId: "legacy-daily-weird",
         flavor: "weird",
         selectionSource: "automatic",
+        classifierVersion: "legacy-v1",
+        createdAt: "2026-07-17T00:00:00.000Z",
       },
       {
         dailyDate: "2026-07-25",
         challengeId: "legacy-daily-hard",
         flavor: "hard",
         selectionSource: "automatic",
+        classifierVersion: "legacy-v1",
+        createdAt: "2026-07-17T00:00:00.000Z",
       },
     ];
     for (const [index, daily] of seededLegacyDailies.entries()) {
@@ -277,18 +283,45 @@ describe("hardening migration", () => {
 
     await applyD1Migrations(db, env.TEST_MIGRATIONS.slice(4), "editorial_migrations");
 
-    const { results: dailyFeatureColumns } = await db.prepare(
-      "PRAGMA table_info(daily_features)",
-    ).all<{ name: string }>();
-    expect(dailyFeatureColumns.map((column) => column.name)).toEqual(expect.arrayContaining([
-      "daily_date", "challenge_id", "flavor", "selection_source",
-    ]));
+    for (const [table, expectedColumns] of [
+      [
+        "daily_nominations",
+        ["id", "challenge_id", "status", "confidence", "classifier_version", "created_at"],
+      ],
+      [
+        "daily_queue_entries",
+        ["id", "challenge_id", "nomination_id", "flavor", "source", "status", "queued_at"],
+      ],
+      [
+        "daily_features",
+        ["daily_date", "challenge_id", "flavor", "selection_source", "queue_entry_id", "created_at"],
+      ],
+    ] as const) {
+      const { results } = await db.prepare(`PRAGMA table_info(${table})`).all<{ name: string }>();
+      expect(results.map((column) => column.name)).toEqual(expect.arrayContaining([...expectedColumns]));
+    }
+    for (const [index, expectedSql] of [
+      [
+        "challenges_ordered_pair_unique_idx",
+        "on challenges (start_page_id, target_page_id, ruleset) where start_page_id is not null and target_page_id is not null",
+      ],
+      ["daily_nominations_pending_idx", "on daily_nominations (created_at, id) where status = 'pending'"],
+      ["daily_queue_entries_one_queued_challenge_idx", "on daily_queue_entries (challenge_id) where status = 'queued'"],
+      ["daily_queue_entries_queued_fifo_idx", "on daily_queue_entries (flavor, queued_at, id) where status = 'queued'"],
+    ] as const) {
+      const row = await db.prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+      ).bind(index).first<{ sql: string }>();
+      expect(row?.sql, `${index} should exist`).toBeTruthy();
+      expect(normalizeSql(row?.sql ?? "")).toContain(expectedSql);
+    }
     await expect(db.prepare(
       "SELECT COUNT(*) AS count FROM daily_features WHERE daily_date IS NOT NULL",
     ).first<{ count: number }>()).resolves.toEqual({ count: 3 });
     await expect(db.prepare(
       `SELECT daily_date AS dailyDate, challenge_id AS challengeId,
-              flavor, selection_source AS selectionSource
+              flavor, selection_source AS selectionSource,
+              classifier_version AS classifierVersion, created_at AS createdAt
        FROM daily_features
        ORDER BY daily_date`,
     ).all()).resolves.toMatchObject({ results: seededLegacyDailies });
@@ -300,6 +333,118 @@ describe("hardening migration", () => {
                'Another target', 'ranked_classic', 200, 1,
                '2026-07-17T00:00:00.000Z', 9001, 9101, 'ready')`,
     ).run()).rejects.toThrow(/constraint/i);
+    await expect(db.prepare(
+      `INSERT INTO challenges
+         (id, label, start_title, target_title, ruleset, sort_order, is_active,
+          created_at, start_page_id, target_page_id, validation_status)
+       VALUES ('reverse-ordered-pair', 'Reverse pair', 'Another start',
+               'Another target', 'ranked_classic', 201, 1,
+               '2026-07-17T00:00:00.000Z', 9101, 9001, 'ready')`,
+    ).run()).resolves.toBeDefined();
+
+    await expect(insertEditorialQueue(db, {
+      id: "queue-community-without-nomination",
+      challengeId: "challenge-0001",
+      source: "community",
+    })).rejects.toThrow(/community queue entry requires an approved nomination/i);
+    await insertEditorialNomination(db, {
+      id: "nomination-pending",
+      challengeId: "challenge-0001",
+      status: "pending",
+    });
+    await expect(insertEditorialQueue(db, {
+      id: "queue-community-pending-nomination",
+      challengeId: "challenge-0001",
+      nominationId: "nomination-pending",
+      source: "community",
+    })).rejects.toThrow(/community queue entry requires an approved nomination/i);
+    await insertEditorialNomination(db, {
+      id: "nomination-approved-other-challenge",
+      challengeId: "challenge-0002",
+      status: "approved",
+    });
+    await expect(insertEditorialQueue(db, {
+      id: "queue-community-mismatched-nomination",
+      challengeId: "challenge-0001",
+      nominationId: "nomination-approved-other-challenge",
+      source: "community",
+    })).rejects.toThrow(/community queue entry requires an approved nomination/i);
+    await insertEditorialNomination(db, {
+      id: "nomination-approved",
+      challengeId: "challenge-0003",
+      status: "approved",
+    });
+    await insertEditorialQueue(db, {
+      id: "queue-community",
+      challengeId: "challenge-0003",
+      nominationId: "nomination-approved",
+      source: "community",
+    });
+    await insertEditorialQueue(db, {
+      id: "queue-admin",
+      challengeId: "reverse-ordered-pair",
+      source: "admin",
+    });
+    await expect(insertEditorialQueue(db, {
+      id: "queue-admin-duplicate",
+      challengeId: "reverse-ordered-pair",
+      source: "admin",
+    })).rejects.toThrow(/constraint/i);
+    await expect(db.prepare(
+      `UPDATE daily_queue_entries
+       SET status = 'consumed', consumed_daily_date = '2026-07-28',
+           consumed_at = '2026-07-17T00:01:00.000Z'
+       WHERE id = 'queue-admin'`,
+    ).run()).resolves.toBeDefined();
+    await insertEditorialQueue(db, {
+      id: "queue-admin-replacement",
+      challengeId: "reverse-ordered-pair",
+      source: "admin",
+    });
+    await expect(db.prepare(
+      "UPDATE daily_nominations SET status = 'declined' WHERE id = 'nomination-approved'",
+    ).run()).rejects.toThrow(/community queue entry requires an approved nomination/i);
+
+    await expect(insertEditorialFeature(db, {
+      dailyDate: "2026-07-26",
+      challengeId: "challenge-0001",
+      selectionSource: "automatic",
+      queueEntryId: "queue-community",
+    })).rejects.toThrow(/automatic daily feature cannot reference a queue entry/i);
+    await expect(insertEditorialFeature(db, {
+      dailyDate: "2026-07-26",
+      challengeId: "challenge-0002",
+      selectionSource: "community",
+      queueEntryId: "queue-community",
+    })).rejects.toThrow(/daily feature queue entry must match challenge and selection source/i);
+    await expect(insertEditorialFeature(db, {
+      dailyDate: "2026-07-26",
+      challengeId: "challenge-0003",
+      selectionSource: "admin",
+      queueEntryId: "queue-community",
+    })).rejects.toThrow(/daily feature queue entry must match challenge and selection source/i);
+    await insertEditorialFeature(db, {
+      dailyDate: "2026-07-27",
+      challengeId: "challenge-0003",
+      selectionSource: "community",
+      queueEntryId: "queue-community",
+    });
+    await insertEditorialFeature(db, {
+      dailyDate: "2026-07-28",
+      challengeId: "reverse-ordered-pair",
+      selectionSource: "admin",
+      queueEntryId: "queue-admin",
+    });
+    await expect(insertEditorialFeature(db, {
+      dailyDate: "2026-07-28",
+      challengeId: "challenge-0003",
+      selectionSource: "automatic",
+    })).rejects.toThrow(/constraint/i);
+    await expect(insertEditorialFeature(db, {
+      dailyDate: "2026-07-29",
+      challengeId: "reverse-ordered-pair",
+      selectionSource: "automatic",
+    })).rejects.toThrow(/constraint/i);
 
     await expect(db.prepare(
       "SELECT start_title, start_page_id, validation_status FROM challenges WHERE id = 'challenge-0002'",
@@ -2457,6 +2602,54 @@ async function count(table: string): Promise<number> {
 async function scalar(sql: string): Promise<number> {
   const row = await env.VWIKI_RACE_DB.prepare(sql).first<Record<string, number>>();
   return Number(Object.values(row ?? {})[0] ?? 0);
+}
+
+async function insertEditorialNomination(
+  db: D1DatabaseLike,
+  input: { id: string; challengeId: string; status: "pending" | "approved" },
+): Promise<void> {
+  await db.prepare(
+    `INSERT INTO daily_nominations
+       (id, challenge_id, nominated_by_account_id, nominated_by_display_name,
+        status, confidence, classifier_version, created_at, updated_at)
+     VALUES (?, ?, 'nominator', 'Nominator', ?, 'unclassified', 'test-v1',
+             '2026-07-17T00:00:00.000Z', '2026-07-17T00:00:00.000Z')`,
+  ).bind(input.id, input.challengeId, input.status).run();
+}
+
+async function insertEditorialQueue(
+  db: D1DatabaseLike,
+  input: { id: string; challengeId: string; source: "community" | "admin"; nominationId?: string },
+): Promise<void> {
+  await db.prepare(
+    `INSERT INTO daily_queue_entries
+       (id, challenge_id, nomination_id, flavor, source, status,
+        queued_by_account_id, queued_at, updated_at)
+     VALUES (?, ?, ?, 'recognizable', ?, 'queued', 'editor',
+             '2026-07-17T00:00:00.000Z', '2026-07-17T00:00:00.000Z')`,
+  ).bind(input.id, input.challengeId, input.nominationId ?? null, input.source).run();
+}
+
+async function insertEditorialFeature(
+  db: D1DatabaseLike,
+  input: {
+    dailyDate: string;
+    challengeId: string;
+    selectionSource: "automatic" | "community" | "admin";
+    queueEntryId?: string;
+  },
+): Promise<void> {
+  await db.prepare(
+    `INSERT INTO daily_features
+       (daily_date, challenge_id, flavor, selection_source, queue_entry_id,
+        classifier_version, created_at)
+     VALUES (?, ?, 'recognizable', ?, ?, 'test-v1', '2026-07-17T00:00:00.000Z')`,
+  ).bind(
+    input.dailyDate,
+    input.challengeId,
+    input.selectionSource,
+    input.queueEntryId ?? null,
+  ).run();
 }
 
 async function runStatus(runId: string): Promise<string | undefined> {

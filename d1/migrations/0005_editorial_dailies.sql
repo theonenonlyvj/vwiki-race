@@ -52,6 +52,45 @@ create index daily_queue_entries_queued_fifo_idx
   on daily_queue_entries (flavor, queued_at, id)
   where status = 'queued';
 
+create trigger daily_queue_entries_community_nomination_insert
+before insert on daily_queue_entries
+for each row
+when new.source = 'community' and not exists (
+  select 1 from daily_nominations
+  where id = new.nomination_id
+    and challenge_id = new.challenge_id
+    and status = 'approved'
+)
+begin
+  select raise(abort, 'community queue entry requires an approved nomination for the same challenge');
+end;
+
+create trigger daily_queue_entries_community_nomination_update
+before update of challenge_id, nomination_id, source on daily_queue_entries
+for each row
+when new.source = 'community' and not exists (
+  select 1 from daily_nominations
+  where id = new.nomination_id
+    and challenge_id = new.challenge_id
+    and status = 'approved'
+)
+begin
+  select raise(abort, 'community queue entry requires an approved nomination for the same challenge');
+end;
+
+create trigger daily_nominations_community_queue_approval_update
+before update of challenge_id, status on daily_nominations
+for each row
+when exists (
+  select 1 from daily_queue_entries
+  where nomination_id = new.id
+    and source = 'community'
+    and (new.challenge_id <> challenge_id or new.status <> 'approved')
+)
+begin
+  select raise(abort, 'community queue entry requires an approved nomination for the same challenge');
+end;
+
 create table daily_features (
   daily_date text primary key check (daily_date glob '????-??-??'),
   challenge_id text not null unique references challenges(id),
@@ -65,6 +104,60 @@ create table daily_features (
   selected_score integer,
   created_at text not null
 );
+
+create trigger daily_features_queue_provenance_insert
+before insert on daily_features
+for each row
+when (new.selection_source = 'automatic' and new.queue_entry_id is not null)
+  or (
+    new.selection_source in ('community', 'admin')
+    and not exists (
+      select 1 from daily_queue_entries
+      where id = new.queue_entry_id
+        and challenge_id = new.challenge_id
+        and source = new.selection_source
+    )
+  )
+begin
+  select case
+    when new.selection_source = 'automatic'
+      then raise(abort, 'automatic daily feature cannot reference a queue entry')
+    else raise(abort, 'daily feature queue entry must match challenge and selection source')
+  end;
+end;
+
+create trigger daily_features_queue_provenance_update
+before update of challenge_id, selection_source, queue_entry_id on daily_features
+for each row
+when (new.selection_source = 'automatic' and new.queue_entry_id is not null)
+  or (
+    new.selection_source in ('community', 'admin')
+    and not exists (
+      select 1 from daily_queue_entries
+      where id = new.queue_entry_id
+        and challenge_id = new.challenge_id
+        and source = new.selection_source
+    )
+  )
+begin
+  select case
+    when new.selection_source = 'automatic'
+      then raise(abort, 'automatic daily feature cannot reference a queue entry')
+    else raise(abort, 'daily feature queue entry must match challenge and selection source')
+  end;
+end;
+
+create trigger daily_queue_entries_feature_provenance_update
+before update of challenge_id, source on daily_queue_entries
+for each row
+when exists (
+  select 1 from daily_features
+  where queue_entry_id = new.id
+    and (challenge_id <> new.challenge_id or selection_source <> new.source)
+)
+begin
+  select raise(abort, 'daily feature queue entry must match challenge and selection source');
+end;
 
 insert into daily_features (
   daily_date,
