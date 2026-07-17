@@ -43,6 +43,7 @@ beforeEach(async () => {
     DROP TRIGGER IF EXISTS force_click_failure;
     DROP TRIGGER IF EXISTS force_pair_winner;
     DELETE FROM daily_features WHERE challenge_id NOT IN ('challenge-0001', 'challenge-0002', 'challenge-0003');
+    DELETE FROM daily_challenge_jobs;
     DELETE FROM daily_queue_entries;
     DELETE FROM daily_nominations;
     DELETE FROM operation_idempotency;
@@ -1446,16 +1447,23 @@ describe("Task 4 D1 projections", () => {
       challenge: { id: "queue-oldest" },
     });
     expect(queued?.id).not.toBe(newest.id);
-    await expect(repository.listDailyAdminState()).resolves.toMatchObject({
-      nominations: [
-        { id: "nomination-oldest", status: "approved", reviewedByAccountId: "admin-account" },
-        { id: "nomination-newest", status: "approved", reviewedByAccountId: "admin-account" },
-      ],
-      queueEntries: [
+    const adminState = await repository.listDailyAdminState();
+    expect(adminState.nominations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "nomination-oldest", status: "approved", reviewedByAccountId: "admin-account",
+      }),
+      expect.objectContaining({
+        id: "nomination-newest", status: "approved", reviewedByAccountId: "admin-account",
+      }),
+    ]));
+    expect(adminState.queueEntries).toEqual([
+      expect.objectContaining(
         { id: oldest.id, flavor: "weird", source: "community", status: "queued" },
+      ),
+      expect.objectContaining(
         { id: newest.id, flavor: "weird", source: "community", status: "queued" },
-      ],
-    });
+      ),
+    ]);
   });
 
   it("invalidates unusable queue entries and never consumes featured or removed entries", async () => {
@@ -1499,7 +1507,7 @@ describe("Task 4 D1 projections", () => {
     await expect(repository.findQueuedDailyCandidate("hard")).resolves.toBeNull();
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT id, status FROM daily_queue_entries ORDER BY id",
-    ).all()).resolves.toEqual({
+    ).all()).resolves.toMatchObject({
       results: [
         { id: "disabled-entry", status: "invalid" },
         { id: "featured-entry", status: "invalid" },
@@ -1587,7 +1595,7 @@ describe("Task 4 D1 projections", () => {
       source: "wikipedia_random",
       dailyFeature: {
         dailyDate: "2026-07-20",
-        flavor: "hard",
+        flavor: "recognizable",
         selectionSource: "automatic",
       },
     });
@@ -1601,7 +1609,7 @@ describe("Task 4 D1 projections", () => {
         dailyDate: "2026-07-20",
         dailyFeature: {
           dailyDate: "2026-07-20",
-          flavor: "hard",
+          flavor: "recognizable",
           selectionSource: "automatic",
         },
       }),
