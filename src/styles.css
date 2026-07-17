@@ -459,9 +459,21 @@ h1 {
   display: flex;
 }
 
-.header-compact .player-gate button:first-child,
+.header-compact .player-gate button:first-child:not(.end-run-button),
 .header-compact .account-chip {
   display: none;
+}
+
+.end-run-button {
+  border-color: #ffb4a6;
+  background: var(--coral);
+  color: #170908;
+  min-height: 44px;
+  font-weight: 900;
+}
+
+.end-run-button:not(:disabled):hover {
+  box-shadow: 0 0 0 3px rgba(255, 118, 95, 0.35);
 }
 
 .name-control {

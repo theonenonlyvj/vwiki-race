@@ -797,6 +797,28 @@ describe("VWiki Race app", () => {
     expect(screen.getByRole("button", { name: /^end run$/i })).toBeDisabled();
   });
 
+  it("keeps End Run as a prominent, styled control that opens the confirmation during an active run", async () => {
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+
+    const endRun = screen.getByRole("button", { name: /^end run$/i });
+    expect(endRun).toBeEnabled();
+    // Locks in the dedicated styling hook so the control reads as an obvious,
+    // actionable "end / give up" affordance rather than a bare header button.
+    expect(endRun).toHaveClass("end-run-button");
+    // The header is always in its "compact" layout while a run is active
+    // (see headerState in App.tsx), which previously hid this exact button
+    // via a `.player-gate button:first-child` CSS rule. Guard the DOM shape
+    // that rule keys off so a regression there is caught here too.
+    expect(endRun.closest(".app-shell")).toHaveClass("header-compact");
+    expect(endRun).toBe(endRun.parentElement?.firstElementChild);
+
+    await user.click(endRun);
+    expect(screen.getByRole("dialog", { name: /end this run/i })).toBeVisible();
+  });
+
   it("shows Timer in active run metrics and freezes it throughout syncing and completion", async () => {
     let now = 1_000;
     const fruitArticle = createDeferredResponse(fruitParseResponse);

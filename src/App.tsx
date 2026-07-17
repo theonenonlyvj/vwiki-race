@@ -871,6 +871,7 @@ export default function App({
           ) : null}
           {modeState === "active" || modeState === "syncing" || race.recoveryRun ? (
             <button
+              className="end-run-button"
               disabled={endRunIsBlocked || modeState === "preparing" || modeState === "abandoning"}
               type="button"
               onClick={(event) => {
