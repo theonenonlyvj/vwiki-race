@@ -8,6 +8,7 @@ import {
 
 const vitalHtml = `
   <main id="mw-content-text"><ul>
+    <li><a href="/wiki/Earth?action=edit">query edit Earth</a></li>
     <li><a href="/wiki/Earth" data-pageid="101">Earth</a> <a href="/wiki/Incidental">details</a></li>
     <li><a href="/wiki/File:Earth.jpg">image</a></li>
     <li><a href="/w/index.php?title=Moon&action=edit">edit Moon</a></li>

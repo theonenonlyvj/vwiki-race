@@ -80,7 +80,12 @@ describe("daily candidate scoring", () => {
       editorialMembership: expect.any(Number), pageviews: expect.any(Number), thumbnail: expect.any(Number),
     }));
     expect(first.classifierVersion).toBe(CLASSIFIER_VERSION);
-    expect(compareScoredDailyCandidates(first, { ...first, tieBreak: first.tieBreak + 1 }, "recognizable")).toBeGreaterThan(0);
+    const lowerScore = { ...first, recognizableScore: first.recognizableScore - 1 };
+    const higherTie = { ...first, tieBreak: first.tieBreak + 1 };
+    expect([lowerScore, first].sort((left, right) =>
+      compareScoredDailyCandidates(left, right, "recognizable"))[0]).toBe(first);
+    expect([higherTie, first].sort((left, right) =>
+      compareScoredDailyCandidates(left, right, "recognizable"))[0]).toBe(first);
   });
 
   it("degrades confidence for missing pageviews without invalidating editorial membership", () => {

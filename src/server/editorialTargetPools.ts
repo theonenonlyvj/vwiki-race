@@ -160,6 +160,7 @@ function entryFromAnchor(
 }
 
 function isCanonicalArticleHref(href: string): boolean {
+  if (href.includes("?") || href.includes("#")) return false;
   return href.startsWith("/wiki/") || /^https:\/\/en\.wikipedia\.org\/wiki\//i.test(href);
 }
 

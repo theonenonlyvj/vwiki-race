@@ -53,10 +53,10 @@ export function compareScoredDailyCandidates(
   right: ScoredDailyCandidate,
   flavor: "recognizable" | "weird" | "hard",
 ): number {
-  if (left.eligible !== right.eligible) return left.eligible ? 1 : -1;
+  if (left.eligible !== right.eligible) return left.eligible ? -1 : 1;
   const scoreKey = `${flavor}Score` as const;
-  if (left[scoreKey] !== right[scoreKey]) return left[scoreKey] - right[scoreKey];
-  return right.tieBreak - left.tieBreak;
+  if (left[scoreKey] !== right[scoreKey]) return right[scoreKey] - left[scoreKey];
+  return left.tieBreak - right.tieBreak;
 }
 
 export function stableSample<T>(pool: readonly T[], requestedCount: number, seed: string): T[] {
