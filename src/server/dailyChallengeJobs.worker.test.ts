@@ -3,6 +3,7 @@ import { applyD1Migrations, createScheduledController } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthorizedAccount } from "../domain/types";
 import { createD1TrackingRepository } from "./d1TrackingRepository";
+import { ApiError } from "./http";
 import {
   centralDailyDateAtFive,
   createWorker,
@@ -200,11 +201,13 @@ describe("daily challenge D1 jobs", () => {
       startPageId: 201,
       targetTitle: "Target",
       targetPageId: 202,
+      selectedScore: 79,
     }));
     const worker = (createWorker as unknown as (options: {
       createTracking: () => WorkerTracking;
       createDailyCandidateSource: () => { findCandidate(request: { dailyDate: string; flavor: string }): Promise<{
         startTitle: string; startPageId: number; targetTitle: string; targetPageId: number;
+        selectedScore: number;
       }> };
     }) => { scheduled: (controller: { scheduledTime: number }, env: unknown) => Promise<void> })({
       createTracking: () => ({ handlers: {}, identity: {}, runProtocol: repository, authorize: async () => {
@@ -241,6 +244,7 @@ describe("daily challenge D1 jobs", () => {
       startPageId: 201,
       targetTitle: "Target",
       targetPageId: 202,
+      selectedScore: 74,
     }));
     const worker = createWorker({
       createTracking: () => ({
@@ -277,6 +281,7 @@ describe("daily challenge D1 jobs", () => {
       startPageId: 501,
       targetTitle: "Retry target",
       targetPageId: 502,
+      selectedScore: 68,
     }));
     const worker = createWorker({
       createTracking: () => ({
@@ -500,6 +505,7 @@ describe("daily challenge D1 jobs", () => {
       startPageId: 7203,
       targetTitle: "Automatic target",
       targetPageId: 7204,
+      selectedScore: 79,
     }));
     const worker = createWorker({
       createTracking: () => ({
@@ -522,8 +528,8 @@ describe("daily challenge D1 jobs", () => {
       "SELECT status FROM daily_queue_entries WHERE id = ?",
     ).bind(queued.id).first()).resolves.toEqual({ status: "invalid" });
     await expect(env.VWIKI_RACE_DB.prepare(
-      "SELECT selection_source FROM daily_features WHERE daily_date = '2026-07-16'",
-    ).first()).resolves.toEqual({ selection_source: "automatic" });
+      "SELECT selection_source, selected_score FROM daily_features WHERE daily_date = '2026-07-16'",
+    ).first()).resolves.toEqual({ selection_source: "automatic", selected_score: 79 });
   });
 
   it("accepts automatic editorial candidates through the daily feature contract", async () => {
@@ -556,6 +562,7 @@ describe("daily challenge D1 jobs", () => {
           startPageId: 7301,
           targetTitle: "Automatic target",
           targetPageId: 7302,
+          selectedScore: 79,
         })),
       }),
       now: () => new Date("2026-07-15T10:00:00.000Z"),
@@ -575,8 +582,114 @@ describe("daily challenge D1 jobs", () => {
         targetPageId: 7302,
       },
       classifierVersion: "editorial-v1",
+      selectedScore: 79,
     });
     expect(acceptDailyChallenge).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a lost lease", "daily_feature_lease_lost"],
+    ["another accepted date selection", "daily_feature_date_conflict"],
+  ])("does not retry the queue or construct the evaluator after %s", async (_reason, code) => {
+    const job = {
+      dailyDate: "2026-07-15",
+      attemptCount: 1,
+      leaseToken: "terminal-lease",
+      leaseExpiresAt: "2026-07-15T10:10:00.000Z",
+    };
+    const findQueuedDailyCandidate = vi.fn(async () => ({ id: "queue-terminal" }));
+    const acceptDailyFeature = vi.fn(async () => {
+      throw new ApiError(code, "Daily feature acceptance did not complete.", 500);
+    });
+    const failDailyChallengeJob = vi.fn(async () => undefined);
+    const createDailyCandidateSource = vi.fn(() => ({ findCandidate: vi.fn() }));
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: {},
+        identity: {},
+        runProtocol: {
+          ensureDailyChallengeJob: vi.fn(async () => undefined),
+          claimDueDailyChallengeJob: vi.fn(async () => job),
+          failDailyChallengeJob,
+          findQueuedDailyCandidate,
+          acceptDailyFeature,
+        },
+        authorize: async () => { throw new Error("not used"); },
+      } as unknown as WorkerTracking),
+      createDailyCandidateSource,
+      now: () => new Date("2026-07-15T10:00:00.000Z"),
+    });
+
+    await expect(worker.scheduled(createScheduledController({
+      scheduledTime: new Date("2026-07-15T10:00:00.000Z"),
+      cron: "0 10 * * *",
+    }), env as unknown as WorkerEnv)).rejects.toMatchObject({ code });
+
+    expect(findQueuedDailyCandidate).toHaveBeenCalledTimes(1);
+    expect(acceptDailyFeature).toHaveBeenCalledTimes(1);
+    expect(createDailyCandidateSource).not.toHaveBeenCalled();
+    expect(failDailyChallengeJob).toHaveBeenCalledWith(job, code);
+  });
+
+  it("bounds queue-selection retries before falling back to one automatic evaluation", async () => {
+    const job = {
+      dailyDate: "2026-07-15",
+      attemptCount: 1,
+      leaseToken: "queue-race-lease",
+      leaseExpiresAt: "2026-07-15T10:10:00.000Z",
+    };
+    const findQueuedDailyCandidate = vi.fn(async () => ({ id: "queue-race" }));
+    const acceptDailyFeature = vi.fn()
+      .mockRejectedValueOnce(new ApiError(
+        "daily_queue_selection_changed",
+        "Daily feature acceptance did not complete.",
+        500,
+      ))
+      .mockRejectedValueOnce(new ApiError(
+        "daily_queue_selection_changed",
+        "Daily feature acceptance did not complete.",
+        500,
+      ))
+      .mockRejectedValueOnce(new ApiError(
+        "daily_queue_selection_changed",
+        "Daily feature acceptance did not complete.",
+        500,
+      ))
+      .mockResolvedValueOnce({ id: "challenge-automatic" });
+    const findCandidate = vi.fn(async () => ({
+      startTitle: "Automatic start",
+      startPageId: 7401,
+      targetTitle: "Automatic target",
+      targetPageId: 7402,
+      selectedScore: 83,
+    }));
+    const createDailyCandidateSource = vi.fn(() => ({ findCandidate }));
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: {},
+        identity: {},
+        runProtocol: {
+          ensureDailyChallengeJob: vi.fn(async () => undefined),
+          claimDueDailyChallengeJob: vi.fn(async () => job),
+          failDailyChallengeJob: vi.fn(async () => undefined),
+          findQueuedDailyCandidate,
+          acceptDailyFeature,
+        },
+        authorize: async () => { throw new Error("not used"); },
+      } as unknown as WorkerTracking),
+      createDailyCandidateSource,
+      now: () => new Date("2026-07-15T10:00:00.000Z"),
+    });
+
+    await worker.scheduled(createScheduledController({
+      scheduledTime: new Date("2026-07-15T10:00:00.000Z"),
+      cron: "0 10 * * *",
+    }), env as unknown as WorkerEnv);
+
+    expect(findQueuedDailyCandidate).toHaveBeenCalledTimes(3);
+    expect(createDailyCandidateSource).toHaveBeenCalledTimes(1);
+    expect(findCandidate).toHaveBeenCalledTimes(1);
+    expect(acceptDailyFeature).toHaveBeenCalledTimes(4);
   });
 
   it("ignores a trigger dated more than five minutes in the future", async () => {

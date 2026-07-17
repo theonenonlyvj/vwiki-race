@@ -367,7 +367,7 @@ describe("daily candidate evaluator", () => {
     });
   });
 
-  it("emits bounded selection metrics without widening the persistence candidate", async () => {
+  it("returns the chosen flavor score and emits exact bounded selection metrics", async () => {
     const onDiagnostic = vi.fn();
     const evaluator = createDailyCandidateEvaluator({
       fetchImpl: wikipediaFetch({
@@ -383,18 +383,19 @@ describe("daily candidate evaluator", () => {
       dailyDate: "2026-07-17",
       flavor: "recognizable",
     })).resolves.toEqual({
-      startTitle: expect.any(String),
-      startPageId: expect.any(Number),
+      startTitle: "Start two",
+      startPageId: 102,
       targetTitle: "Target canonical",
       targetPageId: 1,
+      selectedScore: 79,
     });
-    expect(onDiagnostic).toHaveBeenCalledWith("selection", expect.objectContaining({
+    expect(onDiagnostic).toHaveBeenCalledWith("selection", {
       dailyDate: "2026-07-17",
       flavor: "recognizable",
       candidateCount: 3,
-      requestCount: expect.any(Number),
-      selectedScore: expect.any(Number),
-    }));
+      requestCount: 12,
+      selectedScore: 79,
+    });
   });
 });
 

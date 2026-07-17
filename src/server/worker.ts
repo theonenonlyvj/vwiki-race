@@ -153,7 +153,7 @@ export function createWorker(options: WorkerOptions = {}) {
           queue: queueResult,
           elapsedMs: Date.now() - selectionStartedAt,
         });
-        const candidate = await buildDailyCandidateSource().findCandidate({
+        const { selectedScore, ...candidate } = await buildDailyCandidateSource().findCandidate({
           dailyDate: job.dailyDate,
           flavor,
         });
@@ -161,6 +161,7 @@ export function createWorker(options: WorkerOptions = {}) {
           kind: "automatic",
           candidate,
           classifierVersion: CLASSIFIER_VERSION,
+          selectedScore,
         });
         logDailyJob("accepted", {
           dailyDate: job.dailyDate,
@@ -226,7 +227,7 @@ async function acceptQueuedDailyFeature(
 }
 
 function isQueueSelectionRace(caught: unknown): boolean {
-  return caught instanceof ApiError && caught.code === "daily_feature_accept_failed";
+  return caught instanceof ApiError && caught.code === "daily_queue_selection_changed";
 }
 
 async function dispatchV2(
@@ -1212,12 +1213,27 @@ function logRequest(
   failureBoundary?: string,
 ): void {
   console.info(JSON.stringify({
-    route: new URL(request.url).pathname,
+    route: requestLogRoute(new URL(request.url).pathname),
     status,
     requestId,
     latencyMs: Date.now() - startedAt,
     failureBoundary: failureBoundary ?? null,
   }));
+}
+
+function requestLogRoute(pathname: string): string {
+  const nominationPrefix = "/api/v2/admin/daily-nominations/";
+  if (pathname.startsWith(nominationPrefix)) {
+    const action = pathname.match(/\/(approve|decline)$/)?.[1];
+    return action
+      ? `${nominationPrefix}:nominationId/${action}`
+      : `${nominationPrefix}:nominationId`;
+  }
+  const queuePrefix = "/api/v2/admin/daily-queue/";
+  if (pathname.startsWith(queuePrefix)) {
+    return `${queuePrefix}:queueEntryId`;
+  }
+  return pathname;
 }
 
 function corsHeadersFor(request: Request, env: Env): Record<string, string> {

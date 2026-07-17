@@ -6,6 +6,7 @@ describe("daily challenge candidate facade", () => {
   it("delegates the editorial daily request and preserves the persistence candidate shape", async () => {
     const findCandidate = vi.fn(async () => ({
       startTitle: "Start", startPageId: 101, targetTitle: "Target", targetPageId: 202,
+      selectedScore: 67,
     }));
     const source = createDailyChallengeCandidateSource({
       fetchImpl: vi.fn() as unknown as typeof fetch,
@@ -15,6 +16,7 @@ describe("daily challenge candidate facade", () => {
 
     await expect(source.findCandidate({ dailyDate: "2026-07-17", flavor: "weird" })).resolves.toEqual({
       startTitle: "Start", startPageId: 101, targetTitle: "Target", targetPageId: 202,
+      selectedScore: 67,
     });
     expect(findCandidate).toHaveBeenCalledWith({ dailyDate: "2026-07-17", flavor: "weird" });
 
@@ -27,6 +29,7 @@ describe("daily challenge candidate facade", () => {
   it("rejects a missing facade request instead of synthesizing a legacy date and flavor", async () => {
     const findCandidate = vi.fn(async () => ({
       startTitle: "Start", startPageId: 101, targetTitle: "Target", targetPageId: 202,
+      selectedScore: 67,
     }));
     const source = createDailyChallengeCandidateSource({
       fetchImpl: vi.fn() as unknown as typeof fetch,

@@ -27,6 +27,7 @@ export interface DailyChallengeCandidate {
   startPageId: number;
   targetTitle: string;
   targetPageId: number;
+  selectedScore: number;
 }
 
 export interface DailyCandidateRequest {
@@ -143,13 +144,13 @@ export function createDailyCandidateEvaluator(options: {
         if (ranked.length === 0) throw unavailable();
         if (request.flavor !== "hard") {
           emitSelectionDiagnostic(diagnostic, request, budget, ranked, ranked[0]!);
-          return toCandidate(ranked[0]!);
+          return toCandidate(ranked[0]!, request.flavor);
         }
 
         for (const pair of ranked) {
           if (!(await hasTwoClickShortcut(pair.start, pair.target, budget, endpoint))) {
             emitSelectionDiagnostic(diagnostic, request, budget, ranked, pair);
-            return toCandidate(pair);
+            return toCandidate(pair, request.flavor);
           }
         }
         throw unavailable();
@@ -499,13 +500,19 @@ function rankPairs(
   });
 }
 
-function toCandidate(pair: CandidatePair): DailyChallengeCandidate {
+function toCandidate(pair: CandidatePair, flavor: DailyFlavor): DailyChallengeCandidate {
   return {
     startTitle: pair.start.title,
     startPageId: pair.start.pageId,
     targetTitle: pair.target.title,
     targetPageId: pair.target.pageId,
+    selectedScore: selectedFlavorScore(pair, flavor),
   };
+}
+
+function selectedFlavorScore(pair: CandidatePair, flavor: DailyFlavor): number {
+  const scoreKey = `${flavor}Score` as const;
+  return pair.score[scoreKey];
 }
 
 function emitSelectionDiagnostic(
@@ -518,13 +525,12 @@ function emitSelectionDiagnostic(
   ranked: readonly CandidatePair[],
   selected: CandidatePair,
 ): void {
-  const scoreKey = `${request.flavor}Score` as const;
   diagnostic("selection", {
     dailyDate: request.dailyDate,
     flavor: request.flavor,
     candidateCount: ranked.length,
     requestCount: budget.requestCount(),
-    selectedScore: selected.score[scoreKey],
+    selectedScore: selectedFlavorScore(selected, request.flavor),
   });
 }
 

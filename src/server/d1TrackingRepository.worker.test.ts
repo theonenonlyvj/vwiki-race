@@ -1756,7 +1756,7 @@ describe("Task 4 D1 projections", () => {
         targetPageId: 6802,
       },
       classifierVersion: "editorial-v1",
-    })).rejects.toMatchObject({ code: "daily_feature_accept_failed", status: 500 });
+    })).rejects.toMatchObject({ code: "daily_feature_selection_conflict", status: 500 });
     await expect(scalar(
       "SELECT COUNT(*) FROM daily_features WHERE challenge_id = 'old-automatic-pair'",
     )).resolves.toBe(1);
@@ -1832,7 +1832,7 @@ describe("Task 4 D1 projections", () => {
       kind: "queued",
       queueEntryId: "stale-queued-entry",
       classifierVersion: "editorial-v1",
-    })).rejects.toMatchObject({ code: "daily_feature_accept_failed", status: 500 });
+    })).rejects.toMatchObject({ code: "daily_feature_date_conflict", status: 500 });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT challenge_id, selection_source, queue_entry_id FROM daily_features WHERE daily_date = ?",
     ).bind("2026-07-27").first()).resolves.toEqual({
@@ -1845,6 +1845,47 @@ describe("Task 4 D1 projections", () => {
     ).bind("stale-queued-entry").first()).resolves.toEqual({
       status: "queued",
       consumed_daily_date: null,
+    });
+  });
+
+  it("classifies a lost lease without consuming the selected queue entry", async () => {
+    const clock = { now: "2026-07-17T03:30:00.000Z" };
+    const staleRepository = fixture(clock, "lost-lease-stale").repository;
+    await insertReadyChallenge({
+      id: "lost-lease-challenge",
+      startPageId: 6923,
+      targetPageId: 6924,
+    });
+    await insertEditorialQueue(env.VWIKI_RACE_DB, {
+      id: "lost-lease-queue",
+      challengeId: "lost-lease-challenge",
+      source: "admin",
+      flavor: "recognizable",
+    });
+    await staleRepository.ensureDailyChallengeJob("2026-07-31");
+    const staleJob = await staleRepository.claimDueDailyChallengeJob();
+
+    clock.now = "2026-07-17T03:41:00.000Z";
+    const currentRepository = fixture(clock, "lost-lease-current").repository;
+    const currentJob = await currentRepository.claimDueDailyChallengeJob();
+    expect(currentJob).toMatchObject({ leaseToken: "lost-lease-current" });
+
+    await expect(staleRepository.acceptDailyFeature(staleJob!, {
+      kind: "queued",
+      queueEntryId: "lost-lease-queue",
+      classifierVersion: "editorial-v1",
+    })).rejects.toMatchObject({ code: "daily_feature_lease_lost", status: 500 });
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT status, consumed_daily_date FROM daily_queue_entries WHERE id = ?",
+    ).bind("lost-lease-queue").first()).resolves.toEqual({
+      status: "queued",
+      consumed_daily_date: null,
+    });
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT status, lease_token FROM daily_challenge_jobs WHERE daily_date = ?",
+    ).bind("2026-07-31").first()).resolves.toEqual({
+      status: "claimed",
+      lease_token: "lost-lease-current",
     });
   });
 
@@ -1877,7 +1918,7 @@ describe("Task 4 D1 projections", () => {
         targetPageId: 6942,
       },
       classifierVersion: "editorial-v1",
-    })).rejects.toMatchObject({ code: "daily_feature_accept_failed", status: 500 });
+    })).rejects.toMatchObject({ code: "daily_feature_date_conflict", status: 500 });
     await expect(env.VWIKI_RACE_DB.prepare(
       `SELECT f.challenge_id, f.selection_source, c.start_page_id, c.target_page_id
        FROM daily_features f JOIN challenges c ON c.id = f.challenge_id
@@ -1919,7 +1960,7 @@ describe("Task 4 D1 projections", () => {
       kind: "queued",
       queueEntryId: "z-fifo-selected-entry",
       classifierVersion: "editorial-v1",
-    })).rejects.toMatchObject({ code: "daily_feature_accept_failed", status: 500 });
+    })).rejects.toMatchObject({ code: "daily_queue_selection_changed", status: 500 });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT id, status FROM daily_queue_entries ORDER BY id",
     ).all()).resolves.toMatchObject({

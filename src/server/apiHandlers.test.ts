@@ -1241,19 +1241,37 @@ describe("editorial daily administration routes", () => {
     await expect(response.json()).resolves.toEqual({ canManageDailies: false });
   });
 
-  it("requires an idempotency key before approving a daily nomination", async () => {
+  it.each([
+    ["approval", "POST", "/api/v2/admin/daily-nominations/nomination-1/approve", { flavor: "weird" }],
+    ["decline", "POST", "/api/v2/admin/daily-nominations/nomination-1/decline", {}],
+    ["direct queue", "POST", "/api/v2/admin/daily-queue", { challengeId: "challenge-1", flavor: "hard" }],
+    ["queue deletion", "DELETE", "/api/v2/admin/daily-queue/queue-1", {}],
+  ] as const)("requires an idempotency key before daily moderation %s", async (
+    _operation,
+    method,
+    pathname,
+    body,
+  ) => {
     const tracking = fakeWorkerTracking();
     const approveDailyNomination = vi.fn();
-    Object.assign(tracking.handlers, { approveDailyNomination });
+    const declineDailyNomination = vi.fn();
+    const queueDailyChallenge = vi.fn();
+    const removeDailyQueueEntry = vi.fn();
+    Object.assign(tracking.handlers, {
+      approveDailyNomination,
+      declineDailyNomination,
+      queueDailyChallenge,
+      removeDailyQueueEntry,
+    });
     tracking.authorize = vi.fn(async () => claimedAdmin());
     const worker = createWorker({ createTracking: () => tracking });
 
     const response = await worker.fetch(new Request(
-      "https://worker.example/api/v2/admin/daily-nominations/nomination-1/approve",
+      `https://worker.example${pathname}`,
       {
-        method: "POST",
+        method,
         headers: { Authorization: "Bearer test", "Content-Type": "application/json" },
-        body: JSON.stringify({ flavor: "weird" }),
+        body: JSON.stringify(body),
       },
     ), editorialWorkerEnv("canonical-admin"));
 
@@ -1262,6 +1280,240 @@ describe("editorial daily administration routes", () => {
       error: { code: "invalid_idempotency_key" },
     });
     expect(approveDailyNomination).not.toHaveBeenCalled();
+    expect(declineDailyNomination).not.toHaveBeenCalled();
+    expect(queueDailyChallenge).not.toHaveBeenCalled();
+    expect(removeDailyQueueEntry).not.toHaveBeenCalled();
+  });
+
+  it("propagates the canonical administrator through decline, direct queue, and deletion", async () => {
+    const tracking = fakeWorkerTracking();
+    const declineDailyNomination = vi.fn(async () => ({ id: "nomination-1" }));
+    const queueDailyChallenge = vi.fn(async () => ({ id: "queue-1" }));
+    const removeDailyQueueEntry = vi.fn(async () => ({ id: "queue-1" }));
+    Object.assign(tracking.handlers, {
+      declineDailyNomination,
+      queueDailyChallenge,
+      removeDailyQueueEntry,
+    });
+    tracking.authorize = vi.fn(async () => claimedAdmin());
+    const worker = createWorker({ createTracking: () => tracking });
+    const env = editorialWorkerEnv("canonical-admin");
+
+    const decline = await worker.fetch(new Request(
+      "https://worker.example/api/v2/admin/daily-nominations/nomination%2D1/decline",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer test",
+          "Content-Type": "application/json",
+          "Idempotency-Key": "decline-1",
+        },
+        body: "{}",
+      },
+    ), env);
+    const queue = await worker.fetch(new Request(
+      "https://worker.example/api/v2/admin/daily-queue",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer test",
+          "Content-Type": "application/json",
+          "Idempotency-Key": "queue-1",
+        },
+        body: JSON.stringify({ challengeId: "challenge-1", flavor: "hard" }),
+      },
+    ), env);
+    const remove = await worker.fetch(new Request(
+      "https://worker.example/api/v2/admin/daily-queue/queue%2D1",
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: "Bearer test",
+          "Content-Type": "application/json",
+          "Idempotency-Key": "remove-1",
+        },
+        body: "{}",
+      },
+    ), env);
+
+    expect([decline.status, queue.status, remove.status]).toEqual([200, 200, 200]);
+    expect(declineDailyNomination).toHaveBeenCalledWith(
+      "canonical-admin", "nomination-1", "decline-1",
+    );
+    expect(queueDailyChallenge).toHaveBeenCalledWith(
+      "canonical-admin", "challenge-1", "hard", "queue-1",
+    );
+    expect(removeDailyQueueEntry).toHaveBeenCalledWith(
+      "canonical-admin", "queue-1", "remove-1",
+    );
+  });
+
+  it.each([
+    ["approval extra field", "POST", "/api/v2/admin/daily-nominations/nomination-1/approve", { flavor: "weird", extra: true }, "invalid_request"],
+    ["approval flavor", "POST", "/api/v2/admin/daily-nominations/nomination-1/approve", { flavor: 1 }, "invalid_daily_flavor"],
+    ["decline body", "POST", "/api/v2/admin/daily-nominations/nomination-1/decline", { flavor: "hard" }, "invalid_request"],
+    ["queue challenge", "POST", "/api/v2/admin/daily-queue", { challengeId: 1, flavor: "hard" }, "invalid_challenge_id"],
+    ["queue extra field", "POST", "/api/v2/admin/daily-queue", { challengeId: "challenge-1", flavor: "hard", extra: true }, "invalid_request"],
+    ["deletion body", "DELETE", "/api/v2/admin/daily-queue/queue-1", { extra: true }, "invalid_request"],
+  ] as const)("rejects a strict or wrong daily moderation %s", async (
+    _case,
+    method,
+    pathname,
+    body,
+    code,
+  ) => {
+    const tracking = fakeWorkerTracking();
+    const mutation = vi.fn();
+    Object.assign(tracking.handlers, {
+      approveDailyNomination: mutation,
+      declineDailyNomination: mutation,
+      queueDailyChallenge: mutation,
+      removeDailyQueueEntry: mutation,
+    });
+    tracking.authorize = vi.fn(async () => claimedAdmin());
+    const worker = createWorker({ createTracking: () => tracking });
+
+    const response = await worker.fetch(new Request(`https://worker.example${pathname}`, {
+      method,
+      headers: {
+        Authorization: "Bearer test",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "strict-body",
+      },
+      body: JSON.stringify(body),
+    }), editorialWorkerEnv("canonical-admin"));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: { code } });
+    expect(mutation).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["GET", "/api/v2/admin/daily-nominations/nomination-1/approve"],
+    ["DELETE", "/api/v2/admin/daily-nominations/nomination-1/decline"],
+    ["PUT", "/api/v2/admin/daily-queue"],
+    ["POST", "/api/v2/admin/daily-queue/queue-1"],
+  ] as const)("does not dispatch the wrong moderation method %s %s", async (method, pathname) => {
+    const tracking = fakeWorkerTracking();
+    const mutation = vi.fn();
+    Object.assign(tracking.handlers, {
+      approveDailyNomination: mutation,
+      declineDailyNomination: mutation,
+      queueDailyChallenge: mutation,
+      removeDailyQueueEntry: mutation,
+    });
+    tracking.authorize = vi.fn(async () => claimedAdmin());
+    const worker = createWorker({ createTracking: () => tracking });
+
+    const response = await worker.fetch(new Request(`https://worker.example${pathname}`, {
+      method,
+      headers: { Authorization: "Bearer test" },
+    }), editorialWorkerEnv("canonical-admin"));
+
+    expect(response.status).toBe(404);
+    expect(mutation).not.toHaveBeenCalled();
+  });
+
+  it("rejects limited administrators and fails closed without the admin limiter", async () => {
+    const tracking = fakeWorkerTracking();
+    const declineDailyNomination = vi.fn();
+    Object.assign(tracking.handlers, { declineDailyNomination });
+    tracking.authorize = vi.fn(async () => claimedAdmin());
+    const worker = createWorker({ createTracking: () => tracking });
+    const limitedEnv = editorialWorkerEnv("canonical-admin");
+    const limit = vi.fn(async () => ({ success: false }));
+    limitedEnv.DAILY_ADMIN_RATE_LIMITER = { limit };
+    const request = () => new Request(
+      "https://worker.example/api/v2/admin/daily-nominations/nomination-1/decline",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer test",
+          "Content-Type": "application/json",
+          "Idempotency-Key": "decline-limited",
+        },
+        body: "{}",
+      },
+    );
+
+    const limited = await worker.fetch(request(), limitedEnv);
+    const unavailableEnv = editorialWorkerEnv("canonical-admin");
+    delete unavailableEnv.DAILY_ADMIN_RATE_LIMITER;
+    const unavailable = await worker.fetch(request(), unavailableEnv);
+
+    expect(limited.status).toBe(429);
+    await expect(limited.json()).resolves.toMatchObject({
+      error: { code: "daily_admin_rate_limited" },
+    });
+    expect(limit).toHaveBeenCalledWith({ key: "decline:canonical-admin" });
+    expect(unavailable.status).toBe(503);
+    await expect(unavailable.json()).resolves.toMatchObject({
+      error: { code: "rate_limiter_unavailable" },
+    });
+    expect(declineDailyNomination).not.toHaveBeenCalled();
+  });
+
+  it("redacts malformed and oversized moderation IDs from request logs", async () => {
+    const tracking = fakeWorkerTracking();
+    tracking.authorize = vi.fn(async () => claimedAdmin());
+    const worker = createWorker({ createTracking: () => tracking });
+    const env = editorialWorkerEnv("canonical-admin");
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const oversizedNominationId = `private-nomination-${"x".repeat(220)}`;
+    const oversizedQueueId = `private-queue-${"y".repeat(220)}`;
+
+    try {
+      const malformed = await worker.fetch(new Request(
+        "https://worker.example/api/v2/admin/daily-nominations/%E0%A4%A-secret-admin-id/approve",
+        {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer test",
+            "Content-Type": "application/json",
+            "Idempotency-Key": "malformed-log",
+          },
+          body: "{}",
+        },
+      ), env);
+      const oversized = await worker.fetch(new Request(
+        `https://worker.example/api/v2/admin/daily-nominations/${oversizedNominationId}/decline`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer test",
+            "Content-Type": "application/json",
+            "Idempotency-Key": "oversized-log",
+          },
+          body: "{}",
+        },
+      ), env);
+      const queue = await worker.fetch(new Request(
+        `https://worker.example/api/v2/admin/daily-queue/${oversizedQueueId}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: "Bearer test",
+            "Content-Type": "application/json",
+            "Idempotency-Key": "oversized-queue-log",
+          },
+          body: "{}",
+        },
+      ), env);
+
+      expect([malformed.status, oversized.status, queue.status]).toEqual([400, 400, 400]);
+      const logs = consoleInfo.mock.calls.map(([line]) => JSON.parse(String(line)) as { route: string });
+      expect(logs.map(({ route }) => route)).toEqual([
+        "/api/v2/admin/daily-nominations/:nominationId/approve",
+        "/api/v2/admin/daily-nominations/:nominationId/decline",
+        "/api/v2/admin/daily-queue/:queueEntryId",
+      ]);
+      const serialized = JSON.stringify(logs);
+      expect(serialized).not.toContain("secret-admin-id");
+      expect(serialized).not.toContain("private-nomination");
+      expect(serialized).not.toContain("private-queue");
+    } finally {
+      consoleInfo.mockRestore();
+    }
   });
 
   it("strictly decodes path IDs and passes the claimed actor to daily moderation", async () => {

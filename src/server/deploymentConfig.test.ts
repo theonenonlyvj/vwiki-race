@@ -3,6 +3,8 @@ import config from "../../wrangler.api.toml?raw";
 
 const canonicalIdentityOrigin =
   "https://vgames-identity.theonenonlyvj.workers.dev";
+const productionDailyAdminAccountId =
+  "c02875a7-0470-5ef3-b87a-38abcbdcd952";
 
 describe("production deployment configuration", () => {
   it("routes VGames identity through the canonical identity service", () => {
@@ -18,5 +20,15 @@ describe("production deployment configuration", () => {
     );
     expect(config).not.toContain('crons = ["7 * * * *"]');
     expect(config).toContain('name = "CHALLENGE_CREATE_RATE_LIMITER"');
+  });
+
+  it("pins the production Daily administrator and low-volume limiter", () => {
+    expect(config).toContain(
+      `DAILY_ADMIN_ACCOUNT_IDS = "${productionDailyAdminAccountId}"`,
+    );
+    expect(config.match(/DAILY_ADMIN_ACCOUNT_IDS\s*=/g)).toHaveLength(1);
+    expect(config).toMatch(
+      /\[\[ratelimits\]\]\s*name = "DAILY_ADMIN_RATE_LIMITER"\s*namespace_id = "51005"\s*simple = \{ limit = 30, period = 60 \}/,
+    );
   });
 });

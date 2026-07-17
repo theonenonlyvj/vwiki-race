@@ -796,8 +796,14 @@ export function createD1TrackingRepository(options: {
         provenance,
       );
       if (!row) {
+        const failureCode = await dailyFeatureAcceptanceFailureCode(
+          db,
+          normalizedJob,
+          normalizedSelection,
+          flavor,
+        );
         throw new ApiError(
-          "daily_feature_accept_failed",
+          failureCode,
           "Daily feature acceptance did not complete.",
           500,
         );
@@ -2734,6 +2740,69 @@ async function selectChallengeForDailyFeature(
      JOIN challenges c ON c.id = f.challenge_id
      WHERE f.daily_date = ? AND (${provenance.sql})`,
   ).bind(dailyDate, ...provenance.bindings).first<ChallengeRow>();
+}
+
+async function dailyFeatureAcceptanceFailureCode(
+  db: D1DatabaseLike,
+  job: DailyChallengeJob,
+  selection: DailyFeatureSelection,
+  flavor: DailyFlavor,
+): Promise<
+  | "daily_feature_date_conflict"
+  | "daily_feature_lease_lost"
+  | "daily_feature_selection_conflict"
+  | "daily_queue_selection_changed"
+  | "daily_feature_accept_failed"
+> {
+  const dateFeature = await db.prepare(
+    "SELECT challenge_id FROM daily_features WHERE daily_date = ?",
+  ).bind(job.dailyDate).first<{ challenge_id: string }>();
+  if (dateFeature) return "daily_feature_date_conflict";
+
+  const jobState = await db.prepare(
+    "SELECT status, lease_token FROM daily_challenge_jobs WHERE daily_date = ?",
+  ).bind(job.dailyDate).first<{ status: string; lease_token: string | null }>();
+  if (jobState?.status !== "claimed" || jobState.lease_token !== job.leaseToken) {
+    return "daily_feature_lease_lost";
+  }
+
+  if (selection.kind === "queued") {
+    const queueHead = await db.prepare(
+      `SELECT q.id
+       FROM daily_queue_entries q
+       JOIN challenges c ON c.id = q.challenge_id
+       WHERE q.status = 'queued' AND q.flavor = ?
+         AND c.is_active = 1 AND c.validation_status = 'ready'
+         AND NOT EXISTS (
+           SELECT 1 FROM daily_features f WHERE f.challenge_id = q.challenge_id
+         )
+         AND (q.source = 'admin' OR EXISTS (
+           SELECT 1 FROM daily_nominations n
+           WHERE n.id = q.nomination_id AND n.challenge_id = q.challenge_id
+             AND n.status = 'approved'
+         ))
+       ORDER BY q.queued_at, q.id
+       LIMIT 1`,
+    ).bind(flavor).first<{ id: string }>();
+    return queueHead?.id === selection.queueEntryId
+      ? "daily_feature_accept_failed"
+      : "daily_queue_selection_changed";
+  }
+
+  const existingSelection = await db.prepare(
+    `SELECT f.daily_date
+     FROM daily_features f
+     JOIN challenges c ON c.id = f.challenge_id
+     WHERE c.start_page_id = ? AND c.target_page_id = ?
+       AND c.ruleset = 'ranked_classic'
+     LIMIT 1`,
+  ).bind(
+    selection.candidate.startPageId,
+    selection.candidate.targetPageId,
+  ).first<{ daily_date: string }>();
+  return existingSelection
+    ? "daily_feature_selection_conflict"
+    : "daily_feature_accept_failed";
 }
 
 function dailyFeatureAcceptanceProvenance(
