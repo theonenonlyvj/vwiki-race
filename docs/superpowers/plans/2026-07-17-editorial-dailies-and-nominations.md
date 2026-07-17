@@ -51,7 +51,7 @@
 - `src/services/vwikiRaceApiClient.ts`: new validators and client methods.
 - `src/App.tsx`: nomination intent through auth gating, duplicate feedback, capabilities, and admin route composition.
 - `src/styles.css`: creation checkbox, notices, and admin surface responsive styles.
-- `wrangler.toml`: non-secret `DAILY_ADMIN_ACCOUNT_IDS` production configuration.
+- `wrangler.api.toml`: non-secret `DAILY_ADMIN_ACCOUNT_IDS` production configuration.
 - `README.md`, `docs/backlog.md`, and handoff docs: authoritative behavior and deployment notes.
 
 ---
@@ -423,7 +423,7 @@ git commit -m "feat: add moderated daily queue"
 - Modify: `src/server/apiHandlers.ts`
 - Modify: `src/server/apiHandlers.test.ts`
 - Modify: `src/server/dailyChallengeJobs.worker.test.ts`
-- Modify: `wrangler.toml`
+- Modify: `wrangler.api.toml`
 
 **Interfaces:**
 - Consumes: Task 3 evaluator and Task 4 repository operations.
@@ -472,7 +472,7 @@ Run Task 5 commands. Expected: selected suites pass.
 - [ ] **Step 7: Commit Task 5**
 
 ```bash
-git add src/server/worker.ts src/server/contracts.ts src/server/apiHandlers.ts src/server/apiHandlers.test.ts src/server/dailyChallengeJobs.worker.test.ts wrangler.toml
+git add src/server/worker.ts src/server/contracts.ts src/server/apiHandlers.ts src/server/apiHandlers.test.ts src/server/dailyChallengeJobs.worker.test.ts wrangler.api.toml
 git commit -m "feat: expose daily moderation API"
 ```
 
@@ -642,7 +642,7 @@ Review for D1 concurrency/sequence gaps, authorization, request-budget escape pa
 - [ ] **Step 5: Commit final integration fixes and docs**
 
 ```bash
-git add README.md docs src d1 public wrangler.toml
+git add README.md docs src d1 public wrangler.api.toml
 git commit -m "docs: hand off editorial daily operations"
 ```
 
