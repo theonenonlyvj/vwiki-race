@@ -12,6 +12,7 @@ does not need VGames realtime rooms or the card-game layer.
 - [Game Principles and Rules](docs/game-principles-and-rules.md)
 - [Cloudflare Deployment Handoff](docs/handoff/cloudflare-deployment-handoff.md)
 - [2026-07-16 Friend Release Handoff](docs/handoff/2026-07-16-friend-release-handoff.md)
+- [2026-07-17 Editorial Daily Release Handoff](docs/handoff/2026-07-17-editorial-dailies-release.md)
 - [Backlog](docs/backlog.md)
 
 Dated files under `docs/superpowers/` are historical design records. Preserve
@@ -26,8 +27,9 @@ current source, configuration, and operational handoffs above.
 - Manual and daily challenges share one global transactional number sequence.
   If `#15` exists, the next accepted challenge is `#16`, regardless of date or
   creator.
-- A DST-safe 5:00 AM `America/Chicago` job eventually creates one random,
-  validated challenge per Central date. The date is provenance, never the
+- A DST-safe 5:00 AM `America/Chicago` job creates at most one Daily per Central
+  date. Monday-Wednesday use the `recognizable` flavor, Thursday-Friday use
+  `weird`, and Saturday-Sunday use `hard`. The date is provenance, never the
   challenge number.
 - The unique VGames name/handle is the canonical public identity.
 - Guests can play through a VGames ghost account and claim their stats later.
@@ -55,6 +57,40 @@ current source, configuration, and operational handoffs above.
 - Challenge links use `/?challenge=challenge-000N` and remain stable. The
   selected challenge exposes a Copy challenge link action before play and on
   the result screen.
+
+## Editorial Daily System
+
+- Daily targets come from cached Wikipedia editorial pools: Vital Articles
+  Levels 1-3 for `recognizable`, Unusual Articles for `weird`, and their union
+  for `hard`. Pools refresh after 24 hours and may be used stale for up to
+  seven days when Wikipedia is unavailable.
+- Every candidate still meets the quality floor: canonical English mainspace
+  articles, no redirects/disambiguation or list-like titles, a target with at
+  least 1,500 article bytes and an 80-character lead, and a rendered start with
+  8-200 playable links. `hard` is a bounded proxy, not an exact graph distance.
+- Automatic evaluation is deterministic and versioned. It samples at most 10
+  targets and 3 independent random starts, stays within 40 Wikimedia
+  subrequests and 25 seconds, and ranks eligible candidates with explainable
+  integer scores. There is no full Wikipedia graph yet.
+- Challenge identity is the ordered `(start_page_id, target_page_id, ruleset)`
+  tuple. Duplicate creation reuses the existing challenge without consuming a
+  number; reverse directions remain distinct. A challenge can be featured as a
+  Daily only once ever.
+- Claimed accounts can nominate only while creating a challenge. Admin approval
+  places the challenge in a per-flavor FIFO queue; the scheduler consumes the
+  oldest valid queued entry before attempting automatic editorial selection.
+  Admins can override flavor, decline/remove entries, or directly promote an
+  existing never-featured challenge.
+- The protected admin surface is `/admin/dailies`. The Worker authorizes
+  immutable VGames account IDs from `DAILY_ADMIN_ACCOUNT_IDS`, not display
+  names, and exposes the capability and moderation routes documented in the
+  Cloudflare handoff.
+
+## Next Product Priority
+
+After the editorial Daily release, reimagine the main screens as four distinct
+experiences: Play, Leaderboard, Challenges, and Stats. This is a separate
+product/UI project; it does not change the Daily selection or moderation model.
 
 ## Local Development
 
@@ -94,9 +130,11 @@ The canonical Worker needs:
 
 - `VGAMES_URL`
 - `ALLOWED_ORIGINS`
+- `DAILY_ADMIN_ACCOUNT_IDS`
 - D1 binding `VWIKI_RACE_DB`
 - rate-limit bindings `CLICK_RATE_LIMITER` and `ACCOUNT_READ_RATE_LIMITER`
 - rate-limit binding `CHALLENGE_CREATE_RATE_LIMITER`
+- rate-limit binding `DAILY_ADMIN_RATE_LIMITER`
 
 ## Identity And Data
 
@@ -115,8 +153,8 @@ prototype repositories were intentionally replaced by VGames sessions and D1.
   clients; they do not bind D1 or duplicate authorization logic.
 - The API Worker has `0 10 * * *` and `0 11 * * *` UTC triggers for 5:00 AM
   Central plus `17 * * * *` for due-job retries. Only the 5:00 AM event may
-  create a new date; the retry trigger never contacts Wikipedia without a due
-  D1 job.
+  create a new date. The scheduler checks the approved Daily queue first; the
+  retry trigger never contacts Wikipedia without a due D1 job.
 
 Pages build settings:
 
@@ -125,7 +163,9 @@ Pages build settings:
 - Functions directory: `functions`
 
 Apply every migration in order from `d1/migrations/` before deploying the
-Worker that depends on it. Never rewrite an already-applied migration.
+Worker that depends on it. Migration `0005_editorial_dailies.sql` is additive
+and must be applied before the Worker release that reads its tables. Never
+rewrite an already-applied migration.
 
 ## VGames
 

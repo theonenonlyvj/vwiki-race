@@ -1,10 +1,10 @@
 # VWiki Race Backlog
 
-Date: 2026-07-16
+Date: 2026-07-17
 
-The current hardening worktree covers the friend-ready v0 game loop. Items below
-are deliberately outside that launch scope unless marked as an operational
-gate.
+The current worktree covers the friend-ready v0 game loop plus the editorial
+Daily and creation-time nomination release. Items below are deliberately
+outside that release unless marked as an operational gate.
 
 ## Operational Gates
 
@@ -13,8 +13,27 @@ gate.
 - Run the complete release gate in the Cloudflare handoff on every shipment.
 - Deploy Worker before Pages when both changed, then run the documented
   production smoke test.
+- Before deploying the editorial Daily Worker, inspect the remote D1 ledger,
+  take the required private backup, and apply pending migration `0005` only
+  after reviewing its additive SQL.
 - Confirm Cloudflare request counts after the first scheduled day; do not
   generate repeated manual cron events.
+
+## Current Daily System
+
+- Central weekday flavoring is implemented: `recognizable` Monday-Wednesday,
+  `weird` Thursday-Friday, and `hard` Saturday-Sunday.
+- Editorial target pools are cached for 24 hours, with stale data allowed for
+  up to seven days. Automatic evaluation is deterministic and bounded to at
+  most 10 targets, 3 random starts, 40 Wikimedia subrequests, and 25 seconds.
+- Challenge pairs are unique by ordered start/target/ruleset, duplicate pairs
+  reuse the existing challenge, and each challenge can be featured as a Daily
+  only once.
+- Claimed users can nominate only during challenge creation. Admin approval
+  feeds a per-flavor FIFO queue, and direct admin promotion is supported. The
+  scheduler consumes the queue before automatic selection.
+- `hard` remains a bounded scoring proxy. There is no full Wikipedia graph or
+  exact shortest-path claim yet.
 
 ## Challenge Quality
 
@@ -33,10 +52,18 @@ gate.
 - Decide whether daily leaderboards allow unlimited attempts, one ranked
   attempt, or best-of-day scoring.
 - Add a daily archive/calendar only when enough history exists to justify it.
-- Consider difficulty balancing after graph analysis exists; do not replace the
-  current proper random selection with a hand-maintained pseudo-random list.
+- Replace the current bounded `hard` proxy with graph-backed difficulty only
+  after a cached/offline graph exists; do not claim exact shortest paths before
+  then.
 - Add streaks, reminders, and notifications only after the core return loop is
   measured.
+
+## Next Product Priority
+
+Reimagine the main product as four distinct screen experiences: Play,
+Leaderboard, Challenges, and Stats. Start this UI/product project after the
+editorial Daily release; keep it separate from the current Daily scheduler,
+queue, and nomination contracts.
 
 ## Thinking Maps And Stats
 
