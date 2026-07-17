@@ -1051,7 +1051,7 @@ export default function App({
         ) : null}
 
         {visibleTab === "admin" && identitySession ? (
-          <AdminDailies apiClient={apiClient} token={identitySession.token} />
+          <AdminDailies apiClient={apiClient} challenges={challenges} token={identitySession.token} />
         ) : null}
       </section>
 

@@ -481,7 +481,8 @@ h1 {
   gap: 4px;
 }
 
-.name-control input {
+.name-control input,
+.name-control select {
   width: 160px;
   min-height: 38px;
   border: 1px solid rgba(130, 246, 239, 0.3);
@@ -491,7 +492,8 @@ h1 {
   padding: 0 10px;
 }
 
-.name-control input:focus {
+.name-control input:focus,
+.name-control select:focus {
   border-color: #0debd7;
   outline: 2px solid rgba(13, 235, 215, 0.22);
 }
@@ -1580,7 +1582,7 @@ h1 {
   padding-inline: 9px;
 }
 
-.daily-direct-promotion .name-control input {
+.daily-direct-promotion .name-control select {
   width: 100%;
 }
 
@@ -1811,6 +1813,7 @@ h1 {
 
   .name-control,
   .name-control input,
+  .name-control select,
   .player-gate button {
     width: 100%;
   }

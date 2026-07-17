@@ -5,9 +5,11 @@ import type {
   DailyQueueEntry,
 } from "../domain/dailyEditorial";
 import type { VWikiRaceDailyAdminApiClient } from "../services/vwikiRaceApiClient";
+import type { Challenge } from "../domain/types";
 
 interface AdminDailiesProps {
   apiClient: VWikiRaceDailyAdminApiClient;
+  challenges: Challenge[];
   token: string;
 }
 
@@ -18,7 +20,7 @@ interface DailyAdminState {
 
 const DAILY_FLAVORS: DailyFlavor[] = ["recognizable", "weird", "hard"];
 
-export default function AdminDailies({ apiClient, token }: AdminDailiesProps) {
+export default function AdminDailies({ apiClient, challenges, token }: AdminDailiesProps) {
   const [state, setState] = useState<DailyAdminState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -140,6 +142,16 @@ export default function AdminDailies({ apiClient, token }: AdminDailiesProps) {
 
   const pendingNominations = state?.nominations.filter((item) => item.status === "pending") ?? [];
   const queuedEntries = state?.queueEntries.filter((item) => item.status === "queued") ?? [];
+  const challengeById = new Map(challenges.map((challenge) => [challenge.id, challenge]));
+  const queuedChallengeIds = new Set(queuedEntries.map((entry) => entry.challengeId));
+  const nominatedChallengeIds = new Set(pendingNominations.map((nomination) => nomination.challengeId));
+  const directPromotionChallenges = challenges.filter((challenge) =>
+    challenge.isActive !== false &&
+    challenge.origin !== "daily" &&
+    !challenge.dailyFeature &&
+    !queuedChallengeIds.has(challenge.id) &&
+    !nominatedChallengeIds.has(challenge.id)
+  );
 
   return (
     <section className="daily-admin-layout" data-testid="daily-admin-layout" aria-labelledby="daily-admin-title">
@@ -172,13 +184,15 @@ export default function AdminDailies({ apiClient, token }: AdminDailiesProps) {
                 {pendingNominations.map((nomination) => {
                   const selectedFlavor = flavorOverrides[nomination.id] ??
                     nomination.suggestedFlavor ?? "recognizable";
+                  const challenge = challengeById.get(nomination.challengeId);
                   return (
                     <li key={nomination.id}>
                       <article aria-label={`Nomination ${nomination.id}`} className="daily-nomination-row">
                         <div className="daily-row-title">
-                          <strong>{nomination.challengeId}</strong>
-                          <span>by {nomination.nominatedByDisplayName}</span>
+                          <strong>{challenge?.label ?? nomination.challengeId}</strong>
+                          <span>{challengeRoute(challenge, nomination.challengeId)}</span>
                         </div>
+                        <p className="daily-classifier-note">Nominated by {nomination.nominatedByDisplayName}</p>
                         <dl className="daily-score-grid" aria-label={`Classifier scores for ${nomination.challengeId}`}>
                           <div>
                             <dt>Recognizable</dt>
@@ -249,7 +263,8 @@ export default function AdminDailies({ apiClient, token }: AdminDailiesProps) {
                           <li key={entry.id}>
                             <article aria-label={`Queued challenge ${entry.id}`} className="daily-queue-row">
                               <div className="daily-row-title">
-                                <strong>{entry.challengeId}</strong>
+                                <strong>{challengeById.get(entry.challengeId)?.label ?? entry.challengeId}</strong>
+                                <span>{challengeRoute(challengeById.get(entry.challengeId), entry.challengeId)}</span>
                                 <span>{entry.source}</span>
                               </div>
                               <button
@@ -276,14 +291,20 @@ export default function AdminDailies({ apiClient, token }: AdminDailiesProps) {
               <h3>Direct promotion</h3>
             </div>
             <label className="name-control">
-              <span>Challenge ID</span>
-              <input
-                aria-label="Challenge ID"
+              <span>Challenge</span>
+              <select
+                aria-label="Challenge"
                 disabled={busyAction !== null}
                 onChange={(event) => setDirectChallengeId(event.target.value)}
-                placeholder="challenge-0001"
                 value={directChallengeId}
-              />
+              >
+                <option value="">Choose a challenge</option>
+                {directPromotionChallenges.map((challenge) => (
+                  <option key={challenge.id} value={challenge.id}>
+                    {challenge.label ?? challenge.id}: {challenge.start.title} -&gt; {challenge.target.title}
+                  </option>
+                ))}
+              </select>
             </label>
             <FlavorSegmentedControl
               label="Direct promotion flavor"
@@ -344,4 +365,8 @@ function flavorLabel(flavor: DailyFlavor): string {
 
 function errorMessage(caught: unknown, fallback: string): string {
   return caught instanceof Error ? caught.message : fallback;
+}
+
+function challengeRoute(challenge: Challenge | undefined, fallback: string): string {
+  return challenge ? `${challenge.start.title} -> ${challenge.target.title}` : fallback;
 }

@@ -8,6 +8,7 @@ import type {
   DailyQueueEntry,
 } from "../domain/dailyEditorial";
 import type { VWikiRaceDailyAdminApiClient } from "../services/vwikiRaceApiClient";
+import type { Challenge } from "../domain/types";
 
 describe("AdminDailies", () => {
   it("shows a loading state before the moderation state arrives", () => {
@@ -16,6 +17,7 @@ describe("AdminDailies", () => {
         apiClient={adminClient({
           getDailyAdminState: () => new Promise(() => undefined),
         })}
+        challenges={challengeCatalog()}
         token="admin-token"
       />,
     );
@@ -29,6 +31,7 @@ describe("AdminDailies", () => {
         apiClient={adminClient({
           getDailyAdminState: vi.fn().mockRejectedValue(new Error("Moderation service is unavailable.")),
         })}
+        challenges={challengeCatalog()}
         token="admin-token"
       />,
     );
@@ -43,6 +46,7 @@ describe("AdminDailies", () => {
         apiClient={adminClient({
           getDailyAdminState: vi.fn().mockResolvedValue({ nominations: [], queueEntries: [] }),
         })}
+        challenges={challengeCatalog()}
         token="admin-token"
       />,
     );
@@ -59,6 +63,7 @@ describe("AdminDailies", () => {
     render(
       <AdminDailies
         apiClient={adminClient({ approveDailyNomination })}
+        challenges={challengeCatalog()}
         token="admin-token"
       />,
     );
@@ -69,6 +74,8 @@ describe("AdminDailies", () => {
     expect(within(nomination).getByText("53")).toBeVisible();
     expect(within(nomination).getByText("Suggested: recognizable")).toBeVisible();
     expect(within(nomination).getByText("Confidence: high")).toBeVisible();
+    expect(within(nomination).getByText("Challenge #101")).toBeVisible();
+    expect(within(nomination).getByText("Mercury -> Solar System")).toBeVisible();
 
     const flavorOverride = within(nomination).getByRole("group", { name: "Flavor for nomination-1" });
     await userEvent.click(within(flavorOverride).getByRole("button", { name: "Hard" }));
@@ -84,7 +91,7 @@ describe("AdminDailies", () => {
       "admin-token",
     );
     await waitFor(() => expect(screen.queryByRole("article", { name: "Nomination nomination-1" })).toBeNull());
-    expect(screen.getByText("challenge-0101")).toBeVisible();
+    expect(screen.getByText("Challenge #101")).toBeVisible();
   });
 
   it("declines nominations, removes queued entries, and directly promotes a challenge", async () => {
@@ -107,6 +114,7 @@ describe("AdminDailies", () => {
           queueDailyChallenge,
           removeDailyQueueEntry,
         })}
+        challenges={challengeCatalog()}
         token="admin-token"
       />,
     );
@@ -119,7 +127,7 @@ describe("AdminDailies", () => {
     await userEvent.click(within(queued).getByRole("button", { name: "Remove" }));
     expect(removeDailyQueueEntry).toHaveBeenCalledWith("queue-1", "admin-token");
 
-    await userEvent.type(screen.getByLabelText("Challenge ID"), "challenge-direct");
+    await userEvent.selectOptions(screen.getByLabelText("Challenge"), "challenge-direct");
     const directFlavor = screen.getByRole("group", { name: "Direct promotion flavor" });
     await userEvent.click(within(directFlavor).getByRole("button", { name: "Weird" }));
     await userEvent.click(screen.getByRole("button", { name: "Queue challenge" }));
@@ -128,7 +136,7 @@ describe("AdminDailies", () => {
       { challengeId: "challenge-direct", flavor: "weird" },
       "admin-token",
     );
-    expect(await screen.findByText("challenge-direct")).toBeVisible();
+    expect(await screen.findByText("Challenge #102")).toBeVisible();
   });
 
   it("keeps moderation groups available in a narrow viewport", async () => {
@@ -139,6 +147,7 @@ describe("AdminDailies", () => {
         apiClient={adminClient({
           getDailyAdminState: vi.fn().mockResolvedValue({ nominations: [], queueEntries: [] }),
         })}
+        challenges={challengeCatalog()}
         token="admin-token"
       />,
     );
@@ -199,5 +208,28 @@ function queueEntry(overrides: Partial<DailyQueueEntry> = {}): DailyQueueEntry {
     consumedAt: null,
     updatedAt: "2026-07-17T00:00:00.000Z",
     ...overrides,
+  };
+}
+
+function challengeCatalog(): Challenge[] {
+  return [
+    challenge("challenge-0101", "Challenge #101", "Mercury", "Solar System"),
+    challenge("challenge-direct", "Challenge #102", "Coffee", "Moon"),
+  ];
+}
+
+function challenge(id: string, label: string, start: string, target: string): Challenge {
+  return {
+    id,
+    label,
+    sortOrder: Number(id.replace(/\D/g, "")),
+    isActive: true,
+    mode: "solo",
+    start: { title: start },
+    target: { title: target },
+    ruleset: "ranked_classic",
+    origin: "manual",
+    dailyDate: null,
+    source: "curated",
   };
 }
