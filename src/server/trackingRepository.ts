@@ -10,6 +10,7 @@ import type {
   ServerPathStep,
 } from "../domain/types";
 export type {
+  DailyFlavor,
   DailyNomination,
   DailyQueueEntry,
 } from "../domain/dailyEditorial";
@@ -21,6 +22,9 @@ import type {
 import type {
   CreateChallengeOutcome,
   DailyClassification,
+  DailyFlavor,
+  DailyNomination,
+  DailyQueueEntry,
 } from "../domain/dailyEditorial";
 
 export type CreateChallengeRepositoryResult = Challenge | CreateChallengeOutcome;
@@ -86,6 +90,51 @@ export interface DailyChallengeInput {
   targetTitle: string;
   targetPageId: number;
 }
+
+export interface DailyAdminState {
+  nominations: DailyNomination[];
+  queueEntries: DailyQueueEntry[];
+}
+
+export interface DailyQueuedCandidate extends DailyQueueEntry {
+  challenge: Challenge;
+}
+
+export interface DailyModerationInput {
+  actorAccountId: string;
+  idempotencyKey: string;
+}
+
+export interface ApproveDailyNominationInput extends DailyModerationInput {
+  nominationId: string;
+  flavor: DailyFlavor;
+}
+
+export interface DeclineDailyNominationInput extends DailyModerationInput {
+  nominationId: string;
+}
+
+export interface QueueDailyChallengeInput extends DailyModerationInput {
+  challengeId: string;
+  flavor: DailyFlavor;
+}
+
+export interface RemoveDailyQueueEntryInput extends DailyModerationInput {
+  queueEntryId: string;
+}
+
+export type DailyFeatureSelection =
+  | {
+      kind: "queued";
+      queueEntryId: string;
+      classifierVersion: string;
+    }
+  | {
+      kind: "automatic";
+      candidate: DailyChallengeInput;
+      classifierVersion: string;
+      selectedScore?: number | null;
+    };
 
 export interface LegacyClickInput {
   sourceTitle: string;
@@ -155,6 +204,13 @@ export interface RunProtocolRepository extends TrackingRepository {
   claimDueDailyChallengeJob(): Promise<DailyChallengeJob | null>;
   failDailyChallengeJob(job: DailyChallengeJob, failureCode: string): Promise<void>;
   acceptDailyChallenge(job: DailyChallengeJob, input: DailyChallengeInput): Promise<Challenge>;
+  listDailyAdminState(): Promise<DailyAdminState>;
+  approveDailyNomination(input: ApproveDailyNominationInput): Promise<DailyQueueEntry>;
+  declineDailyNomination(input: DeclineDailyNominationInput): Promise<DailyNomination>;
+  queueDailyChallenge(input: QueueDailyChallengeInput): Promise<DailyQueueEntry>;
+  removeDailyQueueEntry(input: RemoveDailyQueueEntryInput): Promise<DailyQueueEntry>;
+  findQueuedDailyCandidate(flavor: DailyFlavor): Promise<DailyQueuedCandidate | null>;
+  acceptDailyFeature(job: DailyChallengeJob, selection: DailyFeatureSelection): Promise<Challenge>;
   findChallengeCreationReplay(
     account: AuthorizedAccount,
     input: { idempotencyKey: string; requestFingerprint: string },

@@ -13,6 +13,9 @@ import {
 beforeEach(async () => {
   await env.VWIKI_RACE_DB.exec(`
     DELETE FROM daily_challenge_jobs;
+    DELETE FROM daily_features;
+    DELETE FROM daily_queue_entries;
+    DELETE FROM daily_nominations;
     DELETE FROM operation_idempotency;
     DELETE FROM challenges WHERE id NOT IN ('challenge-0001', 'challenge-0002', 'challenge-0003');
     UPDATE challenge_number_sequence SET next_sort_order = 4 WHERE sequence_name = 'global';
@@ -358,6 +361,67 @@ describe("daily challenge D1 jobs", () => {
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT status, accepted_challenge_id FROM daily_challenge_jobs WHERE daily_date = '2026-07-14'",
     ).first()).resolves.toEqual({ status: "accepted", accepted_challenge_id: "challenge-0004" });
+  });
+
+  it("features a queued old challenge atomically without consuming a challenge number", async () => {
+    const clock = { now: "2026-07-16T10:00:00.000Z" };
+    const repository = createD1TrackingRepository({
+      db: env.VWIKI_RACE_DB,
+      now: () => new Date(clock.now),
+      randomId: (() => {
+        let index = 0;
+        return () => `queued-feature-${++index}`;
+      })(),
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO challenges
+         (id, label, start_title, target_title, start_page_id, target_page_id,
+          validation_status, ruleset, sort_order, is_active, created_at,
+          origin, source)
+       VALUES ('old-queued-challenge', 'Old queued challenge', 'Old start', 'Old target',
+               7001, 7002, 'ready', 'ranked_classic', 40, 1, ?, 'manual', 'curated')`,
+    ).bind(clock.now).run();
+
+    const queued = await repository.queueDailyChallenge({
+      challengeId: "old-queued-challenge",
+      flavor: "weird",
+      actorAccountId: "admin-account",
+      idempotencyKey: "queue-old-challenge",
+    });
+    await repository.ensureDailyChallengeJob("2026-07-16");
+    const job = await repository.claimDueDailyChallengeJob();
+    const featured = await repository.acceptDailyFeature(job!, {
+      kind: "queued",
+      queueEntryId: queued.id,
+      classifierVersion: "editorial-v1",
+    });
+
+    expect(featured).toMatchObject({
+      id: "old-queued-challenge",
+      origin: "daily",
+      dailyDate: "2026-07-16",
+      source: "curated",
+      dailyFeature: {
+        dailyDate: "2026-07-16",
+        flavor: "weird",
+        selectionSource: "admin",
+      },
+    });
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT next_sort_order FROM challenge_number_sequence WHERE sequence_name = 'global'",
+    ).first()).resolves.toEqual({ next_sort_order: 4 });
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT status, consumed_daily_date FROM daily_queue_entries WHERE id = ?",
+    ).bind(queued.id).first()).resolves.toEqual({
+      status: "consumed",
+      consumed_daily_date: "2026-07-16",
+    });
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT status, accepted_challenge_id FROM daily_challenge_jobs WHERE daily_date = '2026-07-16'",
+    ).first()).resolves.toEqual({
+      status: "accepted",
+      accepted_challenge_id: "old-queued-challenge",
+    });
   });
 
   it("ignores a trigger dated more than five minutes in the future", async () => {

@@ -2,7 +2,11 @@ import { normalizeTitle } from "../domain/rules";
 import type {
   CreateChallengeOutcome,
   DailyClassification,
+  DailyFlavor,
+  DailyNomination,
+  DailyQueueEntry,
 } from "../domain/dailyEditorial";
+import { dailyFlavorForCentralDate } from "../domain/dailyEditorial";
 import type {
   AccountStatus,
   AccountStats,
@@ -32,12 +36,19 @@ import {
 import type {
   ActiveRunRecord,
   AccountProfileRecord,
+  ApproveDailyNominationInput,
   CreateChallengeV2Input,
+  DailyAdminState,
   DailyChallengeInput,
   DailyChallengeJob,
+  DailyFeatureSelection,
+  DailyQueuedCandidate,
+  DeclineDailyNominationInput,
   LegacyClickInput,
   LegacyCompleteInput,
+  QueueDailyChallengeInput,
   RecordClickV2Result,
+  RemoveDailyQueueEntryInput,
   RunProtocolRepository,
   RunRecordResponse,
 } from "./trackingRepository";
@@ -119,78 +130,662 @@ export function createD1TrackingRepository(options: {
     },
 
     async acceptDailyChallenge(job, input) {
-      const normalizedJob = normalizeDailyJob(job);
-      const candidate = normalizeDailyChallengeInput(input);
-      const at = timestamp();
-      await requireBatch(db)([
+      return repository.acceptDailyFeature(job, {
+        kind: "automatic",
+        candidate: input,
+        classifierVersion: "legacy-v1",
+      });
+    },
+
+    async listDailyAdminState() {
+      const [nominations, queueEntries] = await Promise.all([
         db.prepare(
-          `UPDATE challenge_number_sequence SET next_sort_order = next_sort_order + 1
-           WHERE sequence_name = 'global'
-             AND EXISTS (SELECT 1 FROM daily_challenge_jobs
-               WHERE daily_date = ? AND status = 'claimed' AND lease_token = ?)
-             AND NOT EXISTS (SELECT 1 FROM challenges WHERE daily_date = ?)`,
-        ).bind(normalizedJob.dailyDate, normalizedJob.leaseToken, normalizedJob.dailyDate),
+          `SELECT id, challenge_id, nominated_by_account_id, nominated_by_display_name,
+                  status, recognizable_score, weird_score, hard_score, suggested_flavor,
+                  confidence, classifier_version, reviewed_by_account_id, reviewed_at,
+                  created_at, updated_at
+           FROM daily_nominations
+           ORDER BY created_at, id`,
+        ).all<DailyNominationRow>(),
         db.prepare(
-          `INSERT INTO challenges
-             (id, label, start_title, target_title, start_page_id, target_page_id,
-              validation_status, ruleset, sort_order, is_active, created_at,
-              created_by_account_id, created_by_display_name, created_by_identity_status,
-              origin, daily_date, source)
-           SELECT printf('challenge-%04d', s.next_sort_order - 1),
-                  'Challenge #' || (s.next_sort_order - 1), ?, ?, ?, ?,
-                  'ready', 'ranked_classic', s.next_sort_order - 1, 1, ?,
-                  'vwiki-race:daily', 'VWiki Race', 'claimed',
-                  'daily', ?, 'wikipedia_random'
-           FROM challenge_number_sequence s
-           WHERE s.sequence_name = 'global'
-             AND EXISTS (SELECT 1 FROM daily_challenge_jobs
-               WHERE daily_date = ? AND status = 'claimed' AND lease_token = ?)
-             AND NOT EXISTS (SELECT 1 FROM challenges WHERE daily_date = ?)`,
-        ).bind(candidate.startTitle, candidate.targetTitle, candidate.startPageId,
-          candidate.targetPageId, at, normalizedJob.dailyDate, normalizedJob.dailyDate,
-          normalizedJob.leaseToken, normalizedJob.dailyDate),
-        db.prepare(
-          `UPDATE daily_challenge_jobs
-           SET status = 'accepted', lease_token = NULL, lease_expires_at = NULL,
-               accepted_challenge_id = (SELECT id FROM challenges WHERE daily_date = ?),
-               failure_code = NULL, updated_at = ?
-           WHERE daily_date = ? AND status = 'claimed' AND lease_token = ?
-             AND EXISTS (SELECT 1 FROM challenges WHERE daily_date = ?)`,
-        ).bind(normalizedJob.dailyDate, at, normalizedJob.dailyDate,
-          normalizedJob.leaseToken, normalizedJob.dailyDate),
+          `SELECT id, challenge_id, nomination_id, flavor, source, status,
+                  queued_by_account_id, queued_at, consumed_daily_date, consumed_at, updated_at
+           FROM daily_queue_entries
+           ORDER BY queued_at, id`,
+        ).all<DailyQueueEntryRow>(),
       ]);
+      return {
+        nominations: nominations.results.map(mapDailyNominationRow),
+        queueEntries: queueEntries.results.map(mapDailyQueueEntryRow),
+      } satisfies DailyAdminState;
+    },
+
+    async approveDailyNomination(input) {
+      const normalized = normalizeApproveDailyNominationInput(input);
+      const at = timestamp();
+      const fingerprint = await fingerprintDailyEditorialOperation("approve", normalized);
+      const existing = await loadOperation(db, "approve_daily_nomination", normalized.idempotencyKey);
+      if (existing) {
+        return replayDailyEditorialOperation<DailyQueueEntry>(
+          existing,
+          normalized.actorAccountId,
+          fingerprint,
+        );
+      }
+      const queueEntryId = randomId();
+      await requireBatch(db)([
+        insertDailyEditorialOperation(
+          db,
+          "approve_daily_nomination",
+          normalized.idempotencyKey,
+          normalized.actorAccountId,
+          fingerprint,
+          at,
+        ),
+        db.prepare(
+          `UPDATE daily_nominations
+           SET status = 'approved', reviewed_by_account_id = ?, reviewed_at = ?, updated_at = ?
+           WHERE id = ? AND status = 'pending'
+             AND NOT EXISTS (
+               SELECT 1 FROM daily_features f
+               WHERE f.challenge_id = daily_nominations.challenge_id
+             )
+             AND EXISTS (
+               SELECT 1 FROM operation_idempotency
+               WHERE operation = 'approve_daily_nomination' AND idempotency_key = ?
+                 AND canonical_account_id = ? AND request_fingerprint = ?
+                 AND outcome_status = 'pending'
+             )`,
+        ).bind(
+          normalized.actorAccountId,
+          at,
+          at,
+          normalized.nominationId,
+          normalized.idempotencyKey,
+          normalized.actorAccountId,
+          fingerprint,
+        ),
+        db.prepare(
+          `INSERT OR IGNORE INTO daily_queue_entries
+             (id, challenge_id, nomination_id, flavor, source, status,
+              queued_by_account_id, queued_at, updated_at)
+           SELECT ?, n.challenge_id, n.id, ?, 'community', 'queued', ?, ?, ?
+           FROM daily_nominations n
+           WHERE n.id = ? AND n.status = 'approved'
+             AND NOT EXISTS (
+               SELECT 1 FROM daily_features f WHERE f.challenge_id = n.challenge_id
+             )
+             AND EXISTS (
+               SELECT 1 FROM operation_idempotency
+               WHERE operation = 'approve_daily_nomination' AND idempotency_key = ?
+                 AND canonical_account_id = ? AND request_fingerprint = ?
+                 AND outcome_status = 'pending'
+             )`,
+        ).bind(
+          queueEntryId,
+          normalized.flavor,
+          normalized.actorAccountId,
+          at,
+          at,
+          normalized.nominationId,
+          normalized.idempotencyKey,
+          normalized.actorAccountId,
+          fingerprint,
+        ),
+        db.prepare(
+          `UPDATE operation_idempotency
+           SET resource_id = (
+             SELECT id FROM daily_queue_entries WHERE nomination_id = ?
+           )
+           WHERE operation = 'approve_daily_nomination' AND idempotency_key = ?
+             AND canonical_account_id = ? AND request_fingerprint = ?
+             AND outcome_status = 'pending'
+             AND EXISTS (
+               SELECT 1 FROM daily_queue_entries WHERE nomination_id = ?
+             )`,
+        ).bind(
+          normalized.nominationId,
+          normalized.idempotencyKey,
+          normalized.actorAccountId,
+          fingerprint,
+          normalized.nominationId,
+        ),
+        finalizeDailyQueueOperation(db, {
+          operation: "approve_daily_nomination",
+          idempotencyKey: normalized.idempotencyKey,
+          actorAccountId: normalized.actorAccountId,
+          fingerprint,
+        }),
+        rejectDailyEditorialOperation(db, {
+          operation: "approve_daily_nomination",
+          idempotencyKey: normalized.idempotencyKey,
+          actorAccountId: normalized.actorAccountId,
+          fingerprint,
+          missingCode: "daily_nomination_not_found",
+          unavailableCode: "daily_challenge_already_featured",
+          resourceSql: "SELECT challenge_id FROM daily_nominations WHERE id = ?",
+          resourceBindings: [normalized.nominationId],
+          stateSql: "SELECT status FROM daily_nominations WHERE id = ?",
+          stateBindings: [normalized.nominationId],
+        }),
+      ]);
+      return replayDailyEditorialOperation<DailyQueueEntry>(
+        await requireFinalizedOperation(db, "approve_daily_nomination", normalized.idempotencyKey),
+        normalized.actorAccountId,
+        fingerprint,
+      );
+    },
+
+    async declineDailyNomination(input) {
+      const normalized = normalizeDeclineDailyNominationInput(input);
+      const at = timestamp();
+      const fingerprint = await fingerprintDailyEditorialOperation("decline", normalized);
+      const existing = await loadOperation(db, "decline_daily_nomination", normalized.idempotencyKey);
+      if (existing) {
+        return replayDailyEditorialOperation<DailyNomination>(
+          existing,
+          normalized.actorAccountId,
+          fingerprint,
+        );
+      }
+      await requireBatch(db)([
+        insertDailyEditorialOperation(
+          db,
+          "decline_daily_nomination",
+          normalized.idempotencyKey,
+          normalized.actorAccountId,
+          fingerprint,
+          at,
+        ),
+        db.prepare(
+          `UPDATE daily_nominations
+           SET status = 'declined', reviewed_by_account_id = ?, reviewed_at = ?, updated_at = ?
+           WHERE id = ? AND status = 'pending'
+             AND NOT EXISTS (
+               SELECT 1 FROM daily_queue_entries q
+               WHERE q.nomination_id = daily_nominations.id AND q.source = 'community'
+             )
+             AND EXISTS (
+               SELECT 1 FROM operation_idempotency
+               WHERE operation = 'decline_daily_nomination' AND idempotency_key = ?
+                 AND canonical_account_id = ? AND request_fingerprint = ?
+                 AND outcome_status = 'pending'
+             )`,
+        ).bind(
+          normalized.actorAccountId,
+          at,
+          at,
+          normalized.nominationId,
+          normalized.idempotencyKey,
+          normalized.actorAccountId,
+          fingerprint,
+        ),
+        db.prepare(
+          `UPDATE operation_idempotency
+           SET resource_id = ?
+           WHERE operation = 'decline_daily_nomination' AND idempotency_key = ?
+             AND canonical_account_id = ? AND request_fingerprint = ?
+             AND outcome_status = 'pending'
+             AND EXISTS (
+               SELECT 1 FROM daily_nominations WHERE id = ? AND status = 'declined'
+             )`,
+        ).bind(
+          normalized.nominationId,
+          normalized.idempotencyKey,
+          normalized.actorAccountId,
+          fingerprint,
+          normalized.nominationId,
+        ),
+        finalizeDailyNominationOperation(db, {
+          operation: "decline_daily_nomination",
+          idempotencyKey: normalized.idempotencyKey,
+          actorAccountId: normalized.actorAccountId,
+          fingerprint,
+        }),
+        rejectDailyEditorialOperation(db, {
+          operation: "decline_daily_nomination",
+          idempotencyKey: normalized.idempotencyKey,
+          actorAccountId: normalized.actorAccountId,
+          fingerprint,
+          missingCode: "daily_nomination_not_found",
+          unavailableCode: "daily_nomination_not_pending",
+          resourceSql: "SELECT challenge_id FROM daily_nominations WHERE id = ?",
+          resourceBindings: [normalized.nominationId],
+          stateSql: "SELECT status FROM daily_nominations WHERE id = ?",
+          stateBindings: [normalized.nominationId],
+        }),
+      ]);
+      return replayDailyEditorialOperation<DailyNomination>(
+        await requireFinalizedOperation(db, "decline_daily_nomination", normalized.idempotencyKey),
+        normalized.actorAccountId,
+        fingerprint,
+      );
+    },
+
+    async queueDailyChallenge(input) {
+      const normalized = normalizeQueueDailyChallengeInput(input);
+      const at = timestamp();
+      const fingerprint = await fingerprintDailyEditorialOperation("queue", normalized);
+      const existing = await loadOperation(db, "queue_daily_challenge", normalized.idempotencyKey);
+      if (existing) {
+        return replayDailyEditorialOperation<DailyQueueEntry>(
+          existing,
+          normalized.actorAccountId,
+          fingerprint,
+        );
+      }
+      const queueEntryId = randomId();
+      await requireBatch(db)([
+        insertDailyEditorialOperation(
+          db,
+          "queue_daily_challenge",
+          normalized.idempotencyKey,
+          normalized.actorAccountId,
+          fingerprint,
+          at,
+        ),
+        db.prepare(
+          `INSERT OR IGNORE INTO daily_queue_entries
+             (id, challenge_id, nomination_id, flavor, source, status,
+              queued_by_account_id, queued_at, updated_at)
+           SELECT ?, c.id, NULL, ?, 'admin', 'queued', ?, ?, ?
+           FROM challenges c
+           WHERE c.id = ? AND c.is_active = 1 AND c.validation_status = 'ready'
+             AND NOT EXISTS (
+               SELECT 1 FROM daily_features f WHERE f.challenge_id = c.id
+             )
+             AND EXISTS (
+               SELECT 1 FROM operation_idempotency
+               WHERE operation = 'queue_daily_challenge' AND idempotency_key = ?
+                 AND canonical_account_id = ? AND request_fingerprint = ?
+                 AND outcome_status = 'pending'
+             )`,
+        ).bind(
+          queueEntryId,
+          normalized.flavor,
+          normalized.actorAccountId,
+          at,
+          at,
+          normalized.challengeId,
+          normalized.idempotencyKey,
+          normalized.actorAccountId,
+          fingerprint,
+        ),
+        db.prepare(
+          `UPDATE operation_idempotency
+           SET resource_id = (
+             SELECT id FROM daily_queue_entries
+             WHERE challenge_id = ? AND status = 'queued'
+             ORDER BY queued_at, id LIMIT 1
+           )
+           WHERE operation = 'queue_daily_challenge' AND idempotency_key = ?
+             AND canonical_account_id = ? AND request_fingerprint = ?
+             AND outcome_status = 'pending'
+             AND EXISTS (
+               SELECT 1 FROM daily_queue_entries
+               WHERE challenge_id = ? AND status = 'queued'
+             )`,
+        ).bind(
+          normalized.challengeId,
+          normalized.idempotencyKey,
+          normalized.actorAccountId,
+          fingerprint,
+          normalized.challengeId,
+        ),
+        finalizeDailyQueueOperation(db, {
+          operation: "queue_daily_challenge",
+          idempotencyKey: normalized.idempotencyKey,
+          actorAccountId: normalized.actorAccountId,
+          fingerprint,
+        }),
+        rejectDirectQueueOperation(db, {
+          operation: "queue_daily_challenge",
+          idempotencyKey: normalized.idempotencyKey,
+          actorAccountId: normalized.actorAccountId,
+          fingerprint,
+          challengeId: normalized.challengeId,
+        }),
+      ]);
+      return replayDailyEditorialOperation<DailyQueueEntry>(
+        await requireFinalizedOperation(db, "queue_daily_challenge", normalized.idempotencyKey),
+        normalized.actorAccountId,
+        fingerprint,
+      );
+    },
+
+    async removeDailyQueueEntry(input) {
+      const normalized = normalizeRemoveDailyQueueEntryInput(input);
+      const at = timestamp();
+      const fingerprint = await fingerprintDailyEditorialOperation("remove", normalized);
+      const existing = await loadOperation(db, "remove_daily_queue_entry", normalized.idempotencyKey);
+      if (existing) {
+        return replayDailyEditorialOperation<DailyQueueEntry>(
+          existing,
+          normalized.actorAccountId,
+          fingerprint,
+        );
+      }
+      await requireBatch(db)([
+        insertDailyEditorialOperation(
+          db,
+          "remove_daily_queue_entry",
+          normalized.idempotencyKey,
+          normalized.actorAccountId,
+          fingerprint,
+          at,
+        ),
+        db.prepare(
+          `UPDATE daily_queue_entries
+           SET status = 'removed', updated_at = ?
+           WHERE id = ? AND status = 'queued'
+             AND EXISTS (
+               SELECT 1 FROM operation_idempotency
+               WHERE operation = 'remove_daily_queue_entry' AND idempotency_key = ?
+                 AND canonical_account_id = ? AND request_fingerprint = ?
+                 AND outcome_status = 'pending'
+             )`,
+        ).bind(
+          at,
+          normalized.queueEntryId,
+          normalized.idempotencyKey,
+          normalized.actorAccountId,
+          fingerprint,
+        ),
+        db.prepare(
+          `UPDATE operation_idempotency
+           SET resource_id = ?
+           WHERE operation = 'remove_daily_queue_entry' AND idempotency_key = ?
+             AND canonical_account_id = ? AND request_fingerprint = ?
+             AND outcome_status = 'pending'
+             AND EXISTS (
+               SELECT 1 FROM daily_queue_entries WHERE id = ? AND status = 'removed'
+             )`,
+        ).bind(
+          normalized.queueEntryId,
+          normalized.idempotencyKey,
+          normalized.actorAccountId,
+          fingerprint,
+          normalized.queueEntryId,
+        ),
+        finalizeDailyQueueOperation(db, {
+          operation: "remove_daily_queue_entry",
+          idempotencyKey: normalized.idempotencyKey,
+          actorAccountId: normalized.actorAccountId,
+          fingerprint,
+        }),
+        rejectRemoveQueueOperation(db, {
+          operation: "remove_daily_queue_entry",
+          idempotencyKey: normalized.idempotencyKey,
+          actorAccountId: normalized.actorAccountId,
+          fingerprint,
+          queueEntryId: normalized.queueEntryId,
+        }),
+      ]);
+      return replayDailyEditorialOperation<DailyQueueEntry>(
+        await requireFinalizedOperation(db, "remove_daily_queue_entry", normalized.idempotencyKey),
+        normalized.actorAccountId,
+        fingerprint,
+      );
+    },
+
+    async findQueuedDailyCandidate(flavorInput) {
+      const flavor = requireDailyFlavor(flavorInput);
+      const at = timestamp();
+      await db.prepare(
+        `UPDATE daily_queue_entries
+         SET status = 'invalid', updated_at = ?
+         WHERE status = 'queued' AND flavor = ?
+           AND (
+             NOT EXISTS (
+               SELECT 1 FROM challenges c
+               WHERE c.id = daily_queue_entries.challenge_id
+                 AND c.is_active = 1 AND c.validation_status = 'ready'
+             )
+             OR EXISTS (
+               SELECT 1 FROM daily_features f
+               WHERE f.challenge_id = daily_queue_entries.challenge_id
+             )
+             OR (
+               source = 'community' AND NOT EXISTS (
+                 SELECT 1 FROM daily_nominations n
+                 WHERE n.id = daily_queue_entries.nomination_id
+                   AND n.challenge_id = daily_queue_entries.challenge_id
+                   AND n.status = 'approved'
+               )
+             )
+           )`,
+      ).bind(at, flavor).run();
       const row = await db.prepare(
-        `SELECT id, label, start_title, target_title, ruleset, sort_order, is_active,
-                start_page_id, target_page_id, created_by_account_id,
-                created_by_display_name, created_by_identity_status, origin, daily_date, source
-         FROM challenges WHERE daily_date = ?`,
-      ).bind(normalizedJob.dailyDate).first<ChallengeRow>();
-      if (!row) throw new ApiError("daily_challenge_accept_failed", "Daily challenge acceptance did not complete.", 500);
+        `SELECT q.id, q.challenge_id, q.nomination_id, q.flavor, q.source, q.status,
+                q.queued_by_account_id, q.queued_at, q.consumed_daily_date,
+                q.consumed_at, q.updated_at,
+                c.label AS challenge_label, c.start_title AS challenge_start_title,
+                c.target_title AS challenge_target_title, c.ruleset AS challenge_ruleset,
+                c.sort_order AS challenge_sort_order, c.is_active AS challenge_is_active,
+                c.start_page_id AS challenge_start_page_id,
+                c.target_page_id AS challenge_target_page_id,
+                c.created_by_account_id AS challenge_created_by_account_id,
+                c.created_by_display_name AS challenge_created_by_display_name,
+                c.created_by_identity_status AS challenge_created_by_identity_status,
+                c.origin AS challenge_origin, c.daily_date AS challenge_daily_date,
+                c.source AS challenge_source
+         FROM daily_queue_entries q
+         JOIN challenges c ON c.id = q.challenge_id
+         WHERE q.status = 'queued' AND q.flavor = ?
+           AND c.is_active = 1 AND c.validation_status = 'ready'
+           AND NOT EXISTS (
+             SELECT 1 FROM daily_features f WHERE f.challenge_id = q.challenge_id
+           )
+           AND (q.source = 'admin' OR EXISTS (
+             SELECT 1 FROM daily_nominations n
+             WHERE n.id = q.nomination_id AND n.challenge_id = q.challenge_id
+               AND n.status = 'approved'
+           ))
+         ORDER BY q.queued_at, q.id
+         LIMIT 1`,
+      ).bind(flavor).first<DailyQueuedCandidateRow>();
+      return row ? mapDailyQueuedCandidateRow(row) : null;
+    },
+
+    async acceptDailyFeature(job, selection) {
+      const normalizedJob = normalizeDailyJob(job);
+      const normalizedSelection = normalizeDailyFeatureSelection(selection);
+      const flavor = dailyFlavorForCentralDate(normalizedJob.dailyDate);
+      const at = timestamp();
+      const batch = requireBatch(db);
+
+      if (normalizedSelection.kind === "queued") {
+        await batch([
+          invalidateQueueEntry(db, normalizedSelection.queueEntryId, at),
+          db.prepare(
+            `INSERT OR IGNORE INTO daily_features
+               (daily_date, challenge_id, flavor, selection_source, queue_entry_id,
+                selected_by_account_id, classifier_version, selected_score, created_at)
+             SELECT j.daily_date, q.challenge_id, q.flavor, q.source, q.id,
+                    q.queued_by_account_id, ?, NULL, ?
+             FROM daily_challenge_jobs j
+             JOIN daily_queue_entries q ON q.id = ?
+             JOIN challenges c ON c.id = q.challenge_id
+             WHERE j.daily_date = ? AND j.status = 'claimed' AND j.lease_token = ?
+               AND q.status = 'queued' AND q.flavor = ?
+               AND c.is_active = 1 AND c.validation_status = 'ready'
+               AND NOT EXISTS (
+                 SELECT 1 FROM daily_features f WHERE f.daily_date = j.daily_date
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM daily_features f WHERE f.challenge_id = q.challenge_id
+               )
+               AND (q.source = 'admin' OR EXISTS (
+                 SELECT 1 FROM daily_nominations n
+                 WHERE n.id = q.nomination_id AND n.challenge_id = q.challenge_id
+                   AND n.status = 'approved'
+               ))`,
+          ).bind(
+            normalizedSelection.classifierVersion,
+            at,
+            normalizedSelection.queueEntryId,
+            normalizedJob.dailyDate,
+            normalizedJob.leaseToken,
+            flavor,
+          ),
+          db.prepare(
+            `UPDATE daily_queue_entries
+             SET status = 'consumed', consumed_daily_date = ?, consumed_at = ?, updated_at = ?
+             WHERE id = ? AND status = 'queued'
+               AND EXISTS (
+                 SELECT 1 FROM daily_features
+                 WHERE daily_date = ? AND queue_entry_id = daily_queue_entries.id
+               )`,
+          ).bind(
+            normalizedJob.dailyDate,
+            at,
+            at,
+            normalizedSelection.queueEntryId,
+            normalizedJob.dailyDate,
+          ),
+          acceptDailyFeatureJob(db, normalizedJob, at),
+        ]);
+      } else {
+        const candidate = normalizedSelection.candidate;
+        await batch([
+          db.prepare(
+            `UPDATE daily_challenge_jobs
+             SET failure_code = 'daily_feature_allocating'
+             WHERE daily_date = ? AND status = 'claimed' AND lease_token = ?
+               AND NOT EXISTS (
+                 SELECT 1 FROM daily_features WHERE daily_date = ?
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM challenges
+                 WHERE start_page_id = ? AND target_page_id = ?
+                   AND ruleset = 'ranked_classic'
+               )`,
+          ).bind(
+            normalizedJob.dailyDate,
+            normalizedJob.leaseToken,
+            normalizedJob.dailyDate,
+            candidate.startPageId,
+            candidate.targetPageId,
+          ),
+          db.prepare(
+            `UPDATE challenge_number_sequence
+             SET next_sort_order = next_sort_order + 1
+             WHERE sequence_name = 'global'
+               AND EXISTS (
+                 SELECT 1 FROM daily_challenge_jobs
+                 WHERE daily_date = ? AND status = 'claimed' AND lease_token = ?
+                   AND failure_code = 'daily_feature_allocating'
+               )`,
+          ).bind(normalizedJob.dailyDate, normalizedJob.leaseToken),
+          db.prepare(
+            `INSERT OR IGNORE INTO challenges
+               (id, label, start_title, target_title, start_page_id, target_page_id,
+                validation_status, ruleset, sort_order, is_active, created_at,
+                created_by_account_id, created_by_display_name, created_by_identity_status,
+                origin, daily_date, source)
+             SELECT printf('challenge-%04d', s.next_sort_order - 1),
+                    'Challenge #' || (s.next_sort_order - 1), ?, ?, ?, ?,
+                    'ready', 'ranked_classic', s.next_sort_order - 1, 1, ?,
+                    'vwiki-race:daily', 'VWiki Race', 'claimed',
+                    'daily', ?, 'wikipedia_random'
+             FROM challenge_number_sequence s
+             WHERE s.sequence_name = 'global'
+               AND EXISTS (
+                 SELECT 1 FROM daily_challenge_jobs
+                 WHERE daily_date = ? AND status = 'claimed' AND lease_token = ?
+                   AND failure_code = 'daily_feature_allocating'
+               )`,
+          ).bind(
+            candidate.startTitle,
+            candidate.targetTitle,
+            candidate.startPageId,
+            candidate.targetPageId,
+            at,
+            normalizedJob.dailyDate,
+            normalizedJob.dailyDate,
+            normalizedJob.leaseToken,
+          ),
+          db.prepare(
+            `UPDATE challenge_number_sequence
+             SET next_sort_order = next_sort_order - 1
+             WHERE sequence_name = 'global'
+               AND NOT EXISTS (
+                 SELECT 1 FROM challenges
+                 WHERE sort_order = challenge_number_sequence.next_sort_order - 1
+               )
+               AND EXISTS (
+                 SELECT 1 FROM daily_challenge_jobs
+                 WHERE daily_date = ? AND status = 'claimed' AND lease_token = ?
+                   AND failure_code = 'daily_feature_allocating'
+               )
+               AND EXISTS (
+                 SELECT 1 FROM challenges
+                 WHERE start_page_id = ? AND target_page_id = ?
+                   AND ruleset = 'ranked_classic'
+               )`,
+          ).bind(
+            normalizedJob.dailyDate,
+            normalizedJob.leaseToken,
+            candidate.startPageId,
+            candidate.targetPageId,
+          ),
+          db.prepare(
+            `INSERT OR IGNORE INTO daily_features
+               (daily_date, challenge_id, flavor, selection_source, queue_entry_id,
+                selected_by_account_id, classifier_version, selected_score, created_at)
+             SELECT j.daily_date, c.id, ?, 'automatic', NULL, NULL, ?, ?, ?
+             FROM daily_challenge_jobs j
+             JOIN challenges c
+               ON c.start_page_id = ? AND c.target_page_id = ?
+              AND c.ruleset = 'ranked_classic'
+             WHERE j.daily_date = ? AND j.status = 'claimed' AND j.lease_token = ?
+               AND c.is_active = 1 AND c.validation_status = 'ready'
+               AND NOT EXISTS (
+                 SELECT 1 FROM daily_features f WHERE f.daily_date = j.daily_date
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM daily_features f WHERE f.challenge_id = c.id
+               )
+             ORDER BY c.sort_order, c.id
+             LIMIT 1`,
+          ).bind(
+            flavor,
+            normalizedSelection.classifierVersion,
+            normalizedSelection.selectedScore,
+            at,
+            candidate.startPageId,
+            candidate.targetPageId,
+            normalizedJob.dailyDate,
+            normalizedJob.leaseToken,
+          ),
+          acceptDailyFeatureJob(db, normalizedJob, at),
+        ]);
+      }
+
+      const row = await selectChallengeForDailyFeature(db, normalizedJob.dailyDate);
+      if (!row) {
+        throw new ApiError(
+          "daily_feature_accept_failed",
+          "Daily feature acceptance did not complete.",
+          500,
+        );
+      }
       return mapChallengeRow(row);
     },
 
     async listChallenges() {
       const { results } = await db
         .prepare(
-          `SELECT
-             id,
-             label,
-             start_title,
-             target_title,
-             ruleset,
-             sort_order,
-             is_active,
-             start_page_id,
-             target_page_id,
-             created_by_account_id,
-             created_by_display_name,
-             created_by_identity_status,
-             origin,
-             daily_date,
-             source
-           FROM challenges
-           WHERE is_active = 1
-           ORDER BY sort_order`,
+          `SELECT c.id, c.label, c.start_title, c.target_title, c.ruleset,
+                  c.sort_order, c.is_active, c.start_page_id, c.target_page_id,
+                  c.created_by_account_id, c.created_by_display_name,
+                  c.created_by_identity_status, c.origin, c.daily_date, c.source,
+                  f.daily_date AS feature_daily_date, f.flavor AS feature_flavor,
+                  f.selection_source AS feature_selection_source
+           FROM challenges c
+           LEFT JOIN daily_features f ON f.challenge_id = c.id
+           WHERE c.is_active = 1
+           ORDER BY c.sort_order`,
         )
         .all<ChallengeRow>();
       return results.map(mapChallengeRow);
@@ -1825,6 +2420,281 @@ function inspectBatchResult(result: D1ResultLike | undefined): number {
   return Number(changes);
 }
 
+function insertDailyEditorialOperation(
+  db: D1DatabaseLike,
+  operation: string,
+  idempotencyKey: string,
+  actorAccountId: string,
+  fingerprint: string,
+  createdAt: string,
+): D1PreparedStatementLike {
+  return db.prepare(
+    `INSERT OR IGNORE INTO operation_idempotency
+       (operation, idempotency_key, canonical_account_id,
+        request_fingerprint, outcome_status, created_at)
+     VALUES (?, ?, ?, ?, 'pending', ?)`,
+  ).bind(operation, idempotencyKey, actorAccountId, fingerprint, createdAt);
+}
+
+function finalizeDailyQueueOperation(
+  db: D1DatabaseLike,
+  input: DailyEditorialOperationIdentity,
+): D1PreparedStatementLike {
+  return db.prepare(
+    `UPDATE operation_idempotency
+     SET outcome_status = 'accepted', response_json = (
+       SELECT json_object(
+         'id', q.id,
+         'challengeId', q.challenge_id,
+         'nominationId', q.nomination_id,
+         'flavor', q.flavor,
+         'source', q.source,
+         'status', q.status,
+         'queuedByAccountId', q.queued_by_account_id,
+         'queuedAt', q.queued_at,
+         'consumedDailyDate', q.consumed_daily_date,
+         'consumedAt', q.consumed_at,
+         'updatedAt', q.updated_at
+       )
+       FROM daily_queue_entries q WHERE q.id = operation_idempotency.resource_id
+     )
+     WHERE operation = ? AND idempotency_key = ?
+       AND canonical_account_id = ? AND request_fingerprint = ?
+       AND outcome_status = 'pending'
+       AND EXISTS (
+         SELECT 1 FROM daily_queue_entries WHERE id = resource_id
+       )`,
+  ).bind(
+    input.operation,
+    input.idempotencyKey,
+    input.actorAccountId,
+    input.fingerprint,
+  );
+}
+
+function finalizeDailyNominationOperation(
+  db: D1DatabaseLike,
+  input: DailyEditorialOperationIdentity,
+): D1PreparedStatementLike {
+  return db.prepare(
+    `UPDATE operation_idempotency
+     SET outcome_status = 'accepted', response_json = (
+       SELECT json_object(
+         'id', n.id,
+         'challengeId', n.challenge_id,
+         'nominatedByAccountId', n.nominated_by_account_id,
+         'nominatedByDisplayName', n.nominated_by_display_name,
+         'status', n.status,
+         'recognizableScore', n.recognizable_score,
+         'weirdScore', n.weird_score,
+         'hardScore', n.hard_score,
+         'suggestedFlavor', n.suggested_flavor,
+         'confidence', n.confidence,
+         'classifierVersion', n.classifier_version,
+         'reviewedByAccountId', n.reviewed_by_account_id,
+         'reviewedAt', n.reviewed_at,
+         'createdAt', n.created_at,
+         'updatedAt', n.updated_at
+       )
+       FROM daily_nominations n WHERE n.id = operation_idempotency.resource_id
+     )
+     WHERE operation = ? AND idempotency_key = ?
+       AND canonical_account_id = ? AND request_fingerprint = ?
+       AND outcome_status = 'pending'
+       AND EXISTS (SELECT 1 FROM daily_nominations WHERE id = resource_id)`,
+  ).bind(
+    input.operation,
+    input.idempotencyKey,
+    input.actorAccountId,
+    input.fingerprint,
+  );
+}
+
+function rejectDailyEditorialOperation(
+  db: D1DatabaseLike,
+  input: DailyEditorialOperationRejection,
+): D1PreparedStatementLike {
+  return db.prepare(
+    `UPDATE operation_idempotency
+     SET outcome_status = 'rejected', error_code = CASE
+       WHEN NOT EXISTS (${input.stateSql}) THEN ?
+       WHEN EXISTS (
+         SELECT 1 FROM daily_features
+         WHERE challenge_id = (${input.resourceSql})
+       ) THEN ?
+       ELSE ?
+     END
+     WHERE operation = ? AND idempotency_key = ?
+       AND canonical_account_id = ? AND request_fingerprint = ?
+       AND outcome_status = 'pending'`,
+  ).bind(
+    ...input.stateBindings,
+    ...input.resourceBindings,
+    input.missingCode,
+    input.unavailableCode,
+    input.unavailableCode,
+    input.operation,
+    input.idempotencyKey,
+    input.actorAccountId,
+    input.fingerprint,
+  );
+}
+
+function rejectDirectQueueOperation(
+  db: D1DatabaseLike,
+  input: DailyEditorialOperationIdentity & { challengeId: string },
+): D1PreparedStatementLike {
+  return db.prepare(
+    `UPDATE operation_idempotency
+     SET outcome_status = 'rejected', error_code = CASE
+       WHEN NOT EXISTS (SELECT 1 FROM challenges WHERE id = ?) THEN 'daily_challenge_not_found'
+       WHEN EXISTS (SELECT 1 FROM daily_features WHERE challenge_id = ?) THEN 'daily_challenge_already_featured'
+       WHEN NOT EXISTS (
+         SELECT 1 FROM challenges
+         WHERE id = ? AND is_active = 1 AND validation_status = 'ready'
+       ) THEN 'daily_challenge_unavailable'
+       ELSE 'daily_queue_conflict'
+     END
+     WHERE operation = ? AND idempotency_key = ?
+       AND canonical_account_id = ? AND request_fingerprint = ?
+       AND outcome_status = 'pending'`,
+  ).bind(
+    input.challengeId,
+    input.challengeId,
+    input.challengeId,
+    input.operation,
+    input.idempotencyKey,
+    input.actorAccountId,
+    input.fingerprint,
+  );
+}
+
+function rejectRemoveQueueOperation(
+  db: D1DatabaseLike,
+  input: DailyEditorialOperationIdentity & { queueEntryId: string },
+): D1PreparedStatementLike {
+  return db.prepare(
+    `UPDATE operation_idempotency
+     SET outcome_status = 'rejected', error_code = CASE
+       WHEN NOT EXISTS (SELECT 1 FROM daily_queue_entries WHERE id = ?) THEN 'daily_queue_not_found'
+       ELSE 'daily_queue_not_queued'
+     END
+     WHERE operation = ? AND idempotency_key = ?
+       AND canonical_account_id = ? AND request_fingerprint = ?
+       AND outcome_status = 'pending'`,
+  ).bind(
+    input.queueEntryId,
+    input.operation,
+    input.idempotencyKey,
+    input.actorAccountId,
+    input.fingerprint,
+  );
+}
+
+function invalidateQueueEntry(
+  db: D1DatabaseLike,
+  queueEntryId: string,
+  at: string,
+): D1PreparedStatementLike {
+  return db.prepare(
+    `UPDATE daily_queue_entries
+     SET status = 'invalid', updated_at = ?
+     WHERE id = ? AND status = 'queued'
+       AND (
+         NOT EXISTS (
+           SELECT 1 FROM challenges c
+           WHERE c.id = daily_queue_entries.challenge_id
+             AND c.is_active = 1 AND c.validation_status = 'ready'
+         )
+         OR EXISTS (
+           SELECT 1 FROM daily_features f
+           WHERE f.challenge_id = daily_queue_entries.challenge_id
+         )
+         OR (
+           source = 'community' AND NOT EXISTS (
+             SELECT 1 FROM daily_nominations n
+             WHERE n.id = daily_queue_entries.nomination_id
+               AND n.challenge_id = daily_queue_entries.challenge_id
+               AND n.status = 'approved'
+           )
+         )
+       )`,
+  ).bind(at, queueEntryId);
+}
+
+function acceptDailyFeatureJob(
+  db: D1DatabaseLike,
+  job: DailyChallengeJob,
+  at: string,
+): D1PreparedStatementLike {
+  return db.prepare(
+    `UPDATE daily_challenge_jobs
+     SET status = 'accepted', lease_token = NULL, lease_expires_at = NULL,
+         accepted_challenge_id = (
+           SELECT challenge_id FROM daily_features WHERE daily_date = ?
+         ),
+         failure_code = NULL, updated_at = ?
+     WHERE daily_date = ? AND status = 'claimed' AND lease_token = ?
+       AND EXISTS (
+         SELECT 1 FROM daily_features WHERE daily_date = ?
+       )`,
+  ).bind(job.dailyDate, at, job.dailyDate, job.leaseToken, job.dailyDate);
+}
+
+async function selectChallengeForDailyFeature(
+  db: D1DatabaseLike,
+  dailyDate: string,
+): Promise<ChallengeRow | null> {
+  return db.prepare(
+    `SELECT c.id, c.label, c.start_title, c.target_title, c.ruleset,
+            c.sort_order, c.is_active, c.start_page_id, c.target_page_id,
+            c.created_by_account_id, c.created_by_display_name,
+            c.created_by_identity_status, c.origin, c.daily_date, c.source,
+            f.daily_date AS feature_daily_date, f.flavor AS feature_flavor,
+            f.selection_source AS feature_selection_source
+     FROM daily_features f
+     JOIN challenges c ON c.id = f.challenge_id
+     WHERE f.daily_date = ?`,
+  ).bind(dailyDate).first<ChallengeRow>();
+}
+
+async function replayDailyEditorialOperation<T>(
+  row: OperationRow,
+  actorAccountId: string,
+  fingerprint: string,
+): Promise<T> {
+  if (row.canonical_account_id !== actorAccountId) {
+    throw new ApiError("operation_forbidden", "That operation belongs to another account.", 403);
+  }
+  if (row.request_fingerprint !== fingerprint) {
+    throw new ApiError(
+      "idempotency_conflict",
+      "That idempotency key was used for a different request.",
+      409,
+    );
+  }
+  if (row.outcome_status === "pending") {
+    throw new ApiError("operation_pending", "That operation is still pending.", 503);
+  }
+  if (row.outcome_status === "rejected") {
+    throw new ApiError(
+      row.error_code ?? "daily_moderation_rejected",
+      "The Daily moderation operation was rejected.",
+      row.error_code?.endsWith("_not_found") ? 404 : 409,
+    );
+  }
+  return parseOperationJson<T>(row);
+}
+
+async function fingerprintDailyEditorialOperation(
+  action: string,
+  input: object,
+): Promise<string> {
+  const value = JSON.stringify({ action, input });
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function normalizeAuthorizedAccount(input: AuthorizedAccount): AuthorizedAccount {
   const accountId = requireValue(input.accountId, "invalid_account_id");
   const displayName = requireValue(input.displayName, "invalid_public_name").slice(0, 24);
@@ -2936,19 +3806,93 @@ function mapChallengeRow(row: ChallengeRow): Challenge {
         }
       : undefined;
 
+  const dailyFeature =
+    row.feature_daily_date && row.feature_flavor && row.feature_selection_source
+      ? {
+          dailyDate: row.feature_daily_date,
+          flavor: row.feature_flavor,
+          selectionSource: row.feature_selection_source,
+        }
+      : null;
+  const origin = dailyFeature || row.origin === "daily" ? "daily" : "manual";
+  const dailyDate = dailyFeature?.dailyDate ?? row.daily_date ?? null;
+  const source = dailyFeature
+    ? dailyFeature.selectionSource === "automatic" ? "wikipedia_random" : "curated"
+    : row.source === "wikipedia_random" ? "wikipedia_random" : "curated";
+
   return {
     id: row.id,
     label: row.label,
     sortOrder: Number(row.sort_order),
     isActive: Boolean(row.is_active),
-    mode: row.origin === "daily" ? "daily" : "solo",
+    mode: origin === "daily" ? "daily" : "solo",
     start: { title: row.start_title, pageId: optionalInteger(row.start_page_id) },
     target: { title: row.target_title, pageId: optionalInteger(row.target_page_id) },
     ruleset: "ranked_classic",
-    origin: row.origin === "daily" ? "daily" : "manual",
-    dailyDate: row.daily_date ?? null,
-    source: row.source === "wikipedia_random" ? "wikipedia_random" : "curated",
+    origin,
+    dailyDate,
+    dailyFeature,
+    source,
     createdBy,
+  };
+}
+
+function mapDailyNominationRow(row: DailyNominationRow): DailyNomination {
+  return {
+    id: row.id,
+    challengeId: row.challenge_id,
+    nominatedByAccountId: row.nominated_by_account_id,
+    nominatedByDisplayName: row.nominated_by_display_name,
+    status: row.status,
+    recognizableScore: nullableInteger(row.recognizable_score),
+    weirdScore: nullableInteger(row.weird_score),
+    hardScore: nullableInteger(row.hard_score),
+    suggestedFlavor: row.suggested_flavor,
+    confidence: row.confidence,
+    classifierVersion: row.classifier_version,
+    reviewedByAccountId: row.reviewed_by_account_id,
+    reviewedAt: row.reviewed_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapDailyQueueEntryRow(row: DailyQueueEntryRow): DailyQueueEntry {
+  return {
+    id: row.id,
+    challengeId: row.challenge_id,
+    nominationId: row.nomination_id,
+    flavor: row.flavor,
+    source: row.source,
+    status: row.status,
+    queuedByAccountId: row.queued_by_account_id,
+    queuedAt: row.queued_at,
+    consumedDailyDate: row.consumed_daily_date,
+    consumedAt: row.consumed_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapDailyQueuedCandidateRow(row: DailyQueuedCandidateRow): DailyQueuedCandidate {
+  return {
+    ...mapDailyQueueEntryRow(row),
+    challenge: mapChallengeRow({
+      id: row.challenge_id,
+      label: row.challenge_label,
+      start_title: row.challenge_start_title,
+      target_title: row.challenge_target_title,
+      ruleset: row.challenge_ruleset,
+      sort_order: row.challenge_sort_order,
+      is_active: row.challenge_is_active,
+      start_page_id: row.challenge_start_page_id,
+      target_page_id: row.challenge_target_page_id,
+      created_by_account_id: row.challenge_created_by_account_id,
+      created_by_display_name: row.challenge_created_by_display_name,
+      created_by_identity_status: row.challenge_created_by_identity_status,
+      origin: row.challenge_origin,
+      daily_date: row.challenge_daily_date,
+      source: row.challenge_source,
+    }),
   };
 }
 
@@ -3009,6 +3953,74 @@ interface ChallengeRow {
   origin?: "manual" | "daily" | null;
   daily_date?: string | null;
   source?: "curated" | "wikipedia_random" | null;
+  feature_daily_date?: string | null;
+  feature_flavor?: DailyFlavor | null;
+  feature_selection_source?: "automatic" | "community" | "admin" | null;
+}
+
+interface DailyNominationRow {
+  id: string;
+  challenge_id: string;
+  nominated_by_account_id: string;
+  nominated_by_display_name: string;
+  status: "pending" | "approved" | "declined";
+  recognizable_score: number | null;
+  weird_score: number | null;
+  hard_score: number | null;
+  suggested_flavor: DailyFlavor | null;
+  confidence: "high" | "medium" | "low" | "unclassified";
+  classifier_version: string;
+  reviewed_by_account_id: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface DailyQueueEntryRow {
+  id: string;
+  challenge_id: string;
+  nomination_id: string | null;
+  flavor: DailyFlavor;
+  source: "community" | "admin";
+  status: "queued" | "consumed" | "removed" | "invalid";
+  queued_by_account_id: string;
+  queued_at: string;
+  consumed_daily_date: string | null;
+  consumed_at: string | null;
+  updated_at: string;
+}
+
+interface DailyQueuedCandidateRow extends DailyQueueEntryRow {
+  challenge_label: string;
+  challenge_start_title: string;
+  challenge_target_title: string;
+  challenge_ruleset: string;
+  challenge_sort_order: number;
+  challenge_is_active: number | boolean;
+  challenge_start_page_id: number | null;
+  challenge_target_page_id: number | null;
+  challenge_created_by_account_id: string | null;
+  challenge_created_by_display_name: string | null;
+  challenge_created_by_identity_status: AccountStatus | null;
+  challenge_origin: "manual" | "daily" | null;
+  challenge_daily_date: string | null;
+  challenge_source: "curated" | "wikipedia_random" | null;
+}
+
+interface DailyEditorialOperationIdentity {
+  operation: string;
+  idempotencyKey: string;
+  actorAccountId: string;
+  fingerprint: string;
+}
+
+interface DailyEditorialOperationRejection extends DailyEditorialOperationIdentity {
+  missingCode: string;
+  unavailableCode: string;
+  resourceSql: string;
+  resourceBindings: unknown[];
+  stateSql: string;
+  stateBindings: unknown[];
 }
 
 interface DailyChallengeJobRow {
@@ -3049,6 +4061,92 @@ function normalizeDailyChallengeInput(input: DailyChallengeInput): DailyChalleng
     throw new ApiError("invalid_daily_candidate", "Daily challenge candidates must be distinct main articles.", 400);
   }
   return { startTitle, startPageId: input.startPageId, targetTitle, targetPageId: input.targetPageId };
+}
+
+function normalizeApproveDailyNominationInput(
+  input: ApproveDailyNominationInput,
+): ApproveDailyNominationInput {
+  return {
+    nominationId: requireValue(input.nominationId, "invalid_daily_nomination_id"),
+    flavor: requireDailyFlavor(input.flavor),
+    ...normalizeDailyModerationInput(input),
+  };
+}
+
+function normalizeDeclineDailyNominationInput(
+  input: DeclineDailyNominationInput,
+): DeclineDailyNominationInput {
+  return {
+    nominationId: requireValue(input.nominationId, "invalid_daily_nomination_id"),
+    ...normalizeDailyModerationInput(input),
+  };
+}
+
+function normalizeQueueDailyChallengeInput(
+  input: QueueDailyChallengeInput,
+): QueueDailyChallengeInput {
+  return {
+    challengeId: requireValue(input.challengeId, "invalid_challenge_id"),
+    flavor: requireDailyFlavor(input.flavor),
+    ...normalizeDailyModerationInput(input),
+  };
+}
+
+function normalizeRemoveDailyQueueEntryInput(
+  input: RemoveDailyQueueEntryInput,
+): RemoveDailyQueueEntryInput {
+  return {
+    queueEntryId: requireValue(input.queueEntryId, "invalid_daily_queue_entry_id"),
+    ...normalizeDailyModerationInput(input),
+  };
+}
+
+function normalizeDailyModerationInput(input: {
+  actorAccountId: string;
+  idempotencyKey: string;
+}): { actorAccountId: string; idempotencyKey: string } {
+  return {
+    actorAccountId: requireValue(input.actorAccountId, "invalid_account_id"),
+    idempotencyKey: requireValue(input.idempotencyKey, "invalid_idempotency_key"),
+  };
+}
+
+function normalizeDailyFeatureSelection(
+  selection: DailyFeatureSelection,
+): DailyFeatureSelection {
+  const classifierVersion = requireValue(
+    selection.classifierVersion,
+    "invalid_daily_classifier_version",
+  );
+  if (selection.kind === "queued") {
+    return {
+      kind: "queued",
+      queueEntryId: requireValue(selection.queueEntryId, "invalid_daily_queue_entry_id"),
+      classifierVersion,
+    };
+  }
+  if (selection.kind !== "automatic") {
+    throw new ApiError("invalid_daily_selection", "Daily feature selection is invalid.", 400);
+  }
+  const selectedScore = selection.selectedScore ?? null;
+  if (selectedScore !== null && !Number.isSafeInteger(selectedScore)) {
+    throw new ApiError("invalid_daily_score", "Daily feature score is invalid.", 400);
+  }
+  return {
+    kind: "automatic",
+    candidate: normalizeDailyChallengeInput(selection.candidate),
+    classifierVersion,
+    selectedScore,
+  };
+}
+
+function requireDailyFlavor(value: unknown): DailyFlavor {
+  if (value === "recognizable" || value === "weird" || value === "hard") return value;
+  throw new ApiError("invalid_daily_flavor", "Daily flavor is invalid.", 400);
+}
+
+function nullableInteger(value: number | null | undefined): number | null {
+  return value === null || value === undefined ? null : Number(value);
 }
 
 function mapDailyChallengeJob(row: DailyChallengeJobRow): DailyChallengeJob {
@@ -3101,7 +4199,15 @@ interface RunRow {
 }
 
 interface OperationRow {
-  operation: "start" | "click" | "abandon" | "create_challenge";
+  operation:
+    | "start"
+    | "click"
+    | "abandon"
+    | "create_challenge"
+    | "approve_daily_nomination"
+    | "decline_daily_nomination"
+    | "queue_daily_challenge"
+    | "remove_daily_queue_entry";
   idempotency_key: string;
   canonical_account_id: string;
   request_fingerprint: string;
