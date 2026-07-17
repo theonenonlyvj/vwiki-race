@@ -1613,6 +1613,41 @@ h1 {
     overscroll-behavior: contain;
   }
 
+  /*
+   * iOS Safari tap-swallow fix, identity dialog ONLY: do not revert this to
+   * a bottom sheet.
+   *
+   * The "Save your stats" dialog used to inherit the bottom-sheet placement
+   * above (`align-items: end` against a `dvh`-based backdrop height). `dvh`
+   * tracks the *visual* viewport, which shrinks the instant the on-screen
+   * keyboard starts dismissing -- e.g. on the very first tap of "Log in"
+   * while the password field is still focused. That shrink re-anchors the
+   * bottom sheet mid-tap, sliding the button out from under the user's
+   * finger, so the tap is swallowed (diagnosed 2026-07-16 by triangulating
+   * three investigations: server-side probes cleared the backend, scripted
+   * Chromium/WebKit could not reproduce, and this keyboard-dependent layout
+   * was the remaining mechanism -- emulators don't run the real keyboard
+   * pipeline). Second tap works because the keyboard is already gone.
+   *
+   * Fix: top-anchor the identity dialog and size it off `svh` ("small"
+   * viewport height -- the stable, keyboard-independent minimum), so its
+   * position and geometry can't move under a tap while the keyboard is
+   * animating. `.modal-backdrop` is shared with `.end-run-dialog`, which
+   * should keep its bottom-sheet placement, so this is scoped via
+   * `:has()` (Safari 15.4+) rather than changing the shared rule above.
+   */
+  .modal-backdrop:has(.identity-dialog) {
+    align-items: start;
+    height: 100vh;
+    height: 100svh;
+    padding-top: max(10px, env(safe-area-inset-top));
+  }
+
+  .identity-dialog {
+    max-height: calc(100vh - 20px);
+    max-height: calc(100svh - 20px);
+  }
+
   .end-run-dialog {
     grid-template-columns: 1fr;
   }
