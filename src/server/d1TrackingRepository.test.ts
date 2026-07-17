@@ -230,7 +230,10 @@ class MemoryStatement implements D1PreparedStatementLike {
   private queryRows(): Record<string, unknown>[] {
     const sql = this.sql.toLowerCase();
 
-    if (sql.includes("from challenges") && sql.includes("where is_active")) {
+    if (
+      (sql.includes("from challenges") || sql.includes("from challenges c")) &&
+      (sql.includes("where is_active") || sql.includes("where c.is_active"))
+    ) {
       return this.db.challenges
         .filter((row) => row.is_active === 1)
         .sort((a, b) => a.sort_order - b.sort_order);
