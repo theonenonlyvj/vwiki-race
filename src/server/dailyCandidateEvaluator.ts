@@ -10,7 +10,6 @@ import {
 import {
   createEditorialTargetPools,
   type EditorialTarget,
-  type EditorialTargetPools,
 } from "./editorialTargetPools";
 
 const DEFAULT_ENDPOINT = "https://en.wikipedia.org/w/api.php";
@@ -58,7 +57,6 @@ export interface DailyCandidateEvaluator {
 export function createDailyCandidateEvaluator(options: {
   fetchImpl: typeof fetch;
   gateway: WikipediaGateway;
-  targetPools?: EditorialTargetPools;
   endpoint?: string;
   pageviewsEndpoint?: string;
   now?: () => number;
@@ -75,7 +73,7 @@ export function createDailyCandidateEvaluator(options: {
   const phaseTimeoutMs = clamp(options.phaseTimeoutMs ?? PHASE_TIMEOUT_MS, 1, PHASE_TIMEOUT_MS);
   const maxRequests = clamp(options.maxRequests ?? MAX_REQUESTS, 1, MAX_REQUESTS);
   const budgetsBySignal = new WeakMap<AbortSignal, WikimediaBudget>();
-  const targetPools = options.targetPools ?? createEditorialTargetPools({
+  const targetPools = createEditorialTargetPools({
     fetchImpl: async (input, init) => {
       const signal = init?.signal;
       const budget = signal && budgetsBySignal.get(signal);
@@ -313,6 +311,7 @@ async function loadRecentPageviews(
   now: Date,
 ): Promise<number | null> {
   const range = latestCompleteUtcDays(now);
+  const expectedTimestamps = completeUtcDayTimestamps(now);
   const url = new URL(
     `metrics/pageviews/per-article/en.wikipedia/all-access/all-agents/${encodeURIComponent(title.replaceAll(" ", "_"))}/daily/${range.start}/${range.end}`,
     ensureTrailingSlash(pageviewsEndpoint),
@@ -323,10 +322,15 @@ async function loadRecentPageviews(
     const payload = await response.json() as unknown;
     if (!isRecord(payload) || !Array.isArray(payload.items) || payload.items.length !== 30) return null;
     let total = 0;
+    const receivedTimestamps = new Set<string>();
     for (const item of payload.items) {
-      if (!isRecord(item) || !Number.isSafeInteger(item.views) || Number(item.views) < 0) return null;
+      if (!isRecord(item) || typeof item.timestamp !== "string" ||
+          !expectedTimestamps.has(item.timestamp) || receivedTimestamps.has(item.timestamp) ||
+          !Number.isSafeInteger(item.views) || Number(item.views) < 0) return null;
+      receivedTimestamps.add(item.timestamp);
       total += Number(item.views);
     }
+    if (receivedTimestamps.size !== expectedTimestamps.size || !Number.isSafeInteger(total)) return null;
     return total;
   } catch (caught) {
     if (caught instanceof BudgetExhausted) throw caught;
@@ -448,10 +452,13 @@ async function hasTwoClickShortcut(
       pltitles: target.title,
     });
     for (const page of queryPages(payload)) {
-      if (!isRecord(page.links) && !Array.isArray(page.links)) continue;
-      const links = Array.isArray(page.links) ? page.links : [];
-      if (links.some((link) => isRecord(link) && normalizeTitle(String(link.title ?? "")) === normalizeTitle(target.title))) {
-        return true;
+      if (page.links === undefined) continue;
+      if (!Array.isArray(page.links)) throw new MalformedWikimediaResponse();
+      for (const link of page.links) {
+        if (!isRecord(link) || typeof link.title !== "string") throw new MalformedWikimediaResponse();
+        if (normalizeTitle(link.title) === normalizeTitle(target.title)) {
+          return true;
+        }
       }
     }
   }
@@ -475,7 +482,11 @@ function rankPairs(
       if (score.eligible) pairs.push({ start, target, score });
     }
   }
-  return pairs.sort((left, right) => compareScoredDailyCandidates(left.score, right.score, request.flavor));
+  return pairs.sort((left, right) => {
+    const scored = compareScoredDailyCandidates(left.score, right.score, request.flavor);
+    if (scored !== 0) return scored;
+    return left.start.pageId - right.start.pageId || left.target.pageId - right.target.pageId;
+  });
 }
 
 function toCandidate(pair: CandidatePair): DailyChallengeCandidate {
@@ -506,9 +517,13 @@ async function apiJson(
 function queryPages(payload: unknown): Record<string, unknown>[] {
   if (!isRecord(payload) || !isRecord(payload.query)) throw new MalformedWikimediaResponse();
   const pages = payload.query.pages;
-  if (Array.isArray(pages)) return pages.filter(isRecord);
-  if (isRecord(pages)) return Object.values(pages).filter(isRecord);
-  throw new MalformedWikimediaResponse();
+  if (!Array.isArray(pages)) throw new MalformedWikimediaResponse();
+  const records: Record<string, unknown>[] = [];
+  for (const page of pages) {
+    if (!isRecord(page)) throw new MalformedWikimediaResponse();
+    records.push(page);
+  }
+  return records;
 }
 
 interface EditorialSources {
@@ -586,6 +601,17 @@ function latestCompleteUtcDays(now: Date): { start: string; end: string } {
   return { start: compactUtcDate(start), end: compactUtcDate(end) };
 }
 
+function completeUtcDayTimestamps(now: Date): Set<string> {
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+  const timestamps = new Set<string>();
+  for (let offset = 29; offset >= 0; offset -= 1) {
+    const day = new Date(end);
+    day.setUTCDate(day.getUTCDate() - offset);
+    timestamps.add(`${compactUtcDate(day)}00`);
+  }
+  return timestamps;
+}
+
 function compactUtcDate(date: Date): string {
   return `${date.getUTCFullYear()}${String(date.getUTCMonth() + 1).padStart(2, "0")}${String(date.getUTCDate()).padStart(2, "0")}`;
 }
@@ -614,6 +640,7 @@ function unavailable(): DailyChallengeCandidateError {
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
+  if (!Number.isFinite(value)) return maximum;
   return Math.min(maximum, Math.max(minimum, Math.floor(value)));
 }
 

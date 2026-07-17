@@ -1,6 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 
 import type { AuthorizedAccount } from "../domain/types";
+import { dailyFlavorForCentralDate } from "../domain/dailyEditorial";
 import { createApiHandlers, type ApiHandlers } from "./apiHandlers";
 import { createD1TrackingRepository } from "./d1TrackingRepository";
 import { ApiError } from "./http";
@@ -9,7 +10,11 @@ import {
   type VGamesIdentityClient,
 } from "./vgamesIdentityClient";
 import { createWikipediaChallengeValidator } from "./wikipediaChallengeValidator";
-import { createDailyChallengeCandidateSource, type DailyChallengeCandidate } from "./dailyChallengeCandidates";
+import {
+  createDailyChallengeCandidateSource,
+  type DailyCandidateRequest,
+  type DailyChallengeCandidate,
+} from "./dailyChallengeCandidates";
 import { createWorkerWikipediaGateway } from "./workerWikipediaGateway";
 import type { RunProtocolRepository } from "./trackingRepository";
 import { legacyCreateOperationKey } from "./runProtocol";
@@ -41,7 +46,7 @@ export interface WorkerTracking {
 export interface WorkerOptions {
   createTracking?: (env: Env) => WorkerTracking;
   createDailyCandidateSource?: () => {
-    findCandidate(): Promise<DailyChallengeCandidate>;
+    findCandidate(request: DailyCandidateRequest): Promise<DailyChallengeCandidate>;
   };
   now?: () => Date;
 }
@@ -119,7 +124,10 @@ export function createWorker(options: WorkerOptions = {}) {
 
       logDailyJob("claimed", { dailyDate: job.dailyDate, attemptCount: job.attemptCount });
       try {
-        const candidate = await buildDailyCandidateSource().findCandidate();
+        const candidate = await buildDailyCandidateSource().findCandidate({
+          dailyDate: job.dailyDate,
+          flavor: dailyFlavorForCentralDate(job.dailyDate),
+        });
         const challenge = await repository.acceptDailyChallenge(job, candidate);
         logDailyJob("accepted", {
           dailyDate: job.dailyDate,

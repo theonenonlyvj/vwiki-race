@@ -200,7 +200,7 @@ describe("daily challenge D1 jobs", () => {
     }));
     const worker = (createWorker as unknown as (options: {
       createTracking: () => WorkerTracking;
-      createDailyCandidateSource: () => { findCandidate(): Promise<{
+      createDailyCandidateSource: () => { findCandidate(request: { dailyDate: string; flavor: string }): Promise<{
         startTitle: string; startPageId: number; targetTitle: string; targetPageId: number;
       }> };
     }) => { scheduled: (controller: { scheduledTime: number }, env: unknown) => Promise<void> })({
@@ -221,10 +221,41 @@ describe("daily challenge D1 jobs", () => {
       }), env),
     ]);
 
-    expect(findCandidate).toHaveBeenCalledTimes(1);
+    expect(findCandidate).toHaveBeenCalledWith({ dailyDate: "2026-07-15", flavor: "recognizable" });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT id, daily_date FROM challenges WHERE daily_date = '2026-07-15'",
     ).first()).resolves.toEqual({ id: "challenge-0004", daily_date: "2026-07-15" });
+  });
+
+  it("derives the weird flavor from a Thursday Central scheduled date", async () => {
+    const timestamp = "2026-07-16T10:00:00.000Z";
+    const repository = createD1TrackingRepository({
+      db: env.VWIKI_RACE_DB,
+      now: () => new Date(timestamp),
+    });
+    const findCandidate = vi.fn(async () => ({
+      startTitle: "Start",
+      startPageId: 201,
+      targetTitle: "Target",
+      targetPageId: 202,
+    }));
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: {},
+        identity: {},
+        runProtocol: repository,
+        authorize: async () => { throw new Error("not used"); },
+      } as unknown as WorkerTracking),
+      createDailyCandidateSource: () => ({ findCandidate }),
+      now: () => new Date(timestamp),
+    });
+
+    await worker.scheduled(createScheduledController({
+      scheduledTime: new Date(timestamp),
+      cron: "0 10 * * *",
+    }), env as unknown as WorkerEnv);
+
+    expect(findCandidate).toHaveBeenCalledWith({ dailyDate: "2026-07-16", flavor: "weird" });
   });
 
   it("uses the hourly retry trigger only to claim an existing due job", async () => {
@@ -234,7 +265,7 @@ describe("daily challenge D1 jobs", () => {
       now: () => new Date(clock.now),
       randomId: (() => { let index = 0; return () => `retry-${++index}`; })(),
     });
-    await repository.ensureDailyChallengeJob("2026-07-15");
+    await repository.ensureDailyChallengeJob("2026-07-11");
     const first = await repository.claimDueDailyChallengeJob();
     await repository.failDailyChallengeJob(first!, "daily_candidate_unavailable");
     clock.now = "2026-07-15T11:17:00.000Z";
@@ -260,10 +291,10 @@ describe("daily challenge D1 jobs", () => {
       cron: "17 * * * *",
     }), env as unknown as WorkerEnv);
 
-    expect(findCandidate).toHaveBeenCalledTimes(1);
+    expect(findCandidate).toHaveBeenCalledWith({ dailyDate: "2026-07-11", flavor: "hard" });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT daily_date FROM challenges WHERE start_title = 'Retry start'",
-    ).first()).resolves.toEqual({ daily_date: "2026-07-15" });
+    ).first()).resolves.toEqual({ daily_date: "2026-07-11" });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT count(*) count FROM daily_challenge_jobs",
     ).first()).resolves.toEqual({ count: 1 });

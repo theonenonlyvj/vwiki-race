@@ -1,4 +1,3 @@
-import type { DailyFlavor } from "../domain/dailyEditorial";
 import type { WikipediaGateway } from "../services/wikipediaGateway";
 import {
   createDailyCandidateEvaluator,
@@ -7,7 +6,6 @@ import {
   type DailyChallengeDiagnosticEvent,
   type DailyChallengeCandidate,
 } from "./dailyCandidateEvaluator";
-import type { EditorialTargetPools } from "./editorialTargetPools";
 
 export {
   DailyChallengeCandidateError,
@@ -19,7 +17,6 @@ export {
 export function createDailyChallengeCandidateSource(options: {
   fetchImpl: typeof fetch;
   gateway: WikipediaGateway;
-  targetPools?: EditorialTargetPools;
   evaluator?: DailyCandidateEvaluator;
   endpoint?: string;
   pageviewsEndpoint?: string;
@@ -31,29 +28,23 @@ export function createDailyChallengeCandidateSource(options: {
     fields: Record<string, string | number | boolean>,
   ) => void;
 }) {
-  const now = options.now ?? Date.now;
   const evaluator = options.evaluator ?? createDailyCandidateEvaluator({
     fetchImpl: options.fetchImpl,
     gateway: options.gateway,
-    targetPools: options.targetPools,
     endpoint: options.endpoint,
     pageviewsEndpoint: options.pageviewsEndpoint,
-    now,
+    now: options.now,
     phaseTimeoutMs: options.phaseTimeoutMs,
     maxRequests: options.maxRequests,
     onDiagnostic: options.onDiagnostic,
   });
 
   return {
-    async findCandidate(request?: DailyCandidateRequest): Promise<DailyChallengeCandidate> {
-      return evaluator.findCandidate(request ?? legacyRequest(now));
+    async findCandidate(request: DailyCandidateRequest): Promise<DailyChallengeCandidate> {
+      if (!request) {
+        throw new TypeError("Daily candidate requests require a daily date and flavor.");
+      }
+      return evaluator.findCandidate(request);
     },
-  };
-}
-
-function legacyRequest(now: () => number): { dailyDate: string; flavor: DailyFlavor } {
-  return {
-    dailyDate: new Date(now()).toISOString().slice(0, 10),
-    flavor: "recognizable",
   };
 }
