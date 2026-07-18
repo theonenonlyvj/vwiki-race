@@ -1,19 +1,16 @@
 import {
-  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
   type RefObject,
-  type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
 } from "react";
 import { getSortedChallenges } from "./domain/challenges";
 import {
   centralDateKey,
-  dailyBadgeLabel,
   selectDefaultChallenge,
 } from "./domain/challengeSelection";
 import type { CreateChallengeOutcome } from "./domain/dailyEditorial";
@@ -36,15 +33,22 @@ import {
   createVWikiRaceApiClient,
   type VWikiRaceApiClient,
 } from "./services/vwikiRaceApiClient";
+import {
+  clearChallengeUrl,
+  exitAdminDailiesUrl,
+  isAdminDailiesRoute,
+  readChallengeIdFromUrl,
+  syncChallengeUrl,
+} from "./services/urlRouting";
 import { createWikipediaGateway } from "./services/wikipediaGateway";
 import { useRaceController } from "./hooks/useRaceController";
-import AdminDailies from "./components/AdminDailies";
 import {
   type TargetPreviewState,
   useTargetPreview,
 } from "./hooks/useTargetPreview";
 import RaceFlow, { type DnfResultSnapshot } from "./race/RaceFlow";
-import { ChallengeShareButton, formatElapsed } from "./race/shared";
+import AppShell, { type ChallengesView, type ModeKey } from "./modes/AppShell";
+import type { CreateChallengeInput } from "./modes/challenges/Browse";
 
 interface AppProps {
   apiOrigin?: string;
@@ -57,7 +61,6 @@ interface AppProps {
   identityRepository?: VGamesIdentityRepository;
 }
 
-type TabKey = "play" | "leaderboard" | "challenges" | "stats" | "admin";
 type AuthMode = "guest" | "create" | "login";
 interface LoginFormInput {
   username: string;
@@ -70,11 +73,6 @@ interface LeaderboardProjection {
 interface AccountStatsProjection {
   token: string;
   stats: AccountStats | null;
-}
-interface CreateChallengeInput {
-  startTitle: string;
-  targetTitle: string;
-  nominateForDaily: boolean;
 }
 type AuthPromptIntent =
   | { type: "start"; challengeId: string }
@@ -134,9 +132,14 @@ export default function App({
   identityClient: injectedIdentityClient,
   identityRepository: injectedIdentityRepository,
 }: AppProps) {
-  const [activeTab, setActiveTab] = useState<TabKey>(() =>
-    isAdminDailiesRoute() ? "admin" : "play",
-  );
+  // Bottom-nav mode shell (Increment 2 - see src/modes/AppShell.tsx). The
+  // `/admin/dailies` bypass reads window.location directly inside AppShell
+  // rather than being tracked here, so `mode` only ever holds the four real
+  // nav destinations - see `locationVersion` below for how admin
+  // enter/exit still forces a re-render without its own piece of state.
+  const [mode, setMode] = useState<ModeKey>("home");
+  const [challengesView, setChallengesView] = useState<ChallengesView>("browse");
+  const [locationVersion, setLocationVersion] = useState(0);
   const [raceStage, setRaceStage] = useState<"preview" | null>(null);
   const [canManageDailies, setCanManageDailies] = useState<boolean | null>(null);
   const [authPrompt, setAuthPrompt] = useState<AuthPromptIntent | null>(null);
@@ -181,6 +184,12 @@ export default function App({
   const challengeLockRef = useRef(false);
   const startLockRef = useRef(false);
   const loginRequestLock = useRef(false);
+  // One-shot guard for migration note (iv): a challenge share link
+  // (?challenge=<id>) routes to Challenges/Detail on the very first catalog
+  // load that honors it. Without this, a later focus-triggered catalog
+  // refresh would keep re-reading the same URL param and yank the player
+  // back to Detail even after they'd already navigated elsewhere in-app.
+  const initialUrlRouteApplied = useRef(false);
 
   const apiClient = useMemo(
     () => injectedApiClient ?? createVWikiRaceApiClient(fetchImpl, { apiOrigin }),
@@ -359,12 +368,24 @@ export default function App({
         setLeaderboardProjection(nextChallenge
           ? { challengeId: nextChallenge.id, rows: [] }
           : null);
+        const requestedIdHonored = Boolean(
+          requestedChallengeId && nextChallenge && requestedChallengeId === nextChallenge.id,
+        );
         if (
           nextChallenge &&
           race.phase === "idle" &&
-          (requestedChallengeId === nextChallenge.id || nextChallenge.origin === "daily")
+          (requestedIdHonored || nextChallenge.origin === "daily")
         ) {
           syncChallengeUrl(nextChallenge.id, "replace");
+        }
+        // Migration note (iv): a challenge share link opens Challenges mode
+        // -> Detail for that id. A plain load (no ?challenge=, or one that
+        // doesn't match a real challenge) is unaffected - Home keeps
+        // showing today's daily exactly as before.
+        if (requestedIdHonored && !initialUrlRouteApplied.current) {
+          initialUrlRouteApplied.current = true;
+          setMode("challenges");
+          setChallengesView("detail");
         }
         if (nextChallenge) {
           const leaderboardGeneration = ++leaderboardRequest.current;
@@ -430,13 +451,19 @@ export default function App({
 
   useEffect(() => {
     const onPopState = () => {
+      // Forces a re-render even on branches below that don't otherwise
+      // touch state (e.g. entering/leaving /admin/dailies), so AppShell's
+      // own isAdminDailiesRoute() read - and every other read of
+      // window.location during this render - reflects the URL popstate
+      // just navigated to. pushState/replaceState never trigger React on
+      // their own.
+      setLocationVersion((version) => version + 1);
       const lockedChallengeId = race.challenge?.id ?? race.recoveryRun?.challengeId ?? selectedChallengeId;
       if (challengeIsLocked) {
         if (lockedChallengeId) syncChallengeUrl(lockedChallengeId, "replace");
         return;
       }
       if (isAdminDailiesRoute()) {
-        setActiveTab("admin");
         setError(null);
         return;
       }
@@ -445,7 +472,10 @@ export default function App({
       if (!requested) return;
       race.resetCompleted();
       setSelectedChallengeId(requested.id);
-      setActiveTab("play");
+      // Migration note (iv): back/forward through a challenge share link
+      // lands on Detail, same as the initial load.
+      setMode("challenges");
+      setChallengesView("detail");
       setError(null);
       void refreshLeaderboard(requested.id).catch((caught) => {
         setError(errorMessage(caught, "Could not load the leaderboard."));
@@ -456,7 +486,7 @@ export default function App({
   }, [challengeIsLocked, challenges, race.challenge, race.recoveryRun, selectedChallengeId]);
 
   useEffect(() => {
-    if (activeTab !== "stats" || !identitySession) return;
+    if (mode !== "you" || !identitySession) return;
     const token = identitySession.token;
     const request = ++statsRequest.current;
     setAccountStatsProjection({ token, stats: null });
@@ -477,7 +507,7 @@ export default function App({
     return () => {
       if (request === statsRequest.current) statsRequest.current += 1;
     };
-  }, [activeTab, apiClient, identitySession]);
+  }, [mode, apiClient, identitySession]);
 
   async function refreshLeaderboard(challengeId: string) {
     const request = ++leaderboardRequest.current;
@@ -495,12 +525,15 @@ export default function App({
     }
   }
 
+  // Used by Home's and Browse's shared ChallengeBrowser mount - both keep
+  // today's exact "select and land on Home" behavior; see that component's
+  // file comment.
   async function selectChallenge(challengeId: string) {
     if (challengeLockRef.current) return;
     race.resetCompleted();
     setSelectedChallengeId(challengeId);
     syncChallengeUrl(challengeId);
-    setActiveTab("play");
+    setMode("home");
     setError(null);
     setRunNotice(null);
     try {
@@ -510,20 +543,37 @@ export default function App({
     }
   }
 
-  function selectView(tab: TabKey) {
-    if (tab === "admin") {
-      if (!canManageDailies) return;
-      syncAdminDailiesUrl();
-      setActiveTab("admin");
-      return;
+  // Boards v0's own selector (spec: "challenge-scoped board with its
+  // selector") - unlike selectChallenge above, this stays on Boards rather
+  // than jumping to Home, since Boards is now a standalone destination.
+  async function selectChallengeForBoards(challengeId: string) {
+    if (challengeLockRef.current) return;
+    setSelectedChallengeId(challengeId);
+    syncChallengeUrl(challengeId);
+    setError(null);
+    setRunNotice(null);
+    try {
+      await refreshLeaderboard(challengeId);
+    } catch (caught) {
+      setError(errorMessage(caught, "Could not load the leaderboard."));
     }
+  }
 
-    if (isAdminDailiesRoute()) {
-      const url = new URL(window.location.href);
-      url.pathname = "/";
-      window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
-    }
-    setActiveTab(tab);
+  function selectMode(nextMode: ModeKey) {
+    setMode(nextMode);
+    // Tapping the Challenges nav item always returns to its root (Browse) -
+    // Detail is reached only via a share link/back-forward, never the nav.
+    if (nextMode === "challenges") setChallengesView("browse");
+  }
+
+  function closeChallengeDetail() {
+    setChallengesView("browse");
+    clearChallengeUrl();
+  }
+
+  function exitAdmin() {
+    exitAdminDailiesUrl();
+    setLocationVersion((version) => version + 1);
   }
 
   async function createChallenge(input: CreateChallengeInput) {
@@ -566,7 +616,7 @@ export default function App({
         setSelectedChallengeId(challenge.id);
         syncChallengeUrl(challenge.id);
         setLeaderboardProjection({ challengeId: challenge.id, rows: [] });
-        setActiveTab("play");
+        setMode("home");
       }
       setRunNotice(createChallengeNotice(outcome));
       if (!challengeLockRef.current) {
@@ -591,16 +641,16 @@ export default function App({
     setRaceStage("preview");
   }
 
-  function exitRaceFlow(tab: TabKey) {
+  function exitRaceFlow(nextMode: ModeKey) {
     setRaceStage(null);
-    setActiveTab(tab);
+    selectMode(nextMode);
   }
 
-  function exitCompletedRaceTo(tab: TabKey) {
+  function exitCompletedRaceTo(nextMode: ModeKey) {
     race.resetCompleted();
     setDnfResult(null);
     setRaceStage(null);
-    setActiveTab(tab);
+    selectMode(nextMode);
   }
 
   function requestEndRun(event: MouseEvent<HTMLElement>) {
@@ -636,7 +686,7 @@ export default function App({
     setError(null);
     setRunNotice(null);
     setDnfResult(null);
-    setActiveTab("play");
+    setMode("home");
     setLeaderboardProjection({ challengeId: challenge.id, rows: [] });
     setSelectedChallengeId(challenge.id);
     syncChallengeUrl(challenge.id);
@@ -839,9 +889,10 @@ export default function App({
     }
 
     if (prompt.type === "claim") {
-      // Results' guest claim CTA (spec beat 3): there is no pending action
-      // to resume - continueAsGuest/createVGamesAccount/login already
-      // upgraded the identity and persisted it. Nothing further to do.
+      // Results' guest claim CTA (spec beat 3) and You's persistent claim
+      // CTA: there is no pending action to resume -
+      // continueAsGuest/createVGamesAccount/login already upgraded the
+      // identity and persisted it. Nothing further to do.
       return;
     }
 
@@ -980,17 +1031,10 @@ export default function App({
   const showBanners = !authPrompt && !endConfirmationOpen;
   const bannerError = showBanners ? visibleError : null;
   const bannerNotice = showBanners ? runNotice : null;
-  const visibleTab: TabKey = activeTab === "admin" && canManageDailies !== true
-    ? "play"
-    : activeTab;
-  const showAdminAccessNotice = activeTab === "admin" && canManageDailies === false;
-  const availableTabs: TabKey[] = canManageDailies
-    ? ["play", "leaderboard", "challenges", "stats", "admin"]
-    : ["play", "leaderboard", "challenges", "stats"];
 
   return (
     <main
-      className="app-shell header-expanded"
+      className="app-shell"
       aria-busy={isBusy}
     >
       {raceEngaged ? (
@@ -1021,155 +1065,46 @@ export default function App({
           onRetryRecovery={() => void retryRecovery()}
           onRetryCatalog={() => setCatalogRefreshVersion((version) => version + 1)}
           onRequestEndRun={requestEndRun}
-          onBackFromPreview={() => exitRaceFlow("play")}
+          onBackFromPreview={() => exitRaceFlow("home")}
           onSeeOtherChallengesFromPreview={() => exitRaceFlow("challenges")}
           onStartFromPreview={() => void startSelectedChallenge()}
           onPlayAgain={() => void startSelectedChallenge()}
-          onShowLeaderboard={() => exitCompletedRaceTo("leaderboard")}
+          onShowLeaderboard={() => exitCompletedRaceTo("boards")}
           onShowChallenges={() => exitCompletedRaceTo("challenges")}
           onClaimIdentity={(mode) => openAuthPrompt({ type: "claim" }, mode)}
           handleArticleClick={handleArticleClick}
           handleArticlePrewarm={handleArticlePrewarm}
         />
       ) : (
-        <>
-          <header className="game-header">
-            <div className="brand-lockup" aria-label="VWiki Race">
-              <span className="viota-mark">VWiki</span>
-              <h1>VWiki Race</h1>
-            </div>
-
-            <div className="challenge-route" aria-label="Current challenge">
-              <div className="challenge-meta">
-                <span>{selectedChallenge?.label ?? "Challenge"}</span>
-                {selectedChallenge && dailyBadgeLabel(selectedChallenge, currentCentralDate) ? (
-                  <span className="daily-badge">
-                    {dailyBadgeLabel(selectedChallenge, currentCentralDate)}
-                  </span>
-                ) : null}
-              </div>
-              <strong>
-                {selectedChallenge
-                  ? `${selectedChallenge.start.title} -> ${selectedChallenge.target.title}`
-                  : "Loading"}
-              </strong>
-            </div>
-
-            <div className="player-gate">
-              <button
-                type="button"
-                disabled={!selectedChallenge || authBusy}
-                onClick={openRacePreview}
-              >
-                {`Start ${selectedChallenge?.label ?? "Challenge"}`}
-              </button>
-            </div>
-
-            <div className="account-chip" role="status" aria-label="Current player">
-              {identitySession?.displayName ?? "Guest"}
-            </div>
-          </header>
-
-          <nav className={`tabbar${canManageDailies ? " has-admin" : ""}`} aria-label="VWiki Race views">
-            {availableTabs.map(
-              (tab) => (
-                <button
-                  aria-pressed={visibleTab === tab}
-                  className={visibleTab === tab ? "active" : undefined}
-                  disabled={tab !== "play" && challengeIsLocked}
-                  key={tab}
-                  onClick={() => selectView(tab)}
-                  type="button"
-                >
-                  {tab === "admin" ? "Admin" : tab}
-                </button>
-              ),
-            )}
-          </nav>
-
-          {bannerError ? (
-            <p className="error-banner" role="alert">{bannerError}</p>
-          ) : null}
-          {bannerNotice ? (
-            <p className="run-notice" role="status">{bannerNotice}</p>
-          ) : null}
-          {showAdminAccessNotice ? (
-            <p aria-label="Authorization notice" className="run-notice" role="status">
-              This page is not available.
-            </p>
-          ) : null}
-
-          <section className="content-shell">
-            {visibleTab === "play" ? (
-              <PlayPanel
-                challenges={challenges}
-                onCreateChallenge={createChallenge}
-                onSelectChallenge={(challengeId) => void selectChallenge(challengeId)}
-                selectedChallenge={selectedChallenge}
-                selectionLocked={challengeIsLocked}
-                targetPreview={targetPreview}
-                todayCentral={currentCentralDate}
-                canNominateForDaily={identitySession?.status === "claimed"}
-              />
-            ) : null}
-
-            {visibleTab === "leaderboard" ? (
-              <LeaderboardPanel
-                leaderboard={leaderboard}
-                onDisclosePath={(runId) => void loadRunPath(runId)}
-                runPaths={runPaths}
-              />
-            ) : null}
-
-            {visibleTab === "challenges" ? (
-              <ChallengeBrowser
-                challenges={challenges}
-                canNominateForDaily={identitySession?.status === "claimed"}
-                onCreateChallenge={createChallenge}
-                onSelectChallenge={(challengeId) => void selectChallenge(challengeId)}
-                selectedChallengeId={selectedChallenge?.id ?? null}
-                selectionLocked={challengeIsLocked}
-                todayCentral={currentCentralDate}
-              />
-            ) : null}
-
-            {visibleTab === "stats" ? (
-              <StatsPanel
-                stats={accountStats}
-              />
-            ) : null}
-
-            {visibleTab === "admin" && identitySession ? (
-              <AdminDailies
-                apiClient={apiClient}
-                challenges={challenges}
-                previewGateway={previewWikipediaGateway}
-                token={identitySession.token}
-              />
-            ) : null}
-          </section>
-
-          <footer className="site-footer">
-            <p>
-              Have{" "}
-              <a
-                href="https://theonenonlyvj.github.io/personal-site/contact"
-                rel="noopener noreferrer"
-                target="_blank"
-              >
-                Feedback
-              </a>
-              ? Want to see my other projects?{" "}
-              <a
-                href="https://theonenonlyvj.github.io/personal-site"
-                rel="noopener noreferrer"
-                target="_blank"
-              >
-                Click here
-              </a>.
-            </p>
-          </footer>
-        </>
+        <AppShell
+          accountStats={accountStats}
+          apiClient={apiClient}
+          authBusy={authBusy}
+          bannerError={bannerError}
+          bannerNotice={bannerNotice}
+          canManageDailies={canManageDailies}
+          canNominateForDaily={identitySession?.status === "claimed"}
+          challenges={challenges}
+          challengesView={challengesView}
+          identitySession={identitySession}
+          leaderboard={leaderboard}
+          mode={mode}
+          onClaimIdentity={() => openAuthPrompt({ type: "claim" })}
+          onCloseChallengeDetail={closeChallengeDetail}
+          onCreateChallenge={createChallenge}
+          onDisclosePath={(runId) => void loadRunPath(runId)}
+          onExitAdmin={exitAdmin}
+          onSelectChallenge={(challengeId) => void selectChallenge(challengeId)}
+          onSelectChallengeForBoards={(challengeId) => void selectChallengeForBoards(challengeId)}
+          onSelectMode={selectMode}
+          onStartChallenge={openRacePreview}
+          previewWikipediaGateway={previewWikipediaGateway}
+          runPaths={runPaths}
+          selectedChallenge={selectedChallenge}
+          selectionLocked={challengeIsLocked}
+          targetPreview={targetPreview}
+          todayCentral={currentCentralDate}
+        />
       )}
 
       {authPrompt ? (
@@ -1571,238 +1506,6 @@ function focusableElements(container: HTMLElement | null): HTMLElement[] {
   ));
 }
 
-function PlayPanel({
-  canNominateForDaily,
-  challenges,
-  onCreateChallenge,
-  onSelectChallenge,
-  selectedChallenge,
-  selectionLocked,
-  targetPreview,
-  todayCentral,
-}: {
-  canNominateForDaily: boolean;
-  challenges: Challenge[];
-  onCreateChallenge: (input: CreateChallengeInput) => Promise<void>;
-  onSelectChallenge: (challengeId: string) => void;
-  selectedChallenge: Challenge | null;
-  selectionLocked: boolean;
-  targetPreview: TargetPreviewState;
-  todayCentral: string;
-}) {
-  // The race flow (preview -> active -> results) is a full-screen takeover
-  // rendered by RaceFlow once engaged (see raceEngaged in App.tsx); this
-  // panel therefore only ever renders the idle "pick a challenge" view.
-  return (
-    <section className="home-layout">
-      <p className="how-to-play muted">
-        Race from the start article to the target using only links inside the page. Fastest time wins.
-      </p>
-      {selectedChallenge ? (
-        <TargetPreviewPanel
-          challenge={selectedChallenge}
-          targetPreview={targetPreview}
-        />
-      ) : (
-        <section className="empty-state">
-          <span>Challenge</span>
-          <h2>Loading challenge catalog</h2>
-          <p>Pick a challenge.</p>
-        </section>
-      )}
-
-      <ChallengeBrowser
-        canNominateForDaily={canNominateForDaily}
-        challenges={challenges}
-        onCreateChallenge={onCreateChallenge}
-        onSelectChallenge={onSelectChallenge}
-        selectedChallengeId={selectedChallenge?.id ?? null}
-        selectionLocked={selectionLocked}
-        todayCentral={todayCentral}
-      />
-    </section>
-  );
-}
-
-function TargetPreviewPanel({
-  challenge,
-  targetPreview,
-}: {
-  challenge: Challenge;
-  targetPreview: TargetPreviewState;
-}) {
-  const readyPreview =
-    targetPreview.status === "ready" && targetPreview.challengeId === challenge.id
-      ? targetPreview
-      : null;
-  const unavailable =
-    targetPreview.status === "unavailable" && targetPreview.challengeId === challenge.id;
-  const title = readyPreview?.canonicalTitle ?? challenge.target.title;
-
-  return (
-    <section
-      aria-label="Target preview"
-      className="target-preview-panel"
-      role="region"
-    >
-      <div className="target-preview-copy">
-        <span className="target-preview-kicker">Target preview</span>
-        <h2 id="target-preview-title">{title}</h2>
-        {readyPreview ? (
-          <p className="target-preview-blurb">
-            {readyPreview.preview.blurb ?? "Wikipedia does not provide a short lead for this target."}
-          </p>
-        ) : unavailable ? (
-          <p className="target-preview-blurb muted">Preview unavailable. You can still start the challenge.</p>
-        ) : (
-          <p className="target-preview-blurb muted">Loading target preview...</p>
-        )}
-        {readyPreview ? (
-          <p className="target-preview-attribution">
-            <a href={readyPreview.attributionUrl} rel="noreferrer noopener" target="_blank">
-              Source revision
-            </a>{" "}
-            ·{" "}
-            <a
-              href="https://creativecommons.org/licenses/by-sa/4.0/"
-              rel="noreferrer noopener"
-              target="_blank"
-            >
-              CC BY-SA 4.0
-            </a>
-          </p>
-        ) : null}
-        <ChallengeShareButton challengeId={challenge.id} />
-      </div>
-    </section>
-  );
-}
-
-function ChallengeBrowser({
-  canNominateForDaily,
-  challenges,
-  onCreateChallenge,
-  onSelectChallenge,
-  selectionLocked = false,
-  selectedChallengeId,
-  todayCentral,
-}: {
-  canNominateForDaily: boolean;
-  challenges: Challenge[];
-  onCreateChallenge: (input: CreateChallengeInput) => Promise<void>;
-  onSelectChallenge: (challengeId: string) => void;
-  selectionLocked?: boolean;
-  selectedChallengeId: string | null;
-  todayCentral: string;
-}) {
-  const [startTitle, setStartTitle] = useState("");
-  const [targetTitle, setTargetTitle] = useState("");
-  const [nominateForDaily, setNominateForDaily] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  const canCreate =
-    startTitle.trim().length > 0 && targetTitle.trim().length > 0;
-
-  useEffect(() => {
-    if (!canNominateForDaily) setNominateForDaily(false);
-  }, [canNominateForDaily]);
-
-  async function submitChallenge(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (selectionLocked || !canCreate) {
-      return;
-    }
-
-    setIsCreating(true);
-    try {
-      await onCreateChallenge({
-        startTitle: startTitle.trim(),
-        targetTitle: targetTitle.trim(),
-        nominateForDaily,
-      });
-      setStartTitle("");
-      setTargetTitle("");
-      setNominateForDaily(false);
-    } finally {
-      setIsCreating(false);
-    }
-  }
-
-  return (
-    <section className="challenge-browser">
-      <h2>Challenges</h2>
-      <form className="create-challenge-form" onSubmit={submitChallenge}>
-        <label className="name-control">
-          <span>Start article</span>
-          <input
-            aria-label="Start article"
-            disabled={selectionLocked}
-            maxLength={512}
-            onChange={(event) => setStartTitle(event.target.value)}
-            placeholder="Wikipedia title or URL"
-            value={startTitle}
-          />
-        </label>
-        <label className="name-control">
-          <span>Target article</span>
-          <input
-            aria-label="Target article"
-            disabled={selectionLocked}
-            maxLength={512}
-            onChange={(event) => setTargetTitle(event.target.value)}
-            placeholder="Wikipedia title or URL"
-            value={targetTitle}
-          />
-        </label>
-        {canNominateForDaily ? (
-          <label className="daily-nomination-control">
-            <input
-              checked={nominateForDaily}
-              disabled={selectionLocked}
-              onChange={(event) => setNominateForDaily(event.target.checked)}
-              type="checkbox"
-            />
-            <span>Nominate for a future Daily</span>
-          </label>
-        ) : null}
-        <button type="submit" disabled={selectionLocked || !canCreate || isCreating}>
-          Create Challenge
-        </button>
-      </form>
-      {challenges.length ? (
-        <ol className="challenge-list">
-          {challenges.map((challenge) => (
-            <li key={challenge.id}>
-              <button
-                aria-pressed={selectedChallengeId === challenge.id}
-                disabled={selectionLocked}
-                onClick={() => onSelectChallenge(challenge.id)}
-                type="button"
-              >
-                <span className="challenge-meta">
-                  <span>{challenge.label ?? challenge.id}</span>
-                  {dailyBadgeLabel(challenge, todayCentral) ? (
-                    <span className="daily-badge">
-                      {dailyBadgeLabel(challenge, todayCentral)}
-                    </span>
-                  ) : null}
-                </span>
-                <strong>
-                  {challenge.start.title} {"->"} {challenge.target.title}
-                </strong>
-                {challenge.createdBy ? (
-                  <em>Created by {challenge.createdBy.displayName}</em>
-                ) : null}
-              </button>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <p className="muted">No challenges loaded.</p>
-      )}
-    </section>
-  );
-}
-
 function createChallengeNotice(outcome: CreateChallengeOutcome): string {
   const challengeLabel = outcome.challenge.label ?? outcome.challenge.id;
   const creation = outcome.disposition === "existing"
@@ -1842,182 +1545,6 @@ function mergeCreatedChallenge(
       ? "wikipedia_random"
       : "curated",
   };
-}
-
-function LeaderboardPanel({
-  leaderboard,
-  onDisclosePath,
-  runPaths,
-}: {
-  leaderboard: RankedLeaderboardRow[];
-  onDisclosePath: (runId: string) => void;
-  runPaths: Record<string, ServerPathStep[]>;
-}) {
-  return (
-    <section className="leaderboard-panel">
-      <h2>Leaderboard</h2>
-      {leaderboard.length ? (
-        <ol className="leaderboard">
-          {leaderboard.map((row) => (
-            <li className={row.status === "abandoned" ? "dnf" : undefined} key={row.runId}>
-              <span className="rank">
-                {row.status === "abandoned" ? "DNF" : `#${row.rank}`}
-              </span>
-              <span className="leaderboard-player">
-                <span>{row.displayName}</span>
-                <span
-                  className={`provenance-badge ${
-                    row.protocolVersion === 1 ? "historical" : "verified"
-                  }`}
-                  title={row.protocolVersion === 1
-                    ? "Recorded before server-tracked race protocol"
-                    : "Identity, timing, and path continuity tracked by the server"}
-                >
-                  {row.protocolVersion === 1 ? "Historical" : "Server tracked"}
-                </span>
-                {row.isRepeatRun ? (
-                  <span className="provenance-badge repeat">Repeat run</span>
-                ) : null}
-              </span>
-              <span>{formatElapsed(row.elapsedMs)}</span>
-              <span>
-                {row.clickCount} {row.clickCount === 1 ? "click" : "clicks"}
-              </span>
-              <details onToggle={(event) => {
-                if (event.currentTarget.open) onDisclosePath(row.runId);
-              }}>
-                <summary>
-                  {row.status === "abandoned" ? "View path" : "View winning path"}
-                </summary>
-                {runPaths[row.runId] ? (
-                  <ol className="winning-path">
-                    {runPaths[row.runId].map((step) => (
-                      <li key={step.stepNumber}>{step.sourceTitle} {"->"} {step.destinationTitle}</li>
-                    ))}
-                  </ol>
-                ) : <p>Loading path...</p>}
-              </details>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <p className="muted">No completed runs yet.</p>
-      )}
-    </section>
-  );
-}
-
-function StatsPanel({ stats }: { stats: AccountStats | null }) {
-  const totals = stats?.totals;
-
-  return (
-    <section className="stats-panel">
-      <h2>Stats</h2>
-      <dl className="stat-grid">
-        <div>
-          <dt>Attempts</dt>
-          <dd>{totals?.attempts ?? "-"}</dd>
-        </div>
-        <div>
-          <dt>Completed</dt>
-          <dd>{totals?.completed ?? "-"}</dd>
-        </div>
-        <div>
-          <dt>DNFs</dt>
-          <dd>{totals?.abandoned ?? "-"}</dd>
-        </div>
-        <div>
-          <dt>Best speed</dt>
-          <dd>{totals?.bestElapsedMs === null || totals?.bestElapsedMs === undefined ? "-" : formatElapsed(totals.bestElapsedMs)}</dd>
-        </div>
-        <div>
-          <dt>Best clicks</dt>
-          <dd>{totals?.bestClicks ?? "-"}</dd>
-        </div>
-        <div>
-          <dt>Completed clicks</dt>
-          <dd>{totals?.totalClicks ?? "-"}</dd>
-        </div>
-      </dl>
-      <StatsList
-        title="Top starts"
-        items={stats?.topStarts.map((item) => item.title) ?? []}
-      />
-      <StatsList
-        title="Top targets"
-        items={stats?.topTargets.map((item) => item.title) ?? []}
-      />
-      <StatsList title="Visited pages" items={stats?.mostVisited.map((item) => item.title) ?? []} />
-    </section>
-  );
-}
-
-function StatsList({ title, items }: { title: string; items: string[] }) {
-  return (
-    <section>
-      <h3>{title}</h3>
-      {items.length ? (
-        <ol className="compact-list">
-          {items.slice(0, 5).map((item) => (
-            <li key={item}>
-              <span>{item}</span>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <p className="muted">No data yet.</p>
-      )}
-    </section>
-  );
-}
-
-function readChallengeIdFromUrl(): string | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  return new URLSearchParams(window.location.search).get("challenge");
-}
-
-function isAdminDailiesRoute(): boolean {
-  return typeof window !== "undefined" && window.location.pathname === "/admin/dailies";
-}
-
-function syncAdminDailiesUrl() {
-  if (typeof window === "undefined" || isAdminDailiesRoute()) {
-    return;
-  }
-  const url = new URL(window.location.href);
-  url.pathname = "/admin/dailies";
-  window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
-}
-
-function syncChallengeUrl(
-  challengeId: string,
-  historyMode: "push" | "replace" = "push",
-) {
-  if (typeof window === "undefined" || !challengeId) {
-    return;
-  }
-
-  if (isAdminDailiesRoute()) {
-    return;
-  }
-
-  const url = new URL(window.location.href);
-  url.searchParams.set("challenge", challengeId);
-  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
-  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-  if (nextUrl === currentUrl) {
-    return;
-  }
-
-  if (historyMode === "replace") {
-    window.history.replaceState({}, "", nextUrl);
-    return;
-  }
-
-  window.history.pushState({}, "", nextUrl);
 }
 
 function errorMessage(caught: unknown, fallback: string): string {

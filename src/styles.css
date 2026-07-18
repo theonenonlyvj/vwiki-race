@@ -99,7 +99,10 @@ ol {
 
 .app-shell {
   min-height: 100vh;
-  padding: 20px;
+  /* Clears the fixed .bottom-nav mode shell (Increment 2) below the content
+     - a no-op while the race takeover or the admin bypass is on screen,
+     since neither renders that nav. */
+  padding: 20px 20px calc(92px + env(safe-area-inset-bottom));
 }
 
 .entry-shell {
@@ -294,9 +297,7 @@ ol {
   color: #dffbfb;
 }
 
-.game-header,
 .path-strip,
-.tabbar,
 .error-banner,
 .run-notice,
 .loading-text,
@@ -305,32 +306,22 @@ ol {
   margin-inline: auto;
 }
 
-.game-header {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  display: grid;
-  grid-template-columns: minmax(170px, 1fr) minmax(250px, 1.1fr) auto auto;
-  gap: 12px;
+/*
+ * Mode shell (Increment 2): a slim persistent brand strip replaces the old
+ * game-header's 4-column layout (current challenge/Start/account chip all
+ * moved into Home/You, per the redesign spec) plus the bottom-nav mode
+ * switcher below (`.bottom-nav`) replaces `.tabbar`.
+ */
+.shell-topbar {
+  display: flex;
   align-items: center;
-  border: 1px solid var(--line);
-  background: rgba(6, 16, 20, 0.96);
-  padding: 14px;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.32);
-  backdrop-filter: blur(16px);
-  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
-  font-family: var(--viota-ui-font);
+  width: min(1320px, 100%);
+  margin-inline: auto;
+  padding: 14px 14px 0;
 }
 
-.header-expanded .game-header,
-.header-result .game-header {
-  grid-template-columns: minmax(230px, 1.15fr) minmax(280px, 1fr) auto auto;
-  padding: 20px;
-}
-
-.header-compact .game-header {
-  grid-template-columns: minmax(120px, 0.6fr) minmax(220px, 1.4fr) auto auto;
-  padding-block: 9px;
+.shell-topbar h1 {
+  font-size: 2.2rem;
 }
 
 .brand-lockup {
@@ -355,10 +346,6 @@ h1 {
   font-weight: 400;
   letter-spacing: 0;
   line-height: 0.9;
-}
-
-.header-compact h1 {
-  font-size: 1.8rem;
 }
 
 .challenge-route {
@@ -410,10 +397,6 @@ h1 {
   white-space: nowrap;
 }
 
-.header-compact .challenge-route strong {
-  font-size: 0.96rem;
-}
-
 .challenge-route .header-navigation-status {
   border-left: 3px solid var(--coral);
   color: var(--cyan);
@@ -453,15 +436,6 @@ h1 {
   align-items: end;
   gap: 8px;
   justify-content: end;
-}
-
-.header-compact .player-gate {
-  display: flex;
-}
-
-.header-compact .player-gate button:first-child:not(.end-run-button),
-.header-compact .account-chip {
-  display: none;
 }
 
 .end-run-button {
@@ -541,15 +515,6 @@ h1 {
   gap: 8px;
   align-items: center;
   overflow: hidden;
-}
-
-.header-compact .path-strip {
-  top: 76px;
-}
-
-.header-result .path-strip {
-  position: relative;
-  top: auto;
 }
 
 .path-history span {
@@ -640,23 +605,58 @@ h1 {
   line-height: 1.45;
 }
 
-.tabbar {
+/*
+ * Bottom-nav mode shell (Increment 2): fixed to the viewport bottom on
+ * every breakpoint (mobile-first; desktop is the same nav, just centered
+ * under the max-width column below) - replaces the old top `.tabbar`.
+ * `.app-shell`'s bottom padding (below) keeps shell content clear of it.
+ */
+.bottom-nav {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  width: min(560px, 100%);
+  margin-inline: auto;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  background: rgba(6, 16, 20, 0.96);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.32);
+  padding: 8px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom))
+    max(8px, env(safe-area-inset-left));
+}
+
+.bottom-nav button {
   display: flex;
-  gap: 8px;
-  margin-top: 14px;
-  overflow-x: auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  background: transparent;
+  border-color: transparent;
+  color: #9fb8bd;
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-transform: none;
+  clip-path: none;
 }
 
-.tabbar button {
-  background: var(--ink-soft);
-  color: #dffbfb;
-  min-width: 112px;
-  text-transform: capitalize;
+.bottom-nav button:not(:disabled):hover {
+  box-shadow: none;
+  transform: none;
+  color: #eef7f8;
 }
 
-.tabbar button.active {
+.bottom-nav button.active {
   background: var(--coral);
   border-color: #ffb4a6;
+  color: #170908;
+}
+
+.bottom-nav button.active:not(:disabled):hover {
   color: #170908;
 }
 
@@ -722,18 +722,66 @@ h1 {
   border-bottom-color: #dffbfb;
 }
 
-.game-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
-}
-
 .home-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
   gap: 14px;
   align-items: start;
+}
+
+.home-target {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+/* Mode-shell panels new this task: Boards' selector, Challenge Detail, the
+   admin-route bypass screen, and You's account chip/claim CTA. */
+.boards-selector {
+  margin-bottom: 14px;
+}
+
+.challenge-detail {
+  display: grid;
+  gap: 14px;
+}
+
+.back-link {
+  justify-self: start;
+  background: transparent;
+  border-color: transparent;
+  color: var(--cyan);
+  font-weight: 850;
+  padding: 6px 0;
+  clip-path: none;
+}
+
+.back-link:not(:disabled):hover {
+  box-shadow: none;
+  transform: none;
+  color: #dffbfb;
+}
+
+.admin-bypass {
+  width: min(1320px, 100%);
+  margin-inline: auto;
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+
+.you-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.you-panel .account-chip {
+  justify-self: start;
+}
+
+.you-panel .claim-cta {
+  border: 1px solid rgba(255, 125, 102, 0.35);
+  padding: 14px;
 }
 
 /*
@@ -1903,25 +1951,6 @@ h1 {
     padding: 10px;
   }
 
-  .game-header {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-    padding: 10px;
-  }
-
-  .header-expanded .game-header,
-  .header-result .game-header {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .header-compact .game-header {
-    grid-template-columns: minmax(100px, 0.55fr) minmax(160px, 1fr) auto auto;
-  }
-
-  .brand-lockup {
-    grid-column: 1;
-  }
-
   .challenge-route {
     grid-column: 1 / -1;
   }
@@ -1931,50 +1960,10 @@ h1 {
     justify-content: start;
   }
 
-  .run-metrics {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-  }
-
-  .account-chip {
-    display: none;
-  }
-
-  .header-compact .viota-mark {
-    display: none;
-  }
-
-  .header-compact .brand-lockup,
-  .header-compact .challenge-route {
-    grid-column: auto;
-    grid-row: auto;
-  }
-
-  .header-compact .run-metrics {
-    grid-column: auto;
-    grid-row: auto;
-  }
-
-  .header-compact .run-metrics div {
-    min-width: 54px;
-    padding: 5px 7px;
-  }
-
-  .header-compact .player-gate {
-    display: flex;
-    grid-column: auto;
-    justify-content: end;
-  }
-
   .path-strip {
     top: 88px;
   }
 
-  .header-result .path-strip {
-    top: auto;
-  }
-
-  .game-layout,
   .home-layout,
   .daily-admin-columns {
     grid-template-columns: 1fr;
@@ -2019,104 +2008,8 @@ h1 {
     min-height: 44px;
   }
 
-  .header-compact {
-    --compact-header-height: 112px;
-  }
-
-  h1,
-  .header-expanded h1,
-  .header-result h1 {
+  h1 {
     font-size: 2.15rem;
-  }
-
-  .header-compact h1 {
-    font-size: 1.15rem;
-  }
-
-  .header-compact .game-header {
-    grid-template-columns: minmax(76px, 1fr) auto;
-    grid-template-rows: 44px 52px;
-    height: var(--compact-header-height);
-    min-height: var(--compact-header-height);
-    padding: 6px 8px;
-  }
-
-  .header-compact .brand-lockup {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .header-compact .player-gate {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  .header-compact .player-gate button {
-    min-height: 44px;
-    padding: 5px 9px;
-  }
-
-  .header-compact .challenge-route {
-    grid-column: 1;
-    grid-row: 2;
-  }
-
-  .header-compact .run-metrics {
-    align-self: stretch;
-    grid-column: 2;
-    grid-row: 2;
-    gap: 4px;
-  }
-
-  .header-compact .run-metrics div {
-    display: grid;
-    min-width: 44px;
-    max-width: 62px;
-    align-content: center;
-    padding: 3px 5px;
-  }
-
-  .header-compact .run-metrics div:last-child {
-    display: none;
-  }
-
-  .header-result .game-header {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .header-result .run-metrics {
-    grid-column: 2;
-    grid-row: 1;
-    gap: 4px;
-  }
-
-  .header-result .run-metrics div {
-    min-width: 44px;
-    max-width: 62px;
-    padding: 3px 5px;
-  }
-
-  .header-result .run-metrics div:last-child {
-    display: none;
-  }
-
-  .header-result .run-metrics dt {
-    font-size: 0.58rem;
-  }
-
-  .header-result .run-metrics dd {
-    font-size: 0.72rem;
-  }
-
-  .header-compact .run-metrics dt {
-    font-size: 0.58rem;
-  }
-
-  .header-compact .run-metrics dd {
-    overflow: hidden;
-    font-size: 0.72rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .challenge-route strong {
@@ -2130,20 +2023,11 @@ h1 {
     width: 100%;
   }
 
-  .header-compact .player-gate button {
-    width: auto;
-  }
-
   .path-strip {
     top: 96px;
   }
 
-  .header-compact .path-strip {
-    top: var(--compact-header-height);
-  }
-
-  button,
-  .tabbar button {
+  button {
     min-height: 44px;
   }
 
@@ -2174,19 +2058,7 @@ h1 {
     font-size: 0.72rem;
   }
 
-  .tabbar {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 4px;
-    overflow: visible;
-  }
-
-  .tabbar.has-admin {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-
-  .tabbar button {
-    min-width: 0;
+  .bottom-nav button {
     padding-inline: 5px;
     font-size: 0.72rem;
   }
@@ -2363,7 +2235,7 @@ h1 {
 }
 
 @media (max-width: 350px) {
-  .tabbar button {
+  .bottom-nav button {
     padding-inline: 2px;
     font-size: 0.62rem;
   }
