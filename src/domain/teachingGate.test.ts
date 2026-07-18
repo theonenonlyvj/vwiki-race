@@ -18,6 +18,8 @@ function stats(completed: number): AccountStats {
     topStarts: [],
     topTargets: [],
     mostVisited: [],
+    dailyStreak: 0,
+    trend30: { avgPlacement: null, playedCount: 0, ranked: false },
   };
 }
 

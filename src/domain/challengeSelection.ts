@@ -66,8 +66,20 @@ export function dailyDateForChallenge(challenge: Challenge): string | null {
  * day, correctly across month/year boundaries.
  */
 export function previousCentralDate(dateKey: string): string {
+  return centralDateDaysBefore(dateKey, 1);
+}
+
+/**
+ * Boards/Home rolling-trend windows (Increment 4, UX redesign spec §Boards
+ * - "7d/30d/lifetime" and §Data requirements - "Rolling avg placement"): the
+ * Central date `days` calendar-days before `dateKey`, same pure
+ * calendar-date arithmetic as `previousCentralDate` (which is just this with
+ * `days = 1`). Used to compute a window's inclusive start date - e.g. a 7-day
+ * window ending at `todayCentral` starts at `centralDateDaysBefore(todayCentral, 6)`.
+ */
+export function centralDateDaysBefore(dateKey: string, days: number): string {
   const [year, month, day] = dateKey.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
-  date.setUTCDate(date.getUTCDate() - 1);
+  date.setUTCDate(date.getUTCDate() - days);
   return date.toISOString().slice(0, 10);
 }

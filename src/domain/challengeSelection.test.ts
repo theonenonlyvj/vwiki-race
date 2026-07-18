@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { dailyFlavorForCentralDate } from "./dailyEditorial";
 import type { Challenge } from "./types";
 import {
+  centralDateDaysBefore,
   centralDateKey,
   dailyBadgeLabel,
   previousCentralDate,
@@ -119,6 +120,33 @@ describe("previousCentralDate", () => {
 
   it("carries across a year boundary", () => {
     expect(previousCentralDate("2026-01-01")).toBe("2025-12-31");
+  });
+});
+
+describe("centralDateDaysBefore", () => {
+  it("returns the same date for a 0-day offset", () => {
+    expect(centralDateDaysBefore("2026-07-15", 0)).toBe("2026-07-15");
+  });
+
+  it("matches previousCentralDate at a 1-day offset", () => {
+    expect(centralDateDaysBefore("2026-07-15", 1)).toBe(previousCentralDate("2026-07-15"));
+  });
+
+  it("computes a 7-day window's inclusive start (6 days before)", () => {
+    // A 7-day window ending at 2026-07-18 inclusive covers 07-12..07-18.
+    expect(centralDateDaysBefore("2026-07-18", 6)).toBe("2026-07-12");
+  });
+
+  it("computes a 30-day window's inclusive start (29 days before)", () => {
+    expect(centralDateDaysBefore("2026-07-18", 29)).toBe("2026-06-19");
+  });
+
+  it("carries across a month boundary", () => {
+    expect(centralDateDaysBefore("2026-08-03", 6)).toBe("2026-07-28");
+  });
+
+  it("carries across a year boundary", () => {
+    expect(centralDateDaysBefore("2026-01-03", 6)).toBe("2025-12-28");
   });
 });
 

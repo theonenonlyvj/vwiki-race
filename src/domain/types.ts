@@ -209,6 +209,49 @@ export interface AccountStats {
   topStarts: CountStat[];
   topTargets: CountStat[];
   mostVisited: CountStat[];
+  /**
+   * Increment 4 (UX redesign spec §Data requirements - "Streaks"): count of
+   * consecutive Central dates, ending today or yesterday, on which this
+   * account has ≥1 eligible completed daily run. Silent reset on a missed
+   * day (no grace period) - see `getAccountDailyStreak`.
+   */
+  dailyStreak: number;
+  /**
+   * Increment 4 (spec §Data requirements - "Rolling avg placement" +
+   * §Boards - the 7d/30d/lifetime participation guard): this account's own
+   * 30-day rolling-placement standing, guard-gated the same way Boards'
+   * trend segments are. `avgPlacement` is only meaningful when `ranked` is
+   * true; a below-guard account still gets `playedCount` so Home/You can
+   * render "N/{guard} dailies" progress copy instead of a bare rejection.
+   */
+  trend30: {
+    avgPlacement: number | null;
+    playedCount: number;
+    ranked: boolean;
+  };
+}
+
+/**
+ * Boards' rolling-trend row (Increment 4, UX redesign spec §Boards -
+ * "7d/30d/lifetime" paragraph): one row per canonical account, using the
+ * same best-rank-per-account-per-daily definition as `ChallengeBoardPlacement`,
+ * aggregated across a window's dailies. A `DailyTrendRankedEntry` has
+ * cleared the participation guard (`playedCount >= guard`); accounts below
+ * it appear as `DailyTrendUnrankedEntry` instead, with no `avgPlacement` -
+ * council: unranked state "should read as progress toward a goal, not a bare
+ * rejection", so `playedCount` is still surfaced.
+ */
+export interface DailyTrendRankedEntry {
+  accountId: string;
+  displayName: string | null;
+  avgPlacement: number;
+  playedCount: number;
+}
+
+export interface DailyTrendUnrankedEntry {
+  accountId: string;
+  displayName: string | null;
+  playedCount: number;
 }
 
 export interface RankedLeaderboardRow extends ServerLeaderboardRow {
