@@ -3336,15 +3336,74 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
   });
 });
 
+describe("Home v2: guarded streak/trend chip (Increment 4)", () => {
+  beforeEach(() => {
+    window.history.pushState({}, "", "/");
+  });
+
+  it("pre-play: shows the streak alone when the account hasn't cleared the 30d ranking guard", async () => {
+    const fetchImpl = createFetchMock({
+      challenges: [twoChallenges()[0]],
+      accountDailyStreak: 5,
+      accountTrend30: { avgPlacement: null, playedCount: 4, ranked: false },
+    });
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    expect(await screen.findByText(/🔥 5-day streak/)).toBeVisible();
+    expect(screen.queryByText(/30-day avg/i)).toBeNull();
+  });
+
+  it("post-play: shows both the streak and the 30d avg chip once ranked", async () => {
+    const fetchImpl = createFetchMock({
+      challenges: [twoChallenges()[0]],
+      leaderboardRows: [
+        leaderboardRow({ rank: 2, runId: "run-1", accountId: "acc-1", displayName: "Vijay", elapsedMs: 42_000, clickCount: 6 }),
+      ],
+      accountDailyStreak: 12,
+      accountTrend30: { avgPlacement: 2.4, playedCount: 26, ranked: true },
+    });
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    expect(await screen.findByText(/🔥 12-day streak/)).toBeVisible();
+    expect(screen.getByText(/30-day avg #2\.4 \(26 dailies\)/)).toBeVisible();
+  });
+
+  it("omits the streak text at 0 but still shows the trend chip once ranked", async () => {
+    const fetchImpl = createFetchMock({
+      challenges: [twoChallenges()[0]],
+      accountDailyStreak: 0,
+      accountTrend30: { avgPlacement: 3.1, playedCount: 15, ranked: true },
+    });
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await screen.findByRole("button", { name: /▶ race/i });
+    expect(screen.queryByText(/day streak/i)).toBeNull();
+    expect(screen.getByText(/30-day avg #3\.1 \(15 dailies\)/)).toBeVisible();
+  });
+
+  it("renders no chip at all when the streak is 0 and the trend is unranked (guard inheritance)", async () => {
+    const fetchImpl = createFetchMock({
+      challenges: [twoChallenges()[0]],
+      accountDailyStreak: 0,
+      accountTrend30: { avgPlacement: null, playedCount: 0, ranked: false },
+    });
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await screen.findByRole("button", { name: /▶ race/i });
+    expect(screen.queryByText(/day streak/i)).toBeNull();
+    expect(screen.queryByText(/30-day avg/i)).toBeNull();
+  });
+});
+
 describe("Boards v1: Today/Yesterday daily views (Increment 3)", () => {
-  it("renders exactly the Today/Yesterday segments (no trends stubs), defaulting to Today", async () => {
+  it("renders the Today/Yesterday/7d/30d/Lifetime segments, defaulting to Today", async () => {
     const user = userEvent.setup();
     render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={claimedStorage()} />);
 
     await user.click(await screen.findByRole("button", { name: "Boards" }));
     const board = screen.getByRole("region", { name: "Boards" });
     const segments = within(board).getAllByRole("tab");
-    expect(segments.map((tab) => tab.textContent)).toEqual(["Today", "Yesterday"]);
+    expect(segments.map((tab) => tab.textContent)).toEqual(["Today", "Yesterday", "7d", "30d", "Lifetime"]);
     expect(within(board).getByRole("tab", { name: "Today" })).toHaveAttribute("aria-selected", "true");
   });
 
@@ -3517,6 +3576,107 @@ describe("Boards v1: Today/Yesterday daily views (Increment 3)", () => {
   });
 });
 
+describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
+  it("shows the guard sub-header, ranked rows, and the progress-framed unranked section for 7d", async () => {
+    const fetchImpl = createFetchMock({
+      boardsTrendsByWindow: {
+        "7": {
+          window: "7",
+          guard: 3,
+          ranked: [
+            { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3 },
+          ],
+          unranked: [
+            { accountId: "acc-2", displayName: "Ari", playedCount: 1 },
+          ],
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: "Boards" }));
+    const board = screen.getByRole("region", { name: "Boards" });
+    await user.click(within(board).getByRole("tab", { name: "7d" }));
+
+    expect(await within(board).findByText(/rolling 7d · ranked by average placement · play ≥3 dailies to rank/i)).toBeVisible();
+    expect(within(board).getByText("1.")).toBeVisible();
+    expect(within(board).getByText(/vijay/i)).toBeVisible();
+    expect(within(board).getByText(/avg #1\.3 \(3 dailies\)/)).toBeVisible();
+    expect(within(board).getByText(/\(you\)/i)).toBeVisible();
+
+    const unrankedSection = within(board).getByRole("region", { name: "Not yet ranked" });
+    expect(within(unrankedSection).getByText(/ari/i)).toBeVisible();
+    expect(within(unrankedSection).getByText(/1\/3 dailies/)).toBeVisible();
+  });
+
+  it("switches windows on segment change - 30d's guard is 10, framed as progress toward it", async () => {
+    const fetchImpl = createFetchMock({
+      boardsTrendsByWindow: {
+        "30": {
+          window: "30",
+          guard: 10,
+          ranked: [],
+          unranked: [{ accountId: "acc-1", displayName: "Vijay", playedCount: 4 }],
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: "Boards" }));
+    const board = screen.getByRole("region", { name: "Boards" });
+    await user.click(within(board).getByRole("tab", { name: "30d" }));
+
+    expect(await within(board).findByText(/rolling 30d · ranked by average placement · play ≥10 dailies to rank/i)).toBeVisible();
+    expect(within(board).getByText(/4\/10 dailies/)).toBeVisible();
+  });
+
+  it("expands the viewer's own ranked row into their last 3 dailies as placement/DNF + time·clicks (invariant 1)", async () => {
+    const recentDaily1 = dailyChallenge("challenge-0011", { dailyDate: "2026-07-18", start: "A", target: "B" });
+    const recentDaily2 = dailyChallenge("challenge-0012", { dailyDate: "2026-07-17", start: "C", target: "D" });
+    const recentDaily3 = dailyChallenge("challenge-0013", { dailyDate: "2026-07-16", start: "E", target: "F" });
+    const fetchImpl = createFetchMock({
+      challenges: [recentDaily1, recentDaily2, recentDaily3],
+      boardsTrendsByWindow: {
+        "7": {
+          window: "7",
+          guard: 3,
+          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3 }],
+          unranked: [],
+        },
+      },
+      boardByChallenge: {
+        "challenge-0011": {
+          placements: [{ accountId: "acc-1", displayName: "Vijay", placement: 1, elapsedMs: 5_000, clickCount: 2 }],
+          dnfs: [],
+        },
+        "challenge-0012": {
+          placements: [],
+          dnfs: [{ accountId: "acc-1", displayName: "Vijay", clickCount: 3, elapsedMs: 8_000 }],
+        },
+        "challenge-0013": { placements: [], dnfs: [] },
+      },
+    });
+    const user = userEvent.setup();
+    render(
+      <App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} todayUtc={() => "2026-07-18"} />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Boards" }));
+    const board = screen.getByRole("region", { name: "Boards" });
+    await user.click(within(board).getByRole("tab", { name: "7d" }));
+    await user.click(await within(board).findByRole("button", { name: /vijay.*avg #1\.3/i }));
+
+    expect(await within(board).findByText("2026-07-18")).toBeVisible();
+    expect(within(board).getByText(/#1 · 0:05 · 2 clk/)).toBeVisible();
+    expect(within(board).getByText("2026-07-17")).toBeVisible();
+    expect(within(board).getByText(/dnf · 0:08 · 3 clk/i)).toBeVisible();
+    expect(within(board).getByText("2026-07-16")).toBeVisible();
+    expect(within(board).getByText(/not played/i)).toBeVisible();
+  });
+});
+
 function dailyChallenge(
   id: string,
   overrides: {
@@ -3589,6 +3749,16 @@ function createFetchMock(options?: {
   // never-resolving promise instead - models a post-race stats refetch that
   // never comes back, to prove the ritual hook no longer depends on it.
   delayedStatsAfterFirst?: Promise<Response>;
+  // Increment 4: Home's guarded streak/trend chip and Boards' trend
+  // segments.
+  accountDailyStreak?: number;
+  accountTrend30?: { avgPlacement: number | null; playedCount: number; ranked: boolean };
+  boardsTrendsByWindow?: Record<string, {
+    window: string;
+    guard: number;
+    ranked: Array<{ accountId: string; displayName: string | null; avgPlacement: number; playedCount: number }>;
+    unranked: Array<{ accountId: string; displayName: string | null; playedCount: number }>;
+  }>;
   leaderboardContext?: { isPersonalBest: boolean; rank: number | null };
   statsUnauthorizedAfterFirst?: boolean;
   creationOutcome?: CreateChallengeOutcome;
@@ -3767,7 +3937,20 @@ function createFetchMock(options?: {
         stats: {
           totals: { attempts: options?.accountAttempts ?? 0, completed, abandoned: 0, timedCompleted: 0, totalClicks: 0, bestClicks: null, bestElapsedMs: null, averageClicks: 0, averageElapsedMs: 0 },
           topStarts: [], topTargets: [], mostVisited: [],
+          dailyStreak: options?.accountDailyStreak ?? 0,
+          trend30: options?.accountTrend30 ?? { avgPlacement: null, playedCount: 0, ranked: false },
         },
+      });
+    }
+
+    if (url.startsWith("/api/v2/boards/trends")) {
+      const window = new URL(requestUrl).searchParams.get("window") ?? "7";
+      const fixture = options?.boardsTrendsByWindow?.[window];
+      return jsonResponse(fixture ?? {
+        window,
+        guard: window === "7" ? 3 : 10,
+        ranked: [],
+        unranked: [],
       });
     }
 
@@ -4071,6 +4254,8 @@ function accountStatsFixture(attempts: number) {
     topStarts: [],
     topTargets: [],
     mostVisited: [],
+    dailyStreak: 0,
+    trend30: { avgPlacement: null, playedCount: 0, ranked: false },
   };
 }
 

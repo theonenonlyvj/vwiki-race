@@ -168,6 +168,7 @@ export default function AppShell({
       <section className="content-shell">
         {visibleMode === "home" ? (
           <Home
+            accountStats={accountStats}
             apiClient={apiClient}
             challenges={challenges}
             heroChallenge={todaysHeroChallenge}

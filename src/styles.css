@@ -769,6 +769,14 @@ h1 {
   margin: 0;
 }
 
+/* Home v2 (Increment 4): the guarded streak/30d-avg chip - deliberately
+   "slim" (spec wording), so it stays a plain muted line like `.ritual-line`
+   rather than another bordered card. */
+.home-streak-trend-row {
+  margin: 0;
+  font-weight: 600;
+}
+
 .teaching-gate-strip {
   margin-top: 10px;
   padding: 10px 12px;
@@ -816,6 +824,56 @@ h1 {
 .board-footnote {
   margin-top: 14px;
   font-size: 0.78rem;
+}
+
+/* Boards v2 (Increment 4): the 7d/30d/lifetime rolling-trend segments. */
+.board-trend-subheader {
+  margin-bottom: 12px;
+  font-size: 0.82rem;
+}
+
+.trend-row-toggle {
+  display: grid;
+  grid-template-columns: 2.4em 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  min-height: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 0.88rem;
+  text-align: left;
+  clip-path: none;
+}
+
+.trend-row-toggle:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.trend-row-toggle:not(:disabled):hover,
+.trend-row-toggle:not(:disabled):focus-visible {
+  box-shadow: none;
+  transform: none;
+  color: var(--cyan);
+}
+
+.board-trend-drilldown {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-left: 2.4em;
+  font-size: 0.8rem;
+}
+
+.board-trend-unranked li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.85rem;
 }
 
 .challenge-detail {

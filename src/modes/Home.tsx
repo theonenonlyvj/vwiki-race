@@ -3,7 +3,7 @@ import BoardSnippet from "../components/BoardSnippet";
 import { dailyDateForChallenge, previousCentralDate } from "../domain/challengeSelection";
 import { dailyFlavorLabel } from "../domain/dailyEditorial";
 import { formatTimeAndClicks } from "../domain/formatting";
-import type { Challenge, RankedLeaderboardRow } from "../domain/types";
+import type { AccountStats, Challenge, RankedLeaderboardRow } from "../domain/types";
 import { ShareResultButton } from "../race/shared";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 
@@ -31,6 +31,7 @@ type DailyState = "not-attempted" | "dnf" | "finished";
  * target blurb; Home's hero only needs the pair + a Race button.
  */
 export default function Home({
+  accountStats,
   apiClient,
   challenges,
   heroChallenge,
@@ -44,6 +45,12 @@ export default function Home({
   sharedLeaderboard,
   todayCentral,
 }: {
+  // Increment 4 (UX redesign spec, Home §Pre-play/§Post-play): the guarded
+  // streak/trend chip. `null` while identity/stats haven't resolved yet -
+  // the row simply doesn't render, matching the teaching gate's existing
+  // "loading/errored stats reads as no stats" convention rather than
+  // showing a placeholder number.
+  accountStats: AccountStats | null;
   apiClient: VWikiRaceApiClient;
   challenges: Challenge[];
   heroChallenge: Challenge | null;
@@ -191,6 +198,8 @@ export default function Home({
         )}
       </div>
 
+      {dailyState !== "finished" ? <StreakTrendRow stats={accountStats} /> : null}
+
       {dailyState !== "finished" && yesterdaysDaily ? (
         <BoardSnippet
           title="Yesterday's results"
@@ -229,11 +238,41 @@ export default function Home({
             </button>
           </section>
 
+          <StreakTrendRow stats={accountStats} />
+
           <p className="ritual-line muted">
             New daily drops 5:00 AM Central — come defend your spot.
           </p>
         </>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Home's guarded streak/avg-placement chip (Increment 4, UX redesign spec:
+ * "slim stats row: 🔥 streak · '30-day avg #2.4 (26 dailies)'"; post-play:
+ * "streak/trend row (inherits the Boards §7d/30d participation guard)").
+ * The streak piece is omitted entirely at 0 (spec: "(omit when 0)"); the
+ * trend piece only ever shows once `trend30.ranked` is true - an unranked
+ * account still gets a `playedCount`, but this row isn't where that
+ * "N/{guard} dailies" progress copy lives (that's Boards' own unranked
+ * section) - Home just stays silent on the trend half until there's a real
+ * number to show, per the spec's "muted/hidden until the account clears the
+ * ranking threshold."
+ */
+function StreakTrendRow({ stats }: { stats: AccountStats | null }) {
+  if (!stats) return null;
+  const { dailyStreak, trend30 } = stats;
+  if (dailyStreak <= 0 && !trend30.ranked) return null;
+
+  return (
+    <p className="home-streak-trend-row muted">
+      {dailyStreak > 0 ? `🔥 ${dailyStreak}-day streak` : null}
+      {dailyStreak > 0 && trend30.ranked ? " · " : null}
+      {trend30.ranked
+        ? `30-day avg #${trend30.avgPlacement?.toFixed(1)} (${trend30.playedCount} dailies)`
+        : null}
+    </p>
   );
 }
