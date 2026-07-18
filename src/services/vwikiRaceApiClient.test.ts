@@ -890,6 +890,196 @@ describe("VWiki Race API client", () => {
       retryAfterMs: 45_000,
     });
   });
+
+  it("fetches Browse's per-challenge summary aggregate (Increment 5)", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe(`${apiOrigin}/api/v2/challenges/summary`);
+      return Response.json({
+        challenges: [
+          { challengeId: "challenge-0001", playerCount: 5, best: { elapsedMs: 38_000, clickCount: 5 } },
+          { challengeId: "challenge-0002", playerCount: 2, best: null },
+        ],
+      });
+    });
+    const client = createVWikiRaceApiClient(fetchImpl, { apiOrigin });
+
+    await expect(client.getChallengesSummary()).resolves.toEqual([
+      { challengeId: "challenge-0001", playerCount: 5, best: { elapsedMs: 38_000, clickCount: 5 } },
+      { challengeId: "challenge-0002", playerCount: 2, best: null },
+    ]);
+  });
+
+  it("rejects a malformed challenges-summary response", async () => {
+    const client = createVWikiRaceApiClient(
+      vi.fn(async () => Response.json({ challenges: [{ challengeId: "challenge-0001" }] })),
+      { apiOrigin },
+    );
+    await expect(client.getChallengesSummary()).rejects.toMatchObject({
+      code: "invalid_response",
+      status: 502,
+    });
+  });
+
+  it("fetches the caller's bulk state-chip outcomes (Increment 5, authenticated)", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe(`${apiOrigin}/api/v2/account/challenge-outcomes`);
+      expect(init?.headers).toMatchObject({ Authorization: "Bearer jwt-claimed" });
+      return Response.json({
+        outcomes: [
+          { challengeId: "challenge-0001", outcome: "completed", best: { elapsedMs: 42_000, clickCount: 6 } },
+          { challengeId: "challenge-0002", outcome: "dnf", best: null },
+        ],
+      });
+    });
+    const client = createVWikiRaceApiClient(fetchImpl, { apiOrigin });
+
+    await expect(client.getAccountChallengeOutcomes("jwt-claimed")).resolves.toEqual([
+      { challengeId: "challenge-0001", outcome: "completed", best: { elapsedMs: 42_000, clickCount: 6 } },
+      { challengeId: "challenge-0002", outcome: "dnf", best: null },
+    ]);
+  });
+
+  it("rejects a completed outcome missing its best time/clicks, and a dnf outcome carrying one", async () => {
+    const missingBest = createVWikiRaceApiClient(
+      vi.fn(async () => Response.json({
+        outcomes: [{ challengeId: "challenge-0001", outcome: "completed", best: null }],
+      })),
+      { apiOrigin },
+    );
+    await expect(missingBest.getAccountChallengeOutcomes("jwt")).rejects.toMatchObject({
+      code: "invalid_response",
+      status: 502,
+    });
+
+    const dnfWithBest = createVWikiRaceApiClient(
+      vi.fn(async () => Response.json({
+        outcomes: [{ challengeId: "challenge-0001", outcome: "dnf", best: { elapsedMs: 1, clickCount: 1 } }],
+      })),
+      { apiOrigin },
+    );
+    await expect(dnfWithBest.getAccountChallengeOutcomes("jwt")).rejects.toMatchObject({
+      code: "invalid_response",
+      status: 502,
+    });
+  });
+
+  it("fetches the Play-another suggestion, including the null 'started everything' case", async () => {
+    const responses = [
+      Response.json({ challenge: validChallenge({ id: "challenge-0002" }) }),
+      Response.json({ challenge: null }),
+    ];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe(`${apiOrigin}/api/v2/challenges/suggestion`);
+      expect(init?.headers).toMatchObject({ Authorization: "Bearer jwt-claimed" });
+      return responses.shift() as Response;
+    });
+    const client = createVWikiRaceApiClient(fetchImpl, { apiOrigin });
+
+    await expect(client.getPlayAnotherSuggestion("jwt-claimed")).resolves.toMatchObject({
+      id: "challenge-0002",
+    });
+    await expect(client.getPlayAnotherSuggestion("jwt-claimed")).resolves.toBeNull();
+  });
+
+  it("creates a random challenge with a fresh idempotency key and the extended timeout, invalidating catalog+stats caches", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === `${apiOrigin}/api/v2/challenges/random`) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(JSON.stringify({}));
+        expect(init?.headers).toMatchObject({
+          Authorization: "Bearer jwt-claimed",
+          "Idempotency-Key": expect.any(String),
+        });
+        return Response.json(validCreateOutcome({ challenge: validChallenge({ id: "challenge-0099" }) }));
+      }
+      if (path === `${apiOrigin}/api/v2/challenges`) {
+        return Response.json({ challenges: [] });
+      }
+      if (path === `${apiOrigin}/api/v2/accounts/me/stats`) {
+        return Response.json({ stats: accountStats(0) });
+      }
+      throw new Error(`Unexpected request ${path}`);
+    });
+    const client = createVWikiRaceApiClient(fetchImpl, { apiOrigin });
+
+    // Warm both caches so we can prove the mutation invalidates them.
+    await client.listChallenges();
+    const statsPromise = client.getAccountStats("jwt-claimed");
+
+    await expect(client.createRandomChallenge("jwt-claimed")).resolves.toMatchObject({
+      challenge: { id: "challenge-0099" },
+      disposition: "created",
+    });
+    await statsPromise;
+
+    const catalogCallsBefore = fetchImpl.mock.calls.filter(
+      ([input]) => String(input) === `${apiOrigin}/api/v2/challenges`,
+    ).length;
+    await client.listChallenges();
+    expect(fetchImpl.mock.calls.filter(
+      ([input]) => String(input) === `${apiOrigin}/api/v2/challenges`,
+    ).length).toBeGreaterThan(catalogCallsBefore);
+  });
+
+  it("surfaces a 429 in-progress/quota error with Retry-After, and a 503 candidate-unavailable error, from random-challenge creation", async () => {
+    const inProgress = createVWikiRaceApiClient(
+      vi.fn(async () => new Response(
+        JSON.stringify({
+          error: {
+            code: "random_challenge_in_progress",
+            message: "A random challenge request is already in progress for this account.",
+          },
+        }),
+        { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "5" } },
+      )),
+      { apiOrigin },
+    );
+    await expect(inProgress.createRandomChallenge("jwt-claimed")).rejects.toMatchObject({
+      code: "random_challenge_in_progress",
+      status: 429,
+      retryAfterMs: 5_000,
+    });
+
+    const unavailable = createVWikiRaceApiClient(
+      vi.fn(async () => new Response(
+        JSON.stringify({
+          error: {
+            code: "random_challenge_unavailable",
+            message: "Could not find a random challenge right now. Try again.",
+          },
+        }),
+        { status: 503, headers: { "Content-Type": "application/json", "Retry-After": "5" } },
+      )),
+      { apiOrigin },
+    );
+    await expect(unavailable.createRandomChallenge("jwt-claimed")).rejects.toMatchObject({
+      code: "random_challenge_unavailable",
+      status: 503,
+    });
+  });
+
+  it("does not automatically retry a timed-out random-challenge request (a client-side timeout doesn't mean the server stopped)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        const signal = init?.signal;
+        return new Promise<Response>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+        });
+      });
+      const client = createVWikiRaceApiClient(fetchImpl, { apiOrigin });
+
+      const request = client.createRandomChallenge("jwt-claimed");
+      const assertion = expect(request).rejects.toMatchObject({ code: "timeout", status: 504 });
+      await vi.advanceTimersByTimeAsync(35_000);
+      await assertion;
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      await vi.runAllTimersAsync();
+      vi.useRealTimers();
+    }
+  });
 });
 
 function accountStats(attempts: number) {

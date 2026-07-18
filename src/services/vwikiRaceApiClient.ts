@@ -1,9 +1,12 @@
 import type {
   AbandonRunV2Response,
+  AccountChallengeOutcomesResponse,
   AccountStatsResponse,
   BoardsTrendsResponse,
   BoardsTrendWindow,
   ChallengeBoardResponse,
+  ChallengesSummaryResponse,
+  ChallengeSuggestionResponse,
   ClickV2Response,
   CreateChallengeV2Response,
   DailyAdminStateResponse,
@@ -11,7 +14,14 @@ import type {
   LeaderboardResponse,
   RunPathResponse,
 } from "../server/contracts";
-import type { AccountStats, Challenge, RankedLeaderboardRow, ServerPathStep } from "../domain/types";
+import type {
+  AccountStats,
+  Challenge,
+  ChallengeOutcomeEntry,
+  ChallengeSummaryEntry,
+  RankedLeaderboardRow,
+  ServerPathStep,
+} from "../domain/types";
 import type { DailyFlavor, DailyNomination, DailyQueueEntry } from "../domain/dailyEditorial";
 import type { ActiveRunRecord, RunRecordResponse } from "../server/trackingRepository";
 import type { RecordClickV2Input } from "../server/runProtocol";
@@ -23,6 +33,13 @@ const DEFAULT_API_ORIGIN = resolveApiOrigin(import.meta.env.VITE_VWIKI_RACE_API_
 });
 const READ_TIMEOUT_MS = 10_000;
 const MUTATION_TIMEOUT_MS = 15_000;
+// Increment 5 (spec: "plus loading/timeout UX for the endpoint's up-to-~25s
+// wall time"): comfortably above the documented ~25s worst case, with no
+// automatic retry (see createRandomChallenge below) - a client-side timeout
+// here does not mean the server-side attempt stopped, so silently retrying
+// could immediately collide with the still-in-flight original and surface a
+// confusing "in_progress" 429 right after what looks like a fresh request.
+const RANDOM_CHALLENGE_TIMEOUT_MS = 35_000;
 
 export interface CreateTrackedChallengeRequest {
   startTitle: string;
@@ -75,6 +92,32 @@ export interface VWikiRaceApiClient extends VWikiRaceDailyAdminApiClient {
   getBoardsTrends(window: BoardsTrendWindow): Promise<BoardsTrendsResponse>;
   getRunPath(runId: string): Promise<ServerPathStep[]>;
   getAccountStats(token: string): Promise<AccountStats>;
+  /**
+   * Browse's per-card aggregate (Increment 5, unauthenticated - `GET
+   * /api/v2/challenges/summary`). One entry per active challenge; the
+   * caller matches entries to the catalog by `challengeId`.
+   */
+  getChallengesSummary(): Promise<ChallengeSummaryEntry[]>;
+  /**
+   * Browse's bulk state-chip data for the caller (Increment 5, authenticated
+   * - `GET /api/v2/account/challenge-outcomes`). Absence of a challenge from
+   * the result means the client's default "NEW" chip applies.
+   */
+  getAccountChallengeOutcomes(token: string): Promise<ChallengeOutcomeEntry[]>;
+  /**
+   * Home/Results' Play-another suggestion (Increment 5, authenticated - `GET
+   * /api/v2/challenges/suggestion`). `null` once the caller has started
+   * every active, non-daily challenge.
+   */
+  getPlayAnotherSuggestion(token: string): Promise<Challenge | null>;
+  /**
+   * On-demand random-challenge creation (Increment 5, authenticated - `POST
+   * /api/v2/challenges/random`). No automatic retry (see
+   * RANDOM_CHALLENGE_TIMEOUT_MS) - a fresh idempotency key every call, since
+   * a caller-initiated retry after a genuine failure is a new attempt, not a
+   * replay of one the caller gave up on.
+   */
+  createRandomChallenge(token: string): Promise<CreateChallengeV2Response>;
 }
 
 export interface VWikiRaceApiClientOptions {
@@ -193,6 +236,37 @@ export function createVWikiRaceApiClient(
       });
       statsInFlight.set(token, pending);
       return pending;
+    },
+    async getChallengesSummary() {
+      return (await read(urlPath.challengesSummary, isChallengesSummaryResponse)).challenges;
+    },
+    async getAccountChallengeOutcomes(token) {
+      return (await authenticatedRead(
+        urlPath.accountChallengeOutcomes,
+        token,
+        isAccountChallengeOutcomesResponse,
+      )).outcomes;
+    },
+    async getPlayAnotherSuggestion(token) {
+      return (await authenticatedRead(
+        urlPath.challengeSuggestion,
+        token,
+        isChallengeSuggestionResponse,
+      )).challenge;
+    },
+    async createRandomChallenge(token) {
+      const response = await requestJson(fetchImpl, url(urlPath.randomChallenge), {
+        method: "POST",
+        body: {},
+        token,
+        timeoutMs: RANDOM_CHALLENGE_TIMEOUT_MS,
+        retry: "never",
+        idempotencyKey: createIdempotencyKey(),
+        validate: isCreateChallengeResponse,
+      });
+      invalidateStats();
+      invalidateChallengeCatalog();
+      return response;
     },
     async getCapabilities(token) {
       return authenticatedRead(urlPath.capabilities, token, isDailyCapabilitiesResponse);
@@ -314,6 +388,10 @@ const urlPath = {
     `/api/v2/challenges/${encodeURIComponent(challengeId)}/board`,
   boardsTrends: (window: BoardsTrendWindow) =>
     `/api/v2/boards/trends?window=${encodeURIComponent(window)}`,
+  challengesSummary: "/api/v2/challenges/summary",
+  accountChallengeOutcomes: "/api/v2/account/challenge-outcomes",
+  challengeSuggestion: "/api/v2/challenges/suggestion",
+  randomChallenge: "/api/v2/challenges/random",
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -421,6 +499,44 @@ function isActiveRunResponse(value: unknown): value is { run: ActiveRunRecord | 
 
 function isAccountStatsResponse(value: unknown): value is AccountStatsResponse {
   return isRecord(value) && isAccountStats(value.stats);
+}
+
+function isChallengesSummaryResponse(value: unknown): value is ChallengesSummaryResponse {
+  return isRecord(value) &&
+    Array.isArray(value.challenges) && value.challenges.every(isChallengeSummaryEntry);
+}
+
+function isChallengeSummaryEntry(value: unknown): value is ChallengeSummaryEntry {
+  return isRecord(value) &&
+    hasString(value, "challengeId") &&
+    hasNumber(value, "playerCount") &&
+    (value.best === null || isBestTimeClicks(value.best));
+}
+
+function isAccountChallengeOutcomesResponse(
+  value: unknown,
+): value is AccountChallengeOutcomesResponse {
+  return isRecord(value) &&
+    Array.isArray(value.outcomes) && value.outcomes.every(isChallengeOutcomeEntry);
+}
+
+function isChallengeOutcomeEntry(value: unknown): value is ChallengeOutcomeEntry {
+  if (!isRecord(value) ||
+    !hasString(value, "challengeId") ||
+    !(value.outcome === "completed" || value.outcome === "dnf")) {
+    return false;
+  }
+  // Doc comment on ChallengeOutcomeEntry: "`best` is populated only for
+  // `outcome: 'completed'`" - enforced here, not just documented.
+  return value.outcome === "completed" ? isBestTimeClicks(value.best) : value.best === null;
+}
+
+function isChallengeSuggestionResponse(value: unknown): value is ChallengeSuggestionResponse {
+  return isRecord(value) && (value.challenge === null || isChallenge(value.challenge));
+}
+
+function isBestTimeClicks(value: unknown): value is { elapsedMs: number; clickCount: number } {
+  return isRecord(value) && hasNumber(value, "elapsedMs") && hasNumber(value, "clickCount");
 }
 
 function isDailyCapabilitiesResponse(value: unknown): value is DailyCapabilitiesResponse {
