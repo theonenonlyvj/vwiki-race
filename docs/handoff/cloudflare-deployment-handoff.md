@@ -3,10 +3,11 @@
 Date: 2026-07-17
 
 Status: current release procedures and production inventory for the editorial
-Daily and community nomination release. Migration `0005` remains pending until
-the remote D1 ledger confirms whether it has been deployed. Verify the live
-commit and deployment state before any rollout; this file is not an incident
-log. The dated July 16 handoff remains the historical record for that release.
+Daily and community nomination release. Migration `0005` was applied and
+verified on 2026-07-17 UTC; the post-release ledger reported no pending
+migrations. Verify the live commit and deployment state before any future
+rollout; this file is not an incident log. The dated release handoffs remain the
+historical evidence.
 
 ## Production Inventory
 
@@ -132,7 +133,7 @@ d1/migrations/0001_vwiki_race_tracking.sql
 d1/migrations/0002_challenge_creators.sql
 d1/migrations/0003_hardening_protocol.sql
 d1/migrations/0004_daily_challenges.sql
-d1/migrations/0005_editorial_dailies.sql  # PENDING until this release is deployed
+d1/migrations/0005_editorial_dailies.sql  # APPLIED 2026-07-17 UTC
 ```
 
 `0003` is an immutable historical artifact, not a safe populated-database
@@ -146,9 +147,8 @@ inspect its SQL and create a private D1 backup/export that must never be printed
 or committed. Migration `0005_editorial_dailies.sql` is additive: it adds
 ordered-pair uniqueness plus `daily_features`, `daily_nominations`, and
 `daily_queue_entries`, and backfills legacy Daily features without renumbering
-or deleting history. Treat `0005` as pending until the remote ledger says it is
-applied; do not claim deployment or skip the backup because the migration is
-additive.
+or deleting history. Production has already applied and recorded `0005`; never
+replay it. The remote ledger remains authoritative for every future release.
 
 Remote ledger/apply commands:
 
@@ -156,6 +156,8 @@ Remote ledger/apply commands:
 npx wrangler d1 migrations list vwiki-race --remote --config wrangler.api.toml
 npx wrangler d1 migrations apply vwiki-race --remote --config wrangler.api.toml
 ```
+
+### Historical `0005` Recovery Procedure
 
 Migration `0005` contains SQLite triggers. Wrangler 4.110 may reject a remote
 `d1 migrations apply` for this file with `SQLITE_ERROR: incomplete input` even
@@ -213,11 +215,11 @@ Do not reverse these steps.
 1. Confirm the VGames identity Worker is healthy.
 2. Run all local release gates listed below and commit the reviewed tree locally.
 3. Inspect the remote D1 migration ledger and record it before mutation.
-4. If `0005` is pending, run the read-only ordered-pair audit below. It must
-   return zero rows; any result blocks the migration and requires a separate,
-   reviewed data-preservation plan.
-5. Create a private D1 backup/export, apply only the reviewed additive
-   migration, and verify the remote ledger again.
+4. If a new migration is pending, run its documented read-only preflight. Any
+   invariant failure blocks the migration and requires a separate, reviewed
+   data-preservation plan. `0005` is already applied; do not replay it.
+5. If a new migration is pending, create a private D1 backup/export, apply only
+   the reviewed additive migration, and verify the remote ledger again.
 6. Deploy the canonical API Worker from `wrangler.api.toml`.
 7. Smoke-test the canonical Worker directly, including the v2 challenge catalog
    and Daily/admin routes.
@@ -231,7 +233,8 @@ Do not reverse these steps.
    scheduled invocations; the Central-time gate creates dates and minute-17 may
    only retry due jobs.
 
-Before migration `0005`, run and record this remote read-only audit:
+The following is the read-only audit that was used before migration `0005` and
+is preserved for release provenance:
 
 ```bash
 npx wrangler d1 execute vwiki-race --remote --config wrangler.api.toml --command \

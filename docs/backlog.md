@@ -2,9 +2,10 @@
 
 Date: 2026-07-17
 
-The current worktree covers the friend-ready v0 game loop plus the editorial
-Daily and creation-time nomination release. Items below are deliberately
-outside that release unless marked as an operational gate.
+Production covers the friend-ready v0 game loop plus the editorial Daily and
+creation-time nomination release. Items below are deliberately outside that
+release unless marked as an operational gate. Resume from
+[`handoff/START_HERE.md`](handoff/START_HERE.md).
 
 ## Operational Gates
 
@@ -13,9 +14,9 @@ outside that release unless marked as an operational gate.
 - Run the complete release gate in the Cloudflare handoff on every shipment.
 - Deploy Worker before Pages when both changed, then run the documented
   production smoke test.
-- Before deploying the editorial Daily Worker, inspect the remote D1 ledger,
-  take the required private backup, and apply pending migration `0005` only
-  after reviewing its additive SQL.
+- Migration `0005` is applied and verified. Before any future schema release,
+  inspect the remote D1 ledger, take a private backup, and apply only the next
+  reviewed additive migration. Never replay `0005`.
 - Confirm Cloudflare request counts after the first scheduled day; do not
   generate repeated manual cron events.
 

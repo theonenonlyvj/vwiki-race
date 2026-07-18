@@ -9,6 +9,7 @@ does not need VGames realtime rooms or the card-game layer.
 
 ## Operational Docs
 
+- [Start Here: Current State and Resume Handoff](docs/handoff/START_HERE.md)
 - [Game Principles and Rules](docs/game-principles-and-rules.md)
 - [Cloudflare Deployment Handoff](docs/handoff/cloudflare-deployment-handoff.md)
 - [2026-07-16 Friend Release Handoff](docs/handoff/2026-07-16-friend-release-handoff.md)
@@ -131,10 +132,13 @@ The canonical Worker needs:
 - `VGAMES_URL`
 - `ALLOWED_ORIGINS`
 - `DAILY_ADMIN_ACCOUNT_IDS`
+- `MAINTENANCE_MODE` (normally `false`; use only through the reviewed release
+  procedure)
 - D1 binding `VWIKI_RACE_DB`
 - rate-limit bindings `CLICK_RATE_LIMITER` and `ACCOUNT_READ_RATE_LIMITER`
 - rate-limit binding `CHALLENGE_CREATE_RATE_LIMITER`
 - rate-limit binding `DAILY_ADMIN_RATE_LIMITER`
+- rate-limit binding `CLIENT_ERROR_RATE_LIMITER`
 
 ## Identity And Data
 
