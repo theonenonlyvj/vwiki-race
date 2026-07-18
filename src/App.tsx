@@ -169,6 +169,7 @@ export default function App({
   const [error, setError] = useState<string | null>(null);
   const [runNotice, setRunNotice] = useState<string | null>(null);
   const [dnfResult, setDnfResult] = useState<DnfResultSnapshot | null>(null);
+  const [catalogLoadFailed, setCatalogLoadFailed] = useState(false);
   const identityTrigger = useRef<HTMLElement | null>(null);
   const endRunTrigger = useRef<HTMLElement | null>(null);
   const requestedPaths = useRef(new Set<string>());
@@ -225,9 +226,15 @@ export default function App({
   // instant the recovery effect below calls it, in the same tick that
   // race.phase flips to "preparing" - so this and the phase check below
   // hand off without a gap). Guests with no cached session have nothing to
-  // recover and skip this gate entirely.
+  // recover and skip this gate entirely. The recovery effect needs
+  // challenges.length > 0 before it can even attempt recoverActiveRun, so a
+  // failed catalog load (catalogLoadFailed) would otherwise leave an
+  // identified user stuck here forever with no article to look at - release
+  // the gate in that case and fall back to the shell, where the existing
+  // error banner + focus-refetch affordances live.
   const recoveryGatePending = identitySession !== null &&
-    recoveredToken.current !== identitySession.token;
+    recoveredToken.current !== identitySession.token &&
+    !catalogLoadFailed;
   // Full-screen, zero-chrome race-flow takeover (spec: "Race flow" section).
   // Engaged whenever the preview beat is open, the run is mid-flight in any
   // sense (including transient preparing/syncing/abandoning and the
@@ -334,12 +341,15 @@ export default function App({
 
     async function loadChallengeCatalog() {
       setError(null);
+      let challengesLoaded = false;
       try {
         const nextChallenges = await apiClient.listChallenges();
         if (cancelled || request !== catalogRequest.current) {
           return;
         }
         setChallenges(nextChallenges);
+        challengesLoaded = true;
+        setCatalogLoadFailed(false);
         const requestedChallengeId = readChallengeIdFromUrl();
         const nextChallenge = selectDefaultChallenge(nextChallenges, {
           requestedChallengeId,
@@ -373,6 +383,11 @@ export default function App({
       } catch (caught) {
         if (!cancelled && request === catalogRequest.current) {
           setError(errorMessage(caught, "Could not load challenges."));
+          // Only the initial challenges fetch itself failing should release
+          // the recovery gate - a later failure in this same pass (e.g. the
+          // leaderboard fetch) doesn't leave recovery stuck, since
+          // challenges.length > 0 already let it proceed.
+          if (!challengesLoaded) setCatalogLoadFailed(true);
         }
       }
     }
@@ -892,7 +907,12 @@ export default function App({
     const endedChallengeId = race.recoveryRun?.challengeId ?? race.challenge?.id ?? null;
     const acceptedClickCount = race.recoveryRun?.clickCount ?? race.session?.clicks ?? 0;
     const dnfSnapshot: DnfResultSnapshot | null = !isRecoveryEnd && race.challenge
-      ? { challenge: race.challenge, clicks: acceptedClickCount, runId: race.run?.id ?? null }
+      ? {
+          challenge: race.challenge,
+          clicks: acceptedClickCount,
+          elapsedMs: race.elapsedMs,
+          runId: race.run?.id ?? null,
+        }
       : null;
     const outcome = await race.endRun(
       sessionForEnd.token,
@@ -976,6 +996,7 @@ export default function App({
       {raceEngaged ? (
         <RaceFlow
           phase={race.phase}
+          raceChallenge={race.challenge}
           recoveryRun={race.recoveryRun}
           recoveryPending={recoveryGatePending}
           showPreview={raceStage === "preview"}
@@ -990,6 +1011,7 @@ export default function App({
           leaderboard={leaderboard}
           runId={race.run?.id ?? null}
           dnfResult={dnfResult}
+          todayCentral={currentCentralDate}
           identityStatus={identitySession?.status ?? null}
           identityDisplayName={identitySession?.displayName ?? ""}
           error={bannerError}
@@ -997,6 +1019,7 @@ export default function App({
           endRunIsBlocked={endRunIsBlocked}
           onRetryPending={() => void retryPendingClick()}
           onRetryRecovery={() => void retryRecovery()}
+          onRetryCatalog={() => setCatalogRefreshVersion((version) => version + 1)}
           onRequestEndRun={requestEndRun}
           onBackFromPreview={() => exitRaceFlow("play")}
           onSeeOtherChallengesFromPreview={() => exitRaceFlow("challenges")}

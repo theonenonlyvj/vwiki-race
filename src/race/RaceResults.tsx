@@ -1,4 +1,5 @@
 import { useCallback, useRef, type FocusEvent, type MouseEvent, type PointerEvent } from "react";
+import { dailyDateForChallenge } from "../domain/challengeSelection";
 import { compressPathForStrip } from "../domain/pathCompression";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { GameSession } from "../domain/gameSession";
@@ -31,6 +32,7 @@ export type RaceResultOutcome =
       status: "dnf";
       challenge: Challenge;
       clicks: number;
+      elapsedMs: number;
       runId: string | null;
     };
 
@@ -43,6 +45,7 @@ export default function RaceResults({
   article,
   outcome,
   leaderboard,
+  todayCentral,
   identityStatus,
   identityDisplayName,
   playAgainDisabled,
@@ -57,6 +60,10 @@ export default function RaceResults({
   article: Article | null;
   outcome: RaceResultOutcome;
   leaderboard: RankedLeaderboardRow[];
+  // The current Central-time date (see App.tsx's currentCentralDate/
+  // todayUtc) - the only thing that distinguishes "today's actual daily"
+  // from any other challenge for the "today"/"Today's board" copy below.
+  todayCentral: string;
   identityStatus: VGamesIdentityStatus | null;
   identityDisplayName: string;
   playAgainDisabled: boolean;
@@ -87,14 +94,18 @@ export default function RaceResults({
 
   const challenge = outcome.status === "completed" ? outcome.session.challenge : outcome.challenge;
   const isGuest = identityStatus === "ghost";
+  // "Today"/"Today's board" is only accurate when the raced challenge is
+  // actually today's daily - anything else (an older daily, a custom
+  // challenge) gets the generic "on this board"/"Leaderboard" copy instead.
+  const isDailyToday = dailyDateForChallenge(challenge) === todayCentral;
 
   return (
     <section className="race-results">
       <aside aria-live="polite" className="result-panel">
         {outcome.status === "completed" ? (
-          <CompletedResultHeader outcome={outcome} />
+          <CompletedResultHeader isDailyToday={isDailyToday} outcome={outcome} />
         ) : (
-          <DnfResultHeader clicks={outcome.clicks} />
+          <DnfResultHeader clicks={outcome.clicks} elapsedMs={outcome.elapsedMs} />
         )}
 
         <div className="result-actions">
@@ -114,7 +125,11 @@ export default function RaceResults({
           <PathRecap session={outcome.session} />
         ) : null}
 
-        <BoardSnippet leaderboard={leaderboard} highlightRunId={outcome.runId} />
+        <BoardSnippet
+          isDailyToday={isDailyToday}
+          leaderboard={leaderboard}
+          highlightRunId={outcome.runId}
+        />
 
         <PlayAnotherSlot
           onBrowseChallenges={onShowChallenges}
@@ -150,13 +165,16 @@ export default function RaceResults({
 }
 
 function CompletedResultHeader({
+  isDailyToday,
   outcome,
 }: {
+  isDailyToday: boolean;
   outcome: Extract<RaceResultOutcome, { status: "completed" }>;
 }) {
   const rank = outcome.leaderboardContext?.rank ?? null;
+  const placement = isDailyToday ? "today" : "on this board";
   const resultLine = rank !== null
-    ? `#${rank} today · ${formatTimeAndClicks(outcome.elapsedMs, outcome.session.clicks)}`
+    ? `#${rank} ${placement} · ${formatTimeAndClicks(outcome.elapsedMs, outcome.session.clicks)}`
     : formatTimeAndClicks(outcome.elapsedMs, outcome.session.clicks);
 
   return (
@@ -168,12 +186,13 @@ function CompletedResultHeader({
   );
 }
 
-function DnfResultHeader({ clicks }: { clicks: number }) {
+function DnfResultHeader({ clicks, elapsedMs }: { clicks: number; elapsedMs: number }) {
   return (
     <>
       <span className="result-kicker">DNF</span>
       <h2>That one got away</h2>
-      <p className="result-score">DNF · {clicks} clk</p>
+      {/* Invariant 1 ("Time AND clicks, always") applies to DNF too. */}
+      <p className="result-score">DNF · {formatTimeAndClicks(elapsedMs, clicks)}</p>
     </>
   );
 }
@@ -204,16 +223,20 @@ function PathRecap({ session }: { session: GameSession }) {
 }
 
 function BoardSnippet({
+  isDailyToday,
   leaderboard,
   highlightRunId,
 }: {
+  isDailyToday: boolean;
   leaderboard: RankedLeaderboardRow[];
   highlightRunId: string | null;
 }) {
+  const boardLabel = isDailyToday ? "Today's board" : "Leaderboard";
+
   if (leaderboard.length === 0) {
     return (
-      <section aria-label="Today's board" className="board-snippet">
-        <h3>Today&apos;s board</h3>
+      <section aria-label={boardLabel} className="board-snippet">
+        <h3>{boardLabel}</h3>
         <p className="muted">No completed runs yet.</p>
       </section>
     );
@@ -228,8 +251,8 @@ function BoardSnippet({
   const visibleRows = highlightedRow && !highlightedInTop3 ? [...top3, highlightedRow] : top3;
 
   return (
-    <section aria-label="Today's board" className="board-snippet">
-      <h3>Today&apos;s board</h3>
+    <section aria-label={boardLabel} className="board-snippet">
+      <h3>{boardLabel}</h3>
       <ol>
         {visibleRows.map((row) => {
           const isYou = row.runId === highlightRunId;

@@ -30,6 +30,7 @@ export default function RaceMode({
   targetPreview,
   endRunDisabled,
   onRequestEndRun,
+  checkingActiveRun,
   handleArticleClick,
   handleArticlePrewarm,
 }: {
@@ -42,6 +43,11 @@ export default function RaceMode({
   targetPreview: TargetPreviewState;
   endRunDisabled: boolean;
   onRequestEndRun: (event: MouseEvent<HTMLElement>) => void;
+  // True only for recoverActiveRun's own "preparing, no session yet" tick
+  // (boot recovery checking whether there's anything to resume) - not for a
+  // fresh challenge start's equivalent preparing window, where an article
+  // really is loading. See RaceFlow's checkingActiveRun computation.
+  checkingActiveRun: boolean;
   handleArticleClick: (event: MouseEvent<HTMLElement>) => void;
   handleArticlePrewarm: (target: EventTarget | null) => void;
 }) {
@@ -130,7 +136,9 @@ export default function RaceMode({
           pendingNavigationTitle={pendingNavigationTitle}
         />
       ) : (
-        <p className="loading-text">Loading article...</p>
+        <p className="loading-text">
+          {checkingActiveRun ? "Checking for an active run..." : "Loading article..."}
+        </p>
       )}
     </section>
   );

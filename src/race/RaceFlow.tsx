@@ -13,6 +13,7 @@ import RaceResults, { type PlayAnotherSuggestion } from "./RaceResults";
 export interface DnfResultSnapshot {
   challenge: Challenge;
   clicks: number;
+  elapsedMs: number;
   runId: string | null;
 }
 
@@ -34,6 +35,7 @@ export interface DnfResultSnapshot {
  */
 export default function RaceFlow({
   phase,
+  raceChallenge,
   recoveryRun,
   recoveryPending,
   showPreview,
@@ -48,6 +50,7 @@ export default function RaceFlow({
   leaderboard,
   runId,
   dnfResult,
+  todayCentral,
   identityStatus,
   identityDisplayName,
   playAnotherSuggestion,
@@ -56,6 +59,7 @@ export default function RaceFlow({
   endRunIsBlocked,
   onRetryPending,
   onRetryRecovery,
+  onRetryCatalog,
   onRequestEndRun,
   onBackFromPreview,
   onSeeOtherChallengesFromPreview,
@@ -68,6 +72,11 @@ export default function RaceFlow({
   handleArticlePrewarm,
 }: {
   phase: RacePhase;
+  // The race hook's own current challenge - null throughout
+  // recoverActiveRun's initial "preparing" tick (see checkingActiveRun
+  // below), but set immediately (alongside phase) whenever a fresh
+  // challenge start kicks off preparing instead.
+  raceChallenge: Challenge | null;
   recoveryRun: ActiveRunRecord | null;
   recoveryPending: boolean;
   showPreview: boolean;
@@ -82,6 +91,7 @@ export default function RaceFlow({
   leaderboard: RankedLeaderboardRow[];
   runId: string | null;
   dnfResult: DnfResultSnapshot | null;
+  todayCentral: string;
   identityStatus: VGamesIdentityStatus | null;
   identityDisplayName: string;
   playAnotherSuggestion?: PlayAnotherSuggestion | null;
@@ -90,6 +100,7 @@ export default function RaceFlow({
   endRunIsBlocked: boolean;
   onRetryPending: () => void;
   onRetryRecovery: () => void;
+  onRetryCatalog: () => void;
   onRequestEndRun: (event: MouseEvent<HTMLElement>) => void;
   onBackFromPreview: () => void;
   onSeeOtherChallengesFromPreview: () => void;
@@ -127,6 +138,12 @@ export default function RaceFlow({
         targetPreview={targetPreview}
         endRunDisabled={endRunIsBlocked || phase === "preparing" || phase === "abandoning"}
         onRequestEndRun={onRequestEndRun}
+        // recoverActiveRun sets phase "preparing" before it even knows
+        // whether there's anything to recover, without ever assigning
+        // raceChallenge (unlike a fresh start, which sets it in the same
+        // commitState call as the phase flip) - so !raceChallenge here means
+        // this preparing tick is boot recovery checking, not an article load.
+        checkingActiveRun={phase === "preparing" && !raceChallenge}
         handleArticleClick={handleArticleClick}
         handleArticlePrewarm={handleArticlePrewarm}
       />
@@ -137,6 +154,7 @@ export default function RaceFlow({
         article={article}
         outcome={{ status: "completed", session, elapsedMs, leaderboardContext, runId }}
         leaderboard={leaderboard}
+        todayCentral={todayCentral}
         identityStatus={identityStatus}
         identityDisplayName={identityDisplayName}
         playAgainDisabled={authBusy}
@@ -153,8 +171,15 @@ export default function RaceFlow({
     body = (
       <RaceResults
         article={null}
-        outcome={{ status: "dnf", challenge: dnfResult.challenge, clicks: dnfResult.clicks, runId: dnfResult.runId }}
+        outcome={{
+          status: "dnf",
+          challenge: dnfResult.challenge,
+          clicks: dnfResult.clicks,
+          elapsedMs: dnfResult.elapsedMs,
+          runId: dnfResult.runId,
+        }}
         leaderboard={leaderboard}
+        todayCentral={todayCentral}
         identityStatus={identityStatus}
         identityDisplayName={identityDisplayName}
         playAgainDisabled={authBusy}
@@ -185,8 +210,16 @@ export default function RaceFlow({
     // keeps this takeover engaged (raceEngaged) from the very first render
     // whenever a cached identity might have an active run, before the
     // catalog has even loaded enough to call recoverActiveRun. Nothing to
-    // show yet but zero chrome - no Home/nav flash while we wait.
-    body = <p className="loading-text">Checking for an active run...</p>;
+    // show yet but zero chrome - no Home/nav flash while we wait. A stalled
+    // (rather than errored) catalog fetch has no exception to release the
+    // gate on its own, so Retry gives the user a manual way out instead of
+    // leaving them stuck here indefinitely.
+    body = (
+      <>
+        <p className="loading-text">Checking for an active run...</p>
+        <button type="button" onClick={onRetryCatalog}>Retry</button>
+      </>
+    );
   }
 
   return (

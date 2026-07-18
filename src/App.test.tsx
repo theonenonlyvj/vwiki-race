@@ -992,7 +992,9 @@ describe("VWiki Race app", () => {
     expect(await screen.findByText(/you reached it/i)).toBeVisible();
     // Invariant 1 ("Time AND clicks, always") + placement from the
     // server-returned leaderboardContext.rank (spec: Race flow beat 3).
-    expect(screen.getByText(/#1 today · 0:01 · 1 clk/)).toBeVisible();
+    // This fixture challenge isn't flagged as today's daily (no
+    // dailyFeature/origin), so the copy reads "on this board", not "today".
+    expect(screen.getByText(/#1 on this board · 0:01 · 1 clk/)).toBeVisible();
     const result = screen.getByText(/you reached it/i).closest("aside");
     const article = screen.getByRole("article");
     expect(result?.compareDocumentPosition(article)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
@@ -1059,7 +1061,9 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: /start race/i }));
     await user.click(await screen.findByRole("link", { name: /fruit/i }));
 
-    expect(await screen.findByText(/#4 today · 0:01 · 1 clk/)).toBeVisible();
+    // Same non-daily fixture challenge as elsewhere - "on this board", not
+    // "today" (see the daily-aware variant below).
+    expect(await screen.findByText(/#4 on this board · 0:01 · 1 clk/)).toBeVisible();
   });
 
   it("falls back to a plain time+clicks line when the server returns no rank", async () => {
@@ -1254,6 +1258,11 @@ describe("VWiki Race app", () => {
     // settles, even for the common "nothing to recover" outcome.
     expect(screen.queryByRole("button", { name: /start challenge #1/i })).toBeNull();
     expect(screen.queryByRole("navigation", { name: /vwiki race views/i })).toBeNull();
+    // recoverActiveRun's own "preparing" tick (no session yet, checking
+    // whether there's anything to recover) must not be mislabeled as if an
+    // article were loading - that copy belongs to a fresh challenge start.
+    expect(screen.getByText(/checking for an active run/i)).toBeVisible();
+    expect(screen.queryByText(/loading article/i)).toBeNull();
 
     await act(async () => {
       activeDiscovery.resolve();
@@ -2556,6 +2565,50 @@ describe("Race flow: full-screen takeover", () => {
     expect(screen.getByRole("navigation", { name: /vwiki race views/i })).toBeVisible();
   });
 
+  it("releases the recovery gate and falls back to the shell when the initial catalog load fails", async () => {
+    // Before the fix: an identified user whose very first GET
+    // /api/v2/challenges fails was stuck forever on the zero-chrome
+    // "Checking for an active run..." interstitial - recoverActiveRun needs
+    // challenges.length > 0 to ever run, so a catalog error meant the
+    // recovery effect (and therefore the gate) never resolved. A catalog
+    // error must release the gate and fall back to the shell, where the
+    // existing error banner + focus-refetch affordances live.
+    const baseFetch = createFetchMock();
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = String(input);
+      const method = init?.method ?? "GET";
+      if (requestUrl === apiUrl("/api/v2/challenges") && method === "GET") {
+        return jsonError("server_error", "Boom.", 500);
+      }
+      return baseFetch(input, init);
+    }) as typeof baseFetch;
+
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/boom/i);
+    expect(screen.queryByText(/checking for an active run/i)).toBeNull();
+    expect(screen.getByRole("navigation", { name: /vwiki race views/i })).toBeVisible();
+  });
+
+  it("offers a Retry control while the recovery gate is waiting on the challenge catalog", async () => {
+    // A catalog that resolves successfully but empty leaves the recovery
+    // effect permanently stuck too (its own guard needs challenges.length >
+    // 0) without ever throwing - so FIX 1(a)'s error-driven gate release
+    // doesn't apply here. This is exactly the case Retry exists for: no
+    // exception to hang a fix off of, just an indefinite wait.
+    const fetchImpl = createFetchMock({ challenges: [] });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    expect(await screen.findByText(/checking for an active run/i)).toBeVisible();
+    const retryButton = screen.getByRole("button", { name: /^retry$/i });
+    expect(retryButton).toBeVisible();
+
+    await waitFor(() => expect(challengeCatalogCalls(fetchImpl)).toBe(1));
+    await user.click(retryButton);
+    await waitFor(() => expect(challengeCatalogCalls(fetchImpl)).toBe(2));
+  });
+
   it("shows the unclaimed-guest claim CTA directly above Share result, opening the identity dialog", async () => {
     const storage = memoryStorage();
     storage.setItem(
@@ -2616,11 +2669,50 @@ describe("Race flow: full-screen takeover", () => {
     await user.click(await screen.findByRole("button", { name: /start race/i }));
     await user.click(await screen.findByRole("link", { name: /fruit/i }));
 
-    const board = await screen.findByRole("region", { name: /today's board/i });
+    // This fixture challenge isn't flagged as today's daily, so the board
+    // reads "Leaderboard", not "Today's board" (see the daily-aware variant
+    // below).
+    const board = await screen.findByRole("region", { name: /^leaderboard$/i });
     const rows = within(board).getAllByRole("listitem");
     expect(rows).toHaveLength(4);
     expect(within(rows[3]).getByText(/vijay/i)).toBeVisible();
     expect(rows[3]).toHaveClass("is-you");
+  });
+
+  it("labels the result line and board 'today'/'Today's board' when the raced challenge is today's actual daily", async () => {
+    const dailyChallenge: Challenge = {
+      id: "challenge-0001",
+      label: "Challenge #1",
+      sortOrder: 1,
+      isActive: true,
+      mode: "daily",
+      start: { title: "Apple" },
+      target: { title: "Fruit" },
+      ruleset: "ranked_classic",
+      source: "wikipedia_random",
+      origin: "daily",
+      dailyDate: "2026-07-17",
+    };
+    const fetchImpl = createFetchMock({
+      challenges: [dailyChallenge],
+      leaderboardRows: [leaderboardRow({ rank: 1, runId: "run-1", displayName: "Vijay" })],
+    });
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={fetchImpl}
+        storage={claimedStorage()}
+        todayUtc={() => "2026-07-17"}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(await screen.findByRole("link", { name: /fruit/i }));
+
+    expect(await screen.findByText(/#1 today · 0:01 · 1 clk/)).toBeVisible();
+    expect(screen.getByRole("region", { name: /today's board/i })).toBeVisible();
   });
 
   it("keeps the original End Run confirm copy when no clicks have been made yet", async () => {
@@ -2637,10 +2729,13 @@ describe("Race flow: full-screen takeover", () => {
     ).toBeVisible();
   });
 
-  it("shows the DNF Results variant and DNF-aware End Run confirm copy after abandoning a run with clicks", async () => {
+  it("shows the DNF Results variant, DNF-aware End Run confirm copy, and elapsed time after abandoning a run with clicks", async () => {
+    let now = 1_000;
     const fetchImpl = createFetchMock({ clickStaysActive: true });
     const user = userEvent.setup();
-    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+    render(
+      <App apiOrigin={apiOrigin} fetchImpl={fetchImpl} now={() => now} storage={claimedStorage()} />,
+    );
 
     await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
@@ -2648,13 +2743,20 @@ describe("Race flow: full-screen takeover", () => {
     await user.click(await screen.findByRole("link", { name: /apple tree/i }));
     await screen.findByRole("heading", { name: "Apple tree" });
 
+    const metrics = screen.getByLabelText(/current run/i);
+    const timer = within(metrics).getByText("Timer").nextElementSibling;
+    now = 9_000;
+    await waitFor(() => expect(timer).toHaveTextContent("8.0s"));
+
     await user.click(screen.getByRole("button", { name: /^end run$/i }));
     const dialog = await screen.findByRole("dialog", { name: /end this run/i });
     expect(within(dialog).getByText(/it'll count as a dnf with 1 click\./i)).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: /confirm end run/i }));
 
     expect(await screen.findByText(/that one got away/i)).toBeVisible();
-    expect(screen.getByText(/dnf · 1 clk/i)).toBeVisible();
+    // Invariant 1 ("Time AND clicks, always") - the DNF headline must carry
+    // elapsed time too, not just click count.
+    expect(screen.getByText(/dnf · 0:08 · 1 clk/i)).toBeVisible();
     expect(screen.getByRole("button", { name: /try again/i })).toBeVisible();
     expect(screen.getByRole("button", { name: /browse all challenges/i })).toBeVisible();
     expect(screen.queryByRole("navigation", { name: /vwiki race views/i })).toBeNull();

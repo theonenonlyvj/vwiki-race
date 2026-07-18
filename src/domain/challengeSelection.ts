@@ -52,7 +52,7 @@ export function selectDefaultChallenge(
     null;
 }
 
-function dailyDateForChallenge(challenge: Challenge): string | null {
+export function dailyDateForChallenge(challenge: Challenge): string | null {
   if (challenge.dailyFeature) return challenge.dailyFeature.dailyDate;
   return challenge.origin === "daily" ? challenge.dailyDate ?? null : null;
 }
