@@ -985,6 +985,8 @@ describe("Worker API route versions", () => {
       ["/api/v2/identity/guest", guestBody],
       ["/api/v2/identity/secure", secureBody],
       ["/api/v2/identity/login", loginBody],
+      // Legacy v1 route must not bypass the same per-IP limiter.
+      ["/api/identity/guest", guestBody],
     ] as const) {
       const response = await post(path, body);
       expect(response.status, path).toBe(429);
@@ -993,7 +995,7 @@ describe("Worker API route versions", () => {
         error: { code: "identity_rate_limited" },
       });
     }
-    expect(identityLimit).toHaveBeenCalledTimes(3);
+    expect(identityLimit).toHaveBeenCalledTimes(4);
     expect(identityLimit).toHaveBeenCalledWith({ key: "203.0.113.7" });
     expect(tracking.identity.quick).not.toHaveBeenCalled();
     expect(tracking.identity.secure).not.toHaveBeenCalled();
@@ -1012,6 +1014,16 @@ describe("Worker API route versions", () => {
       },
     ), openEnv);
     expect(openResponse.status).toBe(200);
+
+    const openLegacyResponse = await worker.fetch(new Request(
+      "https://worker.example/api/identity/guest",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(guestBody),
+      },
+    ), openEnv);
+    expect(openLegacyResponse.status).toBe(200);
   });
 
   it("rate limits run-start per account after authorization and fails open when the binding is absent", async () => {
@@ -1045,6 +1057,25 @@ describe("Worker API route versions", () => {
     expect(runStartLimit).toHaveBeenCalledWith({ key: "acc-1" });
     expect(tracking.runProtocol?.startRunV2).not.toHaveBeenCalled();
 
+    // Legacy v1 route must not bypass the same per-account limiter.
+    const legacyResponse = await worker.fetch(new Request(
+      "https://worker.example/api/runs/start",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer test",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ challengeId: "challenge-0001" }),
+      },
+    ), env);
+    expect(legacyResponse.status).toBe(429);
+    expect(legacyResponse.headers.get("Retry-After")).toBe("60");
+    await expect(legacyResponse.json()).resolves.toMatchObject({
+      error: { code: "run_start_rate_limited" },
+    });
+    expect(tracking.runProtocol?.startRunLegacy).not.toHaveBeenCalled();
+
     const openEnv = {
       VWIKI_RACE_DB: {} as D1Database,
       VGAMES_URL: "https://vgames.example",
@@ -1062,6 +1093,19 @@ describe("Worker API route versions", () => {
       },
     ), openEnv);
     expect(openResponse.status).toBe(200);
+
+    const openLegacyResponse = await worker.fetch(new Request(
+      "https://worker.example/api/runs/start",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer test",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ challengeId: "challenge-0001" }),
+      },
+    ), openEnv);
+    expect(openLegacyResponse.status).toBe(200);
   });
 
   it("enforces exact challenge, click, anchor, and display-name limits", async () => {
@@ -1890,6 +1934,7 @@ function fakeWorkerTracking(): WorkerTracking {
     runProtocol: {
       createChallengeV2: vi.fn(),
       startRunV2: vi.fn(async () => ({ id: "run-1", protocolVersion: 2 })),
+      startRunLegacy: vi.fn(async () => ({ id: "run-legacy-1", protocolVersion: 1 })),
       recordClickV2: vi.fn(async () => ({ transition: { runId: "run-1", clickCount: 1, runStatus: "active" } })),
       abandonRunV2: vi.fn(async () => ({ runId: "run-1", runStatus: "abandoned" })),
       findActiveRun: vi.fn(async () => null),

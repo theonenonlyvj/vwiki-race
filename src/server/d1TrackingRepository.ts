@@ -2401,7 +2401,7 @@ export function createD1TrackingRepository(options: {
                 p.elapsed_since_start_ms, p.created_at
          FROM run_path_steps p
          JOIN runs r ON r.id = p.run_id
-         WHERE r.id = ? AND (
+         WHERE r.id = ? AND r.board_excluded = 0 AND (
            (r.status = 'completed' AND r.elapsed_ms IS NOT NULL
              AND r.completed_at IS NOT NULL AND (
                (r.protocol_version = 2 AND r.ranked_eligible = 1)
@@ -3434,6 +3434,7 @@ async function loadLeaderboardContext(
            (r.protocol_version = 2 AND r.ranked_eligible = 1)
            OR r.protocol_version = 1
          )
+         AND r.board_excluded = 0
          AND r.challenge_id = (SELECT challenge_id FROM runs WHERE id = ?)
      ), ranked AS (
        SELECT *,

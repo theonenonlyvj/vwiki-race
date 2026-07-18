@@ -527,6 +527,7 @@ async function dispatchLegacy(
     );
   }
   if (request.method === "POST" && url.pathname === "/api/identity/guest") {
+    await enforceIdentityRateLimit(env, request);
     return json(
       await tracking.identity.quick(guestIdentityInput(await readJson(request))),
       undefined,
@@ -534,6 +535,7 @@ async function dispatchLegacy(
     );
   }
   if (request.method === "POST" && url.pathname === "/api/identity/secure") {
+    await enforceIdentityRateLimit(env, request);
     return json(
       await tracking.identity.secure(secureIdentityInput(await readJson(request))),
       undefined,
@@ -541,6 +543,7 @@ async function dispatchLegacy(
     );
   }
   if (request.method === "POST" && url.pathname === "/api/identity/login") {
+    await enforceIdentityRateLimit(env, request);
     return json(
       await tracking.identity.login(loginIdentityInput(await readJson(request))),
       undefined,
@@ -549,6 +552,7 @@ async function dispatchLegacy(
   }
   if (request.method === "POST" && url.pathname === "/api/runs/start") {
     const account = await tracking.authorize(request);
+    await enforceRunStartRateLimit(env, account.accountId);
     const input = startInput(await readJson(request));
     if (tracking.runProtocol) {
       return json(

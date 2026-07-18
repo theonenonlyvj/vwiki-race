@@ -2994,6 +2994,32 @@ describe("Task 4 D1 projections", () => {
     });
   });
 
+  it("hides the path of a board-excluded run behind the same not-found outcome", async () => {
+    await insertCompletedV2({
+      id: "excluded-path-run",
+      accountId: account.accountId,
+      elapsedMs: 4200,
+      completedAt: "2026-07-14T01:00:04.200Z",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO run_path_steps
+         (run_id, step_number, source_title, clicked_anchor_text, destination_title,
+          destination_page_id, elapsed_since_start_ms, created_at)
+       VALUES ('excluded-path-run', 1, 'Moon', 'gravity', 'Gravity', 38579, 4200,
+               '2026-07-14T01:00:04.200Z')`,
+    ).run();
+    const { repository } = fixture();
+    await expect(repository.getPublicRunPath("excluded-path-run")).resolves.toEqual([
+      expect.objectContaining({ destinationTitle: "Gravity", stepNumber: 1 }),
+    ]);
+
+    await repository.setRunBoardExclusion("excluded-path-run", true);
+
+    await expect(repository.getPublicRunPath("excluded-path-run")).rejects.toMatchObject({
+      code: "run_path_not_found", status: 404,
+    });
+  });
+
   it("keeps the recorded path of a completed protocol-1 run publicly viewable", async () => {
     await insertCompletedLegacy({
       id: "historical-path-run",
@@ -3350,6 +3376,46 @@ describe("board exclusion (migration 0006)", () => {
       "SELECT board_excluded FROM runs WHERE id = ?",
     ).bind(anyRunId).first<{ board_excluded: number }>();
     expect(row?.board_excluded).toBe(0);
+  });
+
+  it("excludes board-excluded competitors from the completion rank context (loadLeaderboardContext)", async () => {
+    const clock = { now: "2026-07-14T01:00:00.000Z" };
+    const { repository } = fixture(clock);
+
+    // A: fast, but excluded from the boards.
+    await insertCompletedV2({
+      id: "rank-ctx-fast-excluded",
+      accountId: "rank-ctx-fast-account",
+      elapsedMs: 3_000,
+      completedAt: "2026-07-14T01:00:03.000Z",
+    });
+    // B: slower than the new completion (C) below.
+    await insertCompletedV2({
+      id: "rank-ctx-slow",
+      accountId: "rank-ctx-slow-account",
+      elapsedMs: 8_000,
+      completedAt: "2026-07-14T01:00:08.000Z",
+    });
+    await repository.setRunBoardExclusion("rank-ctx-fast-excluded", true);
+
+    // C: a fresh completion, slower than excluded A but faster than B.
+    await repository.startRunV2(account, start);
+    clock.now = "2026-07-14T01:00:05.000Z";
+    const completed = await repository.recordClickV2(account, {
+      ...targetClick,
+      decisionElapsedMs: 5_000,
+      clientObservedAt: clock.now,
+    });
+
+    const board = await repository.listLeaderboard("challenge-0001");
+    const ownRow = board.find((row) => row.runId === "run-1");
+    // Only "rank-ctx-slow" (8s) is eligible competition; the excluded 3s run
+    // must not push C to rank 2.
+    expect(ownRow?.rank).toBe(1);
+    expect(completed.leaderboardContext).toEqual({
+      isPersonalBest: true,
+      rank: ownRow?.rank,
+    });
   });
 });
 
