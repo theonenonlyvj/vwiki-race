@@ -1,36 +1,70 @@
 import { useCallback, useRef, type FocusEvent, type MouseEvent, type PointerEvent } from "react";
+import { compressPathForStrip } from "../domain/pathCompression";
+import { formatTimeAndClicks } from "../domain/formatting";
 import type { GameSession } from "../domain/gameSession";
-import type { Article, LeaderboardContext } from "../domain/types";
+import type {
+  Article,
+  Challenge,
+  LeaderboardContext,
+  RankedLeaderboardRow,
+} from "../domain/types";
+import type { VGamesIdentityStatus } from "../services/vgamesIdentity";
 import { WikipediaArticlePanel } from "./RaceMode";
-import { ChallengeShareButton, formatElapsed } from "./shared";
+import { challengeShareUrl, useClipboardShare } from "./shared";
 
 /**
- * Beat 3 of the race flow, for this increment: the existing completion
- * panel content moved unchanged (result + Play Again/leaderboard/share/
- * choose-another links) plus the frozen article surface beneath it, same as
- * today. Full Results redesign (board snippet, claim CTA, path recap) is
- * the next task.
+ * Beat 3 of the race flow: Results. Two outcomes share this screen -
+ * "completed" (target reached) and "dnf" (ended the run via End Run with
+ * >=1 click) - per the spec's Race flow section and Home's DNF sub-state
+ * language family. Both read from data already fetched elsewhere
+ * (leaderboardContext/leaderboard); nothing here calls the network.
  */
+export type RaceResultOutcome =
+  | {
+      status: "completed";
+      session: GameSession;
+      elapsedMs: number;
+      leaderboardContext: LeaderboardContext | null;
+      runId: string | null;
+    }
+  | {
+      status: "dnf";
+      challenge: Challenge;
+      clicks: number;
+      runId: string | null;
+    };
+
+export interface PlayAnotherSuggestion {
+  title: string;
+  onSelect: () => void;
+}
+
 export default function RaceResults({
   article,
-  session,
-  elapsedMs,
-  leaderboardContext,
+  outcome,
+  leaderboard,
+  identityStatus,
+  identityDisplayName,
   playAgainDisabled,
+  playAnotherSuggestion,
   onPlayAgain,
   onShowLeaderboard,
   onShowChallenges,
+  onClaimIdentity,
   handleArticleClick,
   handleArticlePrewarm,
 }: {
   article: Article | null;
-  session: GameSession;
-  elapsedMs: number;
-  leaderboardContext: LeaderboardContext | null;
+  outcome: RaceResultOutcome;
+  leaderboard: RankedLeaderboardRow[];
+  identityStatus: VGamesIdentityStatus | null;
+  identityDisplayName: string;
   playAgainDisabled: boolean;
+  playAnotherSuggestion?: PlayAnotherSuggestion | null;
   onPlayAgain: () => void;
   onShowLeaderboard: () => void;
   onShowChallenges: () => void;
+  onClaimIdentity: (mode: "create" | "login") => void;
   handleArticleClick: (event: MouseEvent<HTMLElement>) => void;
   handleArticlePrewarm: (target: EventTarget | null) => void;
 }) {
@@ -51,51 +85,60 @@ export default function RaceResults({
     stableArticlePrewarm(event.target);
   }, [stableArticlePrewarm]);
 
+  const challenge = outcome.status === "completed" ? outcome.session.challenge : outcome.challenge;
+  const isGuest = identityStatus === "ghost";
+
   return (
     <section className="race-results">
       <aside aria-live="polite" className="result-panel">
-        <span className="result-kicker">Finished</span>
-        <h2>Target reached</h2>
-        <p className="result-score">
-          {session.clicks} {session.clicks === 1 ? "click" : "clicks"} in{" "}
-          {formatElapsed(elapsedMs)}
-        </p>
-        {leaderboardContext === null ? (
-          <p className="result-standing">Run already completed on the server</p>
-        ) : leaderboardContext.isPersonalBest ? (
-          <p className="result-standing">
-            Personal best
-            {leaderboardContext.rank !== null ? ` / Rank #${leaderboardContext.rank}` : ""}
-          </p>
+        {outcome.status === "completed" ? (
+          <CompletedResultHeader outcome={outcome} />
         ) : (
-          <p className="result-standing">Not a personal best</p>
+          <DnfResultHeader clicks={outcome.clicks} />
         )}
-        {session.challenge.origin === "daily" ? (
-          <p className="result-standing">Next daily arrives at 5:00 AM Central.</p>
-        ) : null}
+
         <div className="result-actions">
-          <button disabled={playAgainDisabled} type="button" onClick={onPlayAgain}>
-            Play Again
+          <button
+            disabled={playAgainDisabled}
+            type="button"
+            onClick={onPlayAgain}
+          >
+            {outcome.status === "dnf" ? "Try again" : "Play Again"}
           </button>
           <button type="button" onClick={onShowLeaderboard}>
             View leaderboard
           </button>
-          <ChallengeShareButton challengeId={session.challenge.id} />
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={onShowChallenges}
-          >
-            Choose another challenge
-          </button>
         </div>
+
+        {outcome.status === "completed" ? (
+          <PathRecap session={outcome.session} />
+        ) : null}
+
+        <BoardSnippet leaderboard={leaderboard} highlightRunId={outcome.runId} />
+
+        <PlayAnotherSlot
+          onBrowseChallenges={onShowChallenges}
+          suggestion={playAnotherSuggestion ?? null}
+        />
+
+        {outcome.status === "completed" ? (
+          <>
+            {isGuest ? (
+              <ClaimCta
+                displayName={identityDisplayName}
+                onClaimIdentity={onClaimIdentity}
+              />
+            ) : null}
+            <ShareResultButton challenge={challenge} outcome={outcome} />
+          </>
+        ) : null}
       </aside>
 
-      {article ? (
+      {outcome.status === "completed" && article ? (
         <WikipediaArticlePanel
           article={article}
-          challengeLabel={session.challenge.label ?? session.challenge.mode}
-          acceptedPageId={session.currentPage.pageId}
+          challengeLabel={outcome.session.challenge.label ?? outcome.session.challenge.mode}
+          acceptedPageId={outcome.session.currentPage.pageId}
           onClick={stableArticleClick}
           onFocus={stableArticleFocus}
           onPointerDown={stableArticlePointerDown}
@@ -104,4 +147,209 @@ export default function RaceResults({
       ) : null}
     </section>
   );
+}
+
+function CompletedResultHeader({
+  outcome,
+}: {
+  outcome: Extract<RaceResultOutcome, { status: "completed" }>;
+}) {
+  const rank = outcome.leaderboardContext?.rank ?? null;
+  const resultLine = rank !== null
+    ? `#${rank} today · ${formatTimeAndClicks(outcome.elapsedMs, outcome.session.clicks)}`
+    : formatTimeAndClicks(outcome.elapsedMs, outcome.session.clicks);
+
+  return (
+    <>
+      <span className="result-kicker">YOU REACHED IT 🏁</span>
+      <h2>{outcome.session.challenge.target.title}</h2>
+      <p className="result-score">{resultLine}</p>
+    </>
+  );
+}
+
+function DnfResultHeader({ clicks }: { clicks: number }) {
+  return (
+    <>
+      <span className="result-kicker">DNF</span>
+      <h2>That one got away</h2>
+      <p className="result-score">DNF · {clicks} clk</p>
+    </>
+  );
+}
+
+function PathRecap({ session }: { session: GameSession }) {
+  const pathTitles = [
+    session.challenge.start.title,
+    ...session.path.map((entry) => entry.resolvedDestination.canonicalTitle),
+  ];
+  const lastTitle = pathTitles.at(-1) ?? "";
+  const compressed = compressPathForStrip(pathTitles, lastTitle);
+
+  return (
+    <details className="path-recap">
+      <summary>
+        <span className="path-recap-line">
+          {compressed.join(" → ")} ({session.clicks} {session.clicks === 1 ? "click" : "clicks"})
+        </span>
+        <span className="link-affordance">see path ›</span>
+      </summary>
+      <ol className="winning-path">
+        {pathTitles.map((title, index) => (
+          <li key={`${title}-${index}`}>{title}</li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+function BoardSnippet({
+  leaderboard,
+  highlightRunId,
+}: {
+  leaderboard: RankedLeaderboardRow[];
+  highlightRunId: string | null;
+}) {
+  if (leaderboard.length === 0) {
+    return (
+      <section aria-label="Today's board" className="board-snippet">
+        <h3>Today&apos;s board</h3>
+        <p className="muted">No completed runs yet.</p>
+      </section>
+    );
+  }
+
+  const top3 = leaderboard.slice(0, 3);
+  const highlightedRow = highlightRunId
+    ? leaderboard.find((row) => row.runId === highlightRunId) ?? null
+    : null;
+  const highlightedInTop3 = Boolean(highlightedRow) &&
+    top3.some((row) => row.runId === highlightedRow?.runId);
+  const visibleRows = highlightedRow && !highlightedInTop3 ? [...top3, highlightedRow] : top3;
+
+  return (
+    <section aria-label="Today's board" className="board-snippet">
+      <h3>Today&apos;s board</h3>
+      <ol>
+        {visibleRows.map((row) => {
+          const isYou = row.runId === highlightRunId;
+          return (
+            <li className={isYou ? "is-you" : undefined} key={row.runId}>
+              <span className="rank">{row.status === "abandoned" ? "DNF" : `#${row.rank}`}</span>
+              <span>
+                {row.displayName}
+                {isYou ? <span className="muted"> (you)</span> : null}
+              </span>
+              <span>{formatTimeAndClicks(row.elapsedMs, row.clickCount)}</span>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+function PlayAnotherSlot({
+  onBrowseChallenges,
+  suggestion,
+}: {
+  onBrowseChallenges: () => void;
+  // Named seam for Increment 5's smart suggestion endpoint - when populated,
+  // the caller supplies a specific challenge to invite the player into.
+  // v1 leaves this null and shows the static invite only.
+  suggestion: PlayAnotherSuggestion | null;
+}) {
+  return (
+    <section aria-label="Play another challenge" className="play-another-card">
+      <h3>Got a few more minutes?</h3>
+      {suggestion ? (
+        <button type="button" onClick={suggestion.onSelect}>
+          {suggestion.title}
+        </button>
+      ) : null}
+      <button className="link-button" type="button" onClick={onBrowseChallenges}>
+        Browse all challenges ›
+      </button>
+    </section>
+  );
+}
+
+function ClaimCta({
+  displayName,
+  onClaimIdentity,
+}: {
+  displayName: string;
+  onClaimIdentity: (mode: "create" | "login") => void;
+}) {
+  return (
+    <section aria-label="Keep your spot" className="claim-cta">
+      <h3>Keep your spot</h3>
+      <p>You&apos;re on the board as {displayName}. Claim it so it stays yours.</p>
+      <div className="claim-cta-actions">
+        <button type="button" onClick={() => onClaimIdentity("create")}>
+          Make a name
+        </button>
+        <button className="link-button" type="button" onClick={() => onClaimIdentity("login")}>
+          Log in
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function ShareResultButton({
+  challenge,
+  outcome,
+}: {
+  challenge: Challenge;
+  outcome: Extract<RaceResultOutcome, { status: "completed" }>;
+}) {
+  const shareText = composeShareText(challenge, outcome);
+  const { status, copy } = useClipboardShare(shareText);
+
+  return (
+    <div className="share-result">
+      <button
+        disabled={status === "copying"}
+        type="button"
+        onClick={() => void copy()}
+      >
+        Share result
+      </button>
+      {status !== "idle" ? (
+        <span aria-live="polite" role="status">
+          {status === "copying"
+            ? "Copying result..."
+            : status === "copied"
+              ? "Result copied. Paste it anywhere."
+              : "Automatic copy was blocked. Select the text below."}
+        </span>
+      ) : null}
+      {status === "failed" ? (
+        <input
+          aria-label="Share text"
+          onFocus={(event) => event.currentTarget.select()}
+          readOnly
+          value={shareText}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * One-line, real-data share text (no fabricated "daily #N" - the catalog
+ * has no such field yet). Always carries time+clicks (invariant 1) when
+ * ranked; falls back gracefully when the server didn't return a rank.
+ */
+export function composeShareText(
+  challenge: Challenge,
+  outcome: Extract<RaceResultOutcome, { status: "completed" }>,
+): string {
+  const label = challenge.label ?? challenge.id;
+  const rank = outcome.leaderboardContext?.rank ?? null;
+  const scoreLine = rank !== null
+    ? `#${rank} · ${formatTimeAndClicks(outcome.elapsedMs, outcome.session.clicks)}`
+    : formatTimeAndClicks(outcome.elapsedMs, outcome.session.clicks);
+  return `VWiki Race — ${label} — ${scoreLine} — ${challengeShareUrl(challenge.id)}`;
 }

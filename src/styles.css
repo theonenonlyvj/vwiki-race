@@ -1255,6 +1255,116 @@ h1 {
   margin-top: 10px;
 }
 
+/* Results sub-sections (spec beat 3): path recap, board snippet,
+   play-another card, guest claim CTA, and the composed share line. Each is
+   a direct child of the two-column `.result-panel` grid, so each spans
+   both columns. */
+.result-panel .path-recap,
+.result-panel .board-snippet,
+.result-panel .play-another-card,
+.result-panel .claim-cta,
+.result-panel .share-result {
+  grid-column: 1 / -1;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 125, 102, 0.35);
+}
+
+.path-recap summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  color: #eef7f8;
+  font-weight: 750;
+  list-style: none;
+}
+
+.path-recap summary::-webkit-details-marker {
+  display: none;
+}
+
+.path-recap .link-affordance {
+  color: var(--cyan);
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.path-recap .winning-path {
+  margin-top: 8px;
+}
+
+.board-snippet h3,
+.play-another-card h3,
+.claim-cta h3 {
+  font-family: var(--viota-ui-font);
+  font-size: 0.95rem;
+  color: #eef7f8;
+  margin: 0 0 8px;
+}
+
+.board-snippet ol {
+  display: grid;
+  gap: 6px;
+}
+
+.board-snippet li {
+  display: grid;
+  grid-template-columns: 2.4em 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 0.88rem;
+}
+
+.board-snippet li.is-you {
+  color: var(--cyan);
+  font-weight: 850;
+}
+
+.board-snippet .rank {
+  color: var(--cyan);
+  font-weight: 850;
+}
+
+.play-another-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.claim-cta p {
+  margin-top: 4px;
+}
+
+.claim-cta-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.share-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.share-result span {
+  color: #dffbfb;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.share-result input {
+  width: min(420px, 100%);
+  min-height: 38px;
+  border: 1px solid #4a8a91;
+  background: #ffffff;
+  color: #202122;
+  padding: 8px 10px;
+}
+
 .sync-retry-panel {
   border-color: var(--line-strong);
   display: grid;

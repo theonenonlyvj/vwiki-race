@@ -669,7 +669,7 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
     await user.click(await screen.findByRole("link", { name: /fruit/i }));
-    expect(await screen.findByText(/target reached/i)).toBeVisible();
+    expect(await screen.findByText(/you reached it/i)).toBeVisible();
     await user.click(screen.getByRole("button", { name: /play again/i }));
 
     await waitFor(() => {
@@ -745,9 +745,9 @@ describe("VWiki Race app", () => {
     now = 2500;
     await user.click(await screen.findByRole("link", { name: /fruit/i }));
 
-    expect(await screen.findByText(/target reached/i)).toBeVisible();
-    expect(screen.getAllByText(/1 click/i).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText(/1\.5s/i).length).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByText(/you reached it/i)).toBeVisible();
+    expect(screen.getAllByText(/1 clk/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/0:01/).length).toBeGreaterThanOrEqual(1);
     await waitFor(() => {
       expect(fetchImpl).toHaveBeenCalledWith(
         apiUrl("/api/v2/runs/run-1/click"),
@@ -790,7 +790,14 @@ describe("VWiki Race app", () => {
       within(screen.getByRole("banner")).getByText(/opening fruit/i),
     ).toBeVisible();
     fruitArticle.resolve();
-    expect(await screen.findByRole("heading", { name: "Fruit" })).toHaveFocus();
+    // Fruit is this challenge's target, so this click completes the run and
+    // Results' own frozen WikipediaArticlePanel takes over from RaceMode's -
+    // same component either way. Results' own headline also reads "Fruit"
+    // (the target title), so scope to the article panel's own heading.
+    await screen.findByText(/you reached it/i);
+    expect(
+      await within(screen.getByRole("article")).findByRole("heading", { name: "Fruit" }),
+    ).toHaveFocus();
   });
 
   it("scrolls to the accepted article top, not an unaccepted optimistic page", async () => {
@@ -813,7 +820,7 @@ describe("VWiki Race app", () => {
       expect(scrollIntoView).not.toHaveBeenCalled();
 
       clickResponse.resolve();
-      expect(await screen.findByText(/target reached/i)).toBeVisible();
+      expect(await screen.findByText(/you reached it/i)).toBeVisible();
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({
         behavior: "auto",
         block: "start",
@@ -851,7 +858,7 @@ describe("VWiki Race app", () => {
     expect(duringRun.defaultPrevented).toBe(true);
 
     await user.click(screen.getByRole("link", { name: /fruit/i }));
-    expect(await screen.findByText(/target reached/i)).toBeVisible();
+    expect(await screen.findByText(/you reached it/i)).toBeVisible();
     const afterFinish = new KeyboardEvent("keydown", {
       key: "f",
       ctrlKey: true,
@@ -877,7 +884,7 @@ describe("VWiki Race app", () => {
     expect(screen.getByRole("region", { name: /wikipedia article/i })).toHaveAttribute("inert");
     expect(screen.getByText(/loading next article/i)).toBeVisible();
     clickResponse.resolve();
-    expect(await screen.findByText(/target reached/i)).toBeVisible();
+    expect(await screen.findByText(/you reached it/i)).toBeVisible();
   });
 
   it("keeps End Run disabled while an exact click retry remains pending", async () => {
@@ -945,7 +952,7 @@ describe("VWiki Race app", () => {
     expect(timer).toHaveTextContent("1.5s");
 
     fruitArticle.resolve();
-    expect(await screen.findByText(/target reached/i)).toBeVisible();
+    expect(await screen.findByText(/you reached it/i)).toBeVisible();
     expect(timer).toHaveTextContent("1.5s");
   });
 
@@ -982,10 +989,11 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
     await user.click(await screen.findByRole("link", { name: /fruit/i }));
-    expect(await screen.findByText(/target reached/i)).toBeVisible();
-    expect(screen.getByText(/personal best/i)).toBeVisible();
-    expect(screen.getByText(/rank #1/i)).toBeVisible();
-    const result = screen.getByText(/target reached/i).closest("aside");
+    expect(await screen.findByText(/you reached it/i)).toBeVisible();
+    // Invariant 1 ("Time AND clicks, always") + placement from the
+    // server-returned leaderboardContext.rank (spec: Race flow beat 3).
+    expect(screen.getByText(/#1 today · 0:01 · 1 clk/)).toBeVisible();
+    const result = screen.getByText(/you reached it/i).closest("aside");
     const article = screen.getByRole("article");
     expect(result?.compareDocumentPosition(article)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(screen.getByRole("button", { name: /play again/i })).toBeVisible();
@@ -1000,20 +1008,20 @@ describe("VWiki Race app", () => {
     expect(completeRunCalls(fetchImpl)).toBe(0);
   });
 
-  it("exits the results takeover to Challenges when Choose another challenge is clicked", async () => {
+  it("exits the results takeover to Challenges when Browse all challenges is clicked", async () => {
     const user = userEvent.setup();
     render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={claimedStorage()} />);
 
     await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
     await user.click(await screen.findByRole("link", { name: /fruit/i }));
-    expect(await screen.findByText(/target reached/i)).toBeVisible();
+    expect(await screen.findByText(/you reached it/i)).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: /choose another challenge/i }));
+    await user.click(screen.getByRole("button", { name: /browse all challenges/i }));
 
     expect(screen.getByRole("heading", { name: "Challenges" })).toBeVisible();
     expect(screen.getByRole("navigation", { name: /vwiki race views/i })).toBeVisible();
-    expect(screen.queryByText(/target reached/i)).toBeNull();
+    expect(screen.queryByText(/you reached it/i)).toBeNull();
   });
 
   it("locks solution-bearing views throughout an active run", async () => {
@@ -1037,7 +1045,10 @@ describe("VWiki Race app", () => {
     expect(screen.queryByText(/view winning path/i)).toBeNull();
   });
 
-  it("does not present a prior personal-best rank as the current run's rank", async () => {
+  it("always shows this run's server-provided placement, personal best or not", async () => {
+    // Race flow spec beat 3 + task brief: placement comes straight from
+    // leaderboardContext.rank (the server's rank for *this* run), shown
+    // unconditionally - not gated on isPersonalBest.
     const fetchImpl = createFetchMock({
       leaderboardContext: { isPersonalBest: false, rank: 4 },
     });
@@ -1048,8 +1059,25 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: /start race/i }));
     await user.click(await screen.findByRole("link", { name: /fruit/i }));
 
-    expect(await screen.findByText(/not a personal best/i)).toBeVisible();
-    expect(screen.queryByText(/rank #4/i)).toBeNull();
+    expect(await screen.findByText(/#4 today · 0:01 · 1 clk/)).toBeVisible();
+  });
+
+  it("falls back to a plain time+clicks line when the server returns no rank", async () => {
+    // Invariant 1 must hold even in the edge case where leaderboardContext
+    // has no rank (e.g. the row lookup failed server-side) - never fabricate
+    // a placement, but never drop time/clicks either.
+    const fetchImpl = createFetchMock({
+      leaderboardContext: { isPersonalBest: true, rank: null },
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(await screen.findByRole("link", { name: /fruit/i }));
+
+    await screen.findByText(/you reached it/i);
+    expect(document.querySelector(".result-score")).toHaveTextContent("0:01 · 1 clk");
   });
 
   it("unlocks challenge selection after a completed run", async () => {
@@ -1060,9 +1088,9 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
     await user.click(await screen.findByRole("link", { name: /fruit/i }));
-    expect(await screen.findByText(/target reached/i)).toBeVisible();
+    expect(await screen.findByText(/you reached it/i)).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: /choose another challenge/i }));
+    await user.click(screen.getByRole("button", { name: /browse all challenges/i }));
     const challengeTwo = screen.getByRole("button", { name: /challenge #2/i });
     expect(challengeTwo).toBeEnabled();
     await user.click(challengeTwo);
@@ -1081,11 +1109,11 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
     await user.click(await screen.findByRole("link", { name: /fruit/i }));
-    expect(await screen.findByText(/target reached/i)).toBeVisible();
-    await user.click(screen.getByRole("button", { name: /choose another challenge/i }));
+    expect(await screen.findByText(/you reached it/i)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /browse all challenges/i }));
     await user.click(screen.getByRole("button", { name: /challenge #2/i }));
 
-    expect(screen.queryByText(/target reached/i)).toBeNull();
+    expect(screen.queryByText(/you reached it/i)).toBeNull();
     expect(screen.queryByRole("navigation", { name: /run path/i })).toBeNull();
     expect(screen.getByRole("heading", { name: "Water" })).toBeVisible();
   });
@@ -1134,7 +1162,7 @@ describe("VWiki Race app", () => {
     const loginForm = screen.getByLabelText(/password/i).closest("form");
     await user.click(within(loginForm as HTMLFormElement).getByRole("button", { name: /^log in$/i }));
 
-    expect(await screen.findByText(/target reached/i)).toBeVisible();
+    expect(await screen.findByText(/you reached it/i)).toBeVisible();
     const bodies = clickRequestBodies(fetchImpl);
     expect(bodies).toHaveLength(2);
     expect(bodies[1]).toEqual(firstBody);
@@ -1653,10 +1681,21 @@ describe("VWiki Race app", () => {
         nomination: "not_requested",
       },
     });
+    // The recovery-first gate (spec: "Race flow" lead paragraph) needs the
+    // catalog to load once before it can even attempt recoverActiveRun for
+    // this claimed identity, so the very first catalog GET must resolve
+    // promptly - a background refetch (window focus, App.tsx's
+    // queueCatalogRefresh) is what stands in for the original "stale
+    // pre-create catalog load" here.
+    let challengeRequestCount = 0;
     const fetchImpl = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const requestUrl = String(input);
       const method = init?.method ?? "GET";
       if (requestUrl === apiUrl("/api/v2/challenges") && method === "GET") {
+        challengeRequestCount += 1;
+        if (challengeRequestCount === 1) {
+          return Promise.resolve(jsonResponse({ challenges: [twoChallenges()[0]] }));
+        }
         return staleCatalog.promise;
       }
       if (requestUrl === apiUrl("/api/v2/challenges/challenge-0002/leaderboard")) {
@@ -1678,7 +1717,14 @@ describe("VWiki Race app", () => {
     const user = userEvent.setup();
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
-    await user.type(await screen.findByLabelText(/start article/i), "Mars");
+    await screen.findByLabelText(/start article/i);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(challengeRequestCount).toBeGreaterThanOrEqual(2));
+
+    await user.type(screen.getByLabelText(/start article/i), "Mars");
     await user.type(screen.getByLabelText(/target article/i), "Water");
     await user.click(screen.getByRole("button", { name: /create challenge/i }));
 
@@ -2162,7 +2208,7 @@ describe("VWiki Race app", () => {
     }
   });
 
-  it("copies the completed challenge link from the result screen", async () => {
+  it("shares a composed placement/time/clicks line from the results screen", async () => {
     const user = userEvent.setup();
     const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -2184,13 +2230,13 @@ describe("VWiki Race app", () => {
       await user.click(await screen.findByRole("button", { name: /start race/i }));
       await user.click(await screen.findByRole("link", { name: /fruit/i }));
 
-      expect(await screen.findByText(/target reached/i)).toBeVisible();
+      expect(await screen.findByText(/you reached it/i)).toBeVisible();
       await user.click(
-        screen.getByRole("button", { name: /copy challenge link/i }),
+        screen.getByRole("button", { name: /share result/i }),
       );
       await waitFor(() => {
         expect(writeText).toHaveBeenCalledWith(
-          `${window.location.origin}/?challenge=challenge-0001`,
+          `VWiki Race — Challenge #1 — #1 · 0:01 · 1 clk — ${window.location.origin}/?challenge=challenge-0001`,
         );
       });
     } finally {
@@ -2469,10 +2515,155 @@ describe("Race flow: full-screen takeover", () => {
     await user.click(await screen.findByRole("button", { name: /start race/i }));
     await user.click(await screen.findByRole("link", { name: /fruit/i }));
 
-    const result = await screen.findByText(/target reached/i);
+    const result = await screen.findByText(/you reached it/i);
     expect(result.closest(".race-takeover")).not.toBeNull();
     expect(screen.queryByRole("navigation", { name: /vwiki race views/i })).toBeNull();
   });
+
+  it("recovery outcome 'recovered' boots straight into RaceMode - the shell never renders, not even once", async () => {
+    const storage = claimedStorage();
+    const fetchImpl = createFetchMock({ activeRun: activeRunFixture() });
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
+
+    // Spec: "On load, recovery takes priority over everything else" - for a
+    // cached identity, the shell must be absent from the very first paint,
+    // not merely hidden once recovery happens to resolve.
+    expect(screen.queryByRole("navigation", { name: /vwiki race views/i })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "VWiki Race" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /start challenge #1/i })).toBeNull();
+
+    expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^end run$/i })).toBeVisible();
+    expect(screen.queryByRole("navigation", { name: /vwiki race views/i })).toBeNull();
+  });
+
+  it("recovery outcome 'recovery-required' boots straight into the interstitial - resolving it releases the shell", async () => {
+    const storage = claimedStorage();
+    const fetchImpl = createFetchMock({ activeRun: activeRunFixture({ protocolVersion: 1 }) });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
+
+    expect(screen.queryByRole("navigation", { name: /vwiki race views/i })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "VWiki Race" })).toBeNull();
+
+    const endOldRun = await screen.findByRole("button", { name: /end old run/i });
+    expect(screen.queryByRole("navigation", { name: /vwiki race views/i })).toBeNull();
+
+    await user.click(endOldRun);
+    await user.click(screen.getByRole("button", { name: /confirm end old run/i }));
+
+    expect(await screen.findByRole("button", { name: /start challenge #1/i })).toBeEnabled();
+    expect(screen.getByRole("navigation", { name: /vwiki race views/i })).toBeVisible();
+  });
+
+  it("shows the unclaimed-guest claim CTA directly above Share result, opening the identity dialog", async () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      "vwiki-race:vgames-session",
+      JSON.stringify({
+        accountId: "acc-guest",
+        displayName: "Guest-42",
+        token: "jwt-guest",
+        status: "ghost",
+      }),
+    );
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={storage} />);
+
+    await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    // Invariant 4 exception aside, a ghost session is still prompted before
+    // Start (asked to claim or continue) - continue as the same guest here,
+    // the claim CTA below is what surfaces the deferred claim opportunity.
+    await user.click(screen.getByRole("button", { name: /^guest$/i }));
+    await user.click(await screen.findByRole("button", { name: /continue as guest/i }));
+    await user.click(await screen.findByRole("link", { name: /fruit/i }));
+
+    const claimCta = await screen.findByRole("region", { name: /keep your spot/i });
+    expect(within(claimCta).getByText(/guest-42/i)).toBeVisible();
+    const shareButton = screen.getByRole("button", { name: /share result/i });
+    expect(claimCta.compareDocumentPosition(shareButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    await user.click(within(claimCta).getByRole("button", { name: /make a name/i }));
+    expect(await screen.findByRole("dialog", { name: /save your stats/i })).toBeVisible();
+  });
+
+  it("does not show the claim CTA for an already-claimed session", async () => {
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(await screen.findByRole("link", { name: /fruit/i }));
+
+    await screen.findByText(/you reached it/i);
+    expect(screen.queryByRole("region", { name: /keep your spot/i })).toBeNull();
+  });
+
+  it("shows a top-3 board snippet with the player's own row highlighted", async () => {
+    const fetchImpl = createFetchMock({
+      leaderboardRows: [
+        leaderboardRow({ rank: 1, runId: "run-a", displayName: "Ari" }),
+        leaderboardRow({ rank: 2, runId: "run-b", displayName: "Bo" }),
+        leaderboardRow({ rank: 3, runId: "run-c", displayName: "Cy" }),
+        leaderboardRow({ rank: 4, runId: "run-1", displayName: "Vijay" }),
+      ],
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(await screen.findByRole("link", { name: /fruit/i }));
+
+    const board = await screen.findByRole("region", { name: /today's board/i });
+    const rows = within(board).getAllByRole("listitem");
+    expect(rows).toHaveLength(4);
+    expect(within(rows[3]).getByText(/vijay/i)).toBeVisible();
+    expect(rows[3]).toHaveClass("is-you");
+  });
+
+  it("keeps the original End Run confirm copy when no clicks have been made yet", async () => {
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(screen.getByRole("button", { name: /^end run$/i }));
+
+    const dialog = await screen.findByRole("dialog", { name: /end this run/i });
+    expect(
+      within(dialog).getByText(/this cannot be resumed after the server accepts it\./i),
+    ).toBeVisible();
+  });
+
+  it("shows the DNF Results variant and DNF-aware End Run confirm copy after abandoning a run with clicks", async () => {
+    const fetchImpl = createFetchMock({ clickStaysActive: true });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: /start challenge #1/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await screen.findByRole("heading", { name: "Apple" });
+    await user.click(await screen.findByRole("link", { name: /apple tree/i }));
+    await screen.findByRole("heading", { name: "Apple tree" });
+
+    await user.click(screen.getByRole("button", { name: /^end run$/i }));
+    const dialog = await screen.findByRole("dialog", { name: /end this run/i });
+    expect(within(dialog).getByText(/it'll count as a dnf with 1 click\./i)).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: /confirm end run/i }));
+
+    expect(await screen.findByText(/that one got away/i)).toBeVisible();
+    expect(screen.getByText(/dnf · 1 clk/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: /try again/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /browse all challenges/i })).toBeVisible();
+    expect(screen.queryByRole("navigation", { name: /vwiki race views/i })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /browse all challenges/i }));
+    expect(screen.getByRole("heading", { name: "Challenges" })).toBeVisible();
+    expect(screen.getByRole("navigation", { name: /vwiki race views/i })).toBeVisible();
+  });
+
 });
 
 function createFetchMock(options?: {
@@ -2498,6 +2689,13 @@ function createFetchMock(options?: {
   statsUnauthorizedAfterFirst?: boolean;
   creationOutcome?: CreateChallengeOutcome;
   canManageDailies?: boolean;
+  // Every fixture challenge's only known non-start link resolves straight
+  // to the target ("Fruit"), so every click mock always completes the run.
+  // Setting this makes the recorded click come back "active" instead, so a
+  // test can click a non-target link (any of Apple's other links, e.g.
+  // "Apple tree") and then still End Run on a genuinely mid-flight run -
+  // exercising the DNF Results variant/DNF-aware confirm copy.
+  clickStaysActive?: boolean;
   dailyAdminState?: { nominations: DailyNomination[]; queueEntries: DailyQueueEntry[] };
 }) {
   let completed = false;
@@ -2676,10 +2874,15 @@ function createFetchMock(options?: {
         expectedStepNumber: 1,
         sourceTitle: "Apple",
         sourcePageId: 18978754,
-        clickedAnchorText: "fruit",
-        requestedTitle: "Fruit",
-        destinationTitle: "Fruit",
-        destinationPageId: 10843,
+        // Every non-"Fruit" link the fixture Apple article offers (e.g.
+        // "Apple tree") resolves through the same generic catch-all below,
+        // so most tests click "fruit" specifically but clickStaysActive
+        // tests click some other link on purpose - assert shape, not the
+        // exact destination.
+        clickedAnchorText: expect.any(String),
+        requestedTitle: expect.any(String),
+        destinationTitle: expect.any(String),
+        destinationPageId: expect.any(Number),
         decisionElapsedMs: expect.any(Number),
       });
       if (unauthorizedClickRemaining > 0) {
@@ -2694,6 +2897,16 @@ function createFetchMock(options?: {
         return options.delayedClickResponse.then((response) => {
           completed = true;
           return response;
+        });
+      }
+      if (options?.clickStaysActive) {
+        const clickBody = readJsonBody(init) as { expectedStepNumber: number };
+        return jsonResponse({
+          transition: {
+            runId: "run-1",
+            clickCount: clickBody.expectedStepNumber,
+            runStatus: "active",
+          },
         });
       }
       completed = true;

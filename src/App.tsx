@@ -43,7 +43,7 @@ import {
   type TargetPreviewState,
   useTargetPreview,
 } from "./hooks/useTargetPreview";
-import RaceFlow from "./race/RaceFlow";
+import RaceFlow, { type DnfResultSnapshot } from "./race/RaceFlow";
 import { ChallengeShareButton, formatElapsed } from "./race/shared";
 
 interface AppProps {
@@ -80,6 +80,7 @@ type AuthPromptIntent =
   | { type: "start"; challengeId: string }
   | { type: "retry-click" }
   | { type: "end-run" }
+  | { type: "claim" }
   | {
       type: "create";
       input: CreateChallengeInput;
@@ -102,6 +103,27 @@ function readBrowserStorage(): StorageLike {
   }
 }
 
+/**
+ * Reads a cached identity session synchronously at mount (see the
+ * identitySession/displayNameDraft/usernameDraft lazy useState initializers
+ * below), rather than through an effect that only sets state a render
+ * after mount. Recovery-first routing (spec: "Race flow" lead paragraph)
+ * needs to know from the very first render whether there's a session that
+ * might have an active run to recover - a post-mount effect would leave a
+ * one-render window where the shell could flash before recovery is even
+ * checked. Builds a throwaway repository instance purely to read cached
+ * state; the memoized `identityRepository` used everywhere else in the
+ * component reads/writes the same underlying storage, so this is safe.
+ */
+function readCachedIdentitySession(
+  storage: StorageLike | undefined,
+  injectedIdentityRepository: VGamesIdentityRepository | undefined,
+): VGamesIdentitySession | null {
+  const resolvedStorage = storage ?? readBrowserStorage();
+  const repository = injectedIdentityRepository ?? createVGamesIdentityRepository(resolvedStorage);
+  return repository.getSession();
+}
+
 export default function App({
   apiOrigin,
   fetchImpl = defaultFetch,
@@ -121,9 +143,16 @@ export default function App({
   const [authMode, setAuthMode] = useState<AuthMode>("create");
   const [authBusy, setAuthBusy] = useState(false);
   const [identitySession, setIdentitySession] =
-    useState<VGamesIdentitySession | null>(null);
-  const [displayNameDraft, setDisplayNameDraft] = useState("");
-  const [usernameDraft, setUsernameDraft] = useState("");
+    useState<VGamesIdentitySession | null>(
+      () => readCachedIdentitySession(storage, injectedIdentityRepository),
+    );
+  const [displayNameDraft, setDisplayNameDraft] = useState(
+    () => readCachedIdentitySession(storage, injectedIdentityRepository)?.displayName ?? "",
+  );
+  const [usernameDraft, setUsernameDraft] = useState(() => {
+    const cached = readCachedIdentitySession(storage, injectedIdentityRepository);
+    return cached ? suggestUsername(cached.displayName) : "";
+  });
   const [passwordDraft, setPasswordDraft] = useState("");
   const [confirmPasswordDraft, setConfirmPasswordDraft] = useState("");
   const [challenges, setChallenges] = useState<Challenge[]>([]);
@@ -139,6 +168,7 @@ export default function App({
   const [endConfirmationOpen, setEndConfirmationOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runNotice, setRunNotice] = useState<string | null>(null);
+  const [dnfResult, setDnfResult] = useState<DnfResultSnapshot | null>(null);
   const identityTrigger = useRef<HTMLElement | null>(null);
   const endRunTrigger = useRef<HTMLElement | null>(null);
   const requestedPaths = useRef(new Set<string>());
@@ -187,13 +217,28 @@ export default function App({
     !["idle", "completed"].includes(race.phase) || Boolean(race.recoveryRun);
   challengeLockRef.current = challengeIsLocked;
   startLockRef.current = startIsLocked;
+  // Recovery-first routing (spec: "Race flow" lead paragraph - "On load,
+  // recovery takes priority over everything else"). True from the very
+  // first render whenever a cached identity might still have an active run
+  // to recover, until recoverActiveRun has actually been invoked for that
+  // session's token (recoveredToken.current is set synchronously the
+  // instant the recovery effect below calls it, in the same tick that
+  // race.phase flips to "preparing" - so this and the phase check below
+  // hand off without a gap). Guests with no cached session have nothing to
+  // recover and skip this gate entirely.
+  const recoveryGatePending = identitySession !== null &&
+    recoveredToken.current !== identitySession.token;
   // Full-screen, zero-chrome race-flow takeover (spec: "Race flow" section).
   // Engaged whenever the preview beat is open, the run is mid-flight in any
   // sense (including transient preparing/syncing/abandoning and the
-  // completed results beat), or an active-run recovery gate is pending.
+  // completed results beat), an active-run recovery gate is pending or
+  // resolved-but-unaddressed, or a just-ended run is showing its DNF
+  // Results variant.
   const raceEngaged = raceStage !== null ||
     ["preparing", "active", "syncing", "completed", "abandoning"].includes(race.phase) ||
-    Boolean(race.recoveryRun);
+    Boolean(race.recoveryRun) ||
+    Boolean(dnfResult) ||
+    recoveryGatePending;
 
   const selectedChallenge =
     challenges.find((challenge) => challenge.id === selectedChallengeId) ??
@@ -217,6 +262,11 @@ export default function App({
     (identitySession?.displayName ?? displayNameDraft).trim().length > 0;
   const isBusy = ["preparing", "syncing", "abandoning"].includes(modeState) || authBusy;
 
+  // Re-syncs identitySession when the *memoized* identityRepository instance
+  // itself changes after mount (e.g. a different `identityRepository`/
+  // `storage` prop, simulating a device/account swap in tests) - the lazy
+  // useState initializers above only run once, at mount, so they can't see
+  // this. Harmless no-op on the initial mount itself (same cached value).
   useEffect(() => {
     const cachedSession = identityRepository.getSession();
     if (cachedSession) {
@@ -533,6 +583,7 @@ export default function App({
 
   function exitCompletedRaceTo(tab: TabKey) {
     race.resetCompleted();
+    setDnfResult(null);
     setRaceStage(null);
     setActiveTab(tab);
   }
@@ -569,6 +620,7 @@ export default function App({
 
     setError(null);
     setRunNotice(null);
+    setDnfResult(null);
     setActiveTab("play");
     setLeaderboardProjection({ challengeId: challenge.id, rows: [] });
     setSelectedChallengeId(challenge.id);
@@ -771,6 +823,13 @@ export default function App({
       return;
     }
 
+    if (prompt.type === "claim") {
+      // Results' guest claim CTA (spec beat 3): there is no pending action
+      // to resume - continueAsGuest/createVGamesAccount/login already
+      // upgraded the identity and persisted it. Nothing further to do.
+      return;
+    }
+
     await createChallengeWithSession(prompt.input, nextIdentitySession);
   }
 
@@ -823,19 +882,40 @@ export default function App({
     sessionForEnd: VGamesIdentitySession | null = identitySession,
   ) {
     if (!sessionForEnd) return;
+    // Recovery's "End Old Run" (a stale/legacy run from this or another
+    // device) has no live session/path to show - it resolves straight back
+    // to the shell, same as always. Only ending an in-flight run from
+    // RaceMode's "End Run" gets the DNF Results variant (spec: Race flow
+    // beat 3). useRaceController.endRun wipes session/run on abandon, so
+    // the data Results needs is snapshotted here, before that call.
+    const isRecoveryEnd = Boolean(race.recoveryRun);
     const endedChallengeId = race.recoveryRun?.challengeId ?? race.challenge?.id ?? null;
     const acceptedClickCount = race.recoveryRun?.clickCount ?? race.session?.clicks ?? 0;
+    const dnfSnapshot: DnfResultSnapshot | null = !isRecoveryEnd && race.challenge
+      ? { challenge: race.challenge, clicks: acceptedClickCount, runId: race.run?.id ?? null }
+      : null;
     const outcome = await race.endRun(
       sessionForEnd.token,
       race.recoveryRun?.protocolVersion === 1 ? 1 : undefined,
     );
-    if (outcome.status === "abandoned" || outcome.status === "completed") {
+    if (outcome.status === "abandoned") {
       setEndConfirmationOpen(false);
-      setRunNotice(outcome.status === "abandoned"
-        ? acceptedClickCount > 0
+      if (dnfSnapshot && dnfSnapshot.clicks > 0) {
+        setDnfResult(dnfSnapshot);
+        setRunNotice(null);
+      } else {
+        setDnfResult(null);
+        setRunNotice(acceptedClickCount > 0
           ? "Run ended. Your DNF and path were saved."
-          : "Run ended. The attempt was saved to your stats."
-        : null);
+          : "Run ended. The attempt was saved to your stats.");
+      }
+      if (endedChallengeId) {
+        await refreshLeaderboard(endedChallengeId);
+      }
+    } else if (outcome.status === "completed") {
+      setEndConfirmationOpen(false);
+      setDnfResult(null);
+      setRunNotice(null);
       if (endedChallengeId) {
         await refreshLeaderboard(endedChallengeId);
       }
@@ -873,6 +953,10 @@ export default function App({
   const elapsedMs = race.elapsedMs;
   const visibleError = error ?? race.error;
   const endRunIsBlocked = modeState === "syncing" || Boolean(race.pendingRetry);
+  const endRunClickCount = race.recoveryRun?.clickCount ?? race.session?.clicks ?? 0;
+  const endRunConfirmCopy = endRunClickCount >= 1
+    ? `It'll count as a DNF with ${endRunClickCount} ${endRunClickCount === 1 ? "click" : "clicks"}.`
+    : "This cannot be resumed after the server accepts it.";
   const showBanners = !authPrompt && !endConfirmationOpen;
   const bannerError = showBanners ? visibleError : null;
   const bannerNotice = showBanners ? runNotice : null;
@@ -893,6 +977,7 @@ export default function App({
         <RaceFlow
           phase={race.phase}
           recoveryRun={race.recoveryRun}
+          recoveryPending={recoveryGatePending}
           showPreview={raceStage === "preview"}
           previewChallenge={selectedChallenge}
           targetPreview={targetPreview}
@@ -902,6 +987,11 @@ export default function App({
           pendingNavigationTitle={pendingNavigationTitle}
           pendingRetry={race.pendingRetry}
           leaderboardContext={race.leaderboardContext}
+          leaderboard={leaderboard}
+          runId={race.run?.id ?? null}
+          dnfResult={dnfResult}
+          identityStatus={identitySession?.status ?? null}
+          identityDisplayName={identitySession?.displayName ?? ""}
           error={bannerError}
           authBusy={authBusy}
           endRunIsBlocked={endRunIsBlocked}
@@ -914,6 +1004,7 @@ export default function App({
           onPlayAgain={() => void startSelectedChallenge()}
           onShowLeaderboard={() => exitCompletedRaceTo("leaderboard")}
           onShowChallenges={() => exitCompletedRaceTo("challenges")}
+          onClaimIdentity={(mode) => openAuthPrompt({ type: "claim" }, mode)}
           handleArticleClick={handleArticleClick}
           handleArticlePrewarm={handleArticlePrewarm}
         />
@@ -1097,7 +1188,7 @@ export default function App({
           titleId="end-run-title"
         >
           <h2 id="end-run-title">End this run?</h2>
-          <p>This cannot be resumed after the server accepts it.</p>
+          <p>{endRunConfirmCopy}</p>
           {visibleError ? <p role="alert">{visibleError}</p> : null}
           <button disabled={modeState === "abandoning"} type="button" onClick={() => setEndConfirmationOpen(false)}>Continue run</button>
           <button disabled={modeState === "abandoning"} type="button" onClick={() => void confirmEndRun()}>
