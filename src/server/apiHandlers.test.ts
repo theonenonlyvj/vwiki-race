@@ -956,6 +956,114 @@ describe("Worker API route versions", () => {
     expect(readLimit).toHaveBeenCalledWith({ key: "active:acc-1" });
   });
 
+  it("rate limits identity routes per client IP and fails open when the binding is absent", async () => {
+    const tracking = fakeWorkerTracking();
+    const worker = createWorker({ createTracking: () => tracking });
+    const identityLimit = vi.fn(async () => ({ success: false }));
+    const env = {
+      VWIKI_RACE_DB: {} as D1Database,
+      VGAMES_URL: "https://vgames.example",
+      IDENTITY_RATE_LIMITER: { limit: identityLimit },
+    } as unknown as WorkerEnv;
+
+    const guestBody = { deviceCredential: "credential", displayName: "Casey" };
+    const secureBody = {
+      deviceCredential: "credential", token: "jwt-1", username: "casey", password: "secret",
+    };
+    const loginBody = { deviceCredential: "credential", username: "casey", password: "secret" };
+
+    const post = (path: string, body: unknown) => worker.fetch(new Request(
+      `https://worker.example${path}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "CF-Connecting-IP": "203.0.113.7" },
+        body: JSON.stringify(body),
+      },
+    ), env);
+
+    for (const [path, body] of [
+      ["/api/v2/identity/guest", guestBody],
+      ["/api/v2/identity/secure", secureBody],
+      ["/api/v2/identity/login", loginBody],
+    ] as const) {
+      const response = await post(path, body);
+      expect(response.status, path).toBe(429);
+      expect(response.headers.get("Retry-After")).toBe("60");
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "identity_rate_limited" },
+      });
+    }
+    expect(identityLimit).toHaveBeenCalledTimes(3);
+    expect(identityLimit).toHaveBeenCalledWith({ key: "203.0.113.7" });
+    expect(tracking.identity.quick).not.toHaveBeenCalled();
+    expect(tracking.identity.secure).not.toHaveBeenCalled();
+    expect(tracking.identity.login).not.toHaveBeenCalled();
+
+    const openEnv = {
+      VWIKI_RACE_DB: {} as D1Database,
+      VGAMES_URL: "https://vgames.example",
+    } as unknown as WorkerEnv;
+    const openResponse = await worker.fetch(new Request(
+      "https://worker.example/api/v2/identity/guest",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(guestBody),
+      },
+    ), openEnv);
+    expect(openResponse.status).toBe(200);
+  });
+
+  it("rate limits run-start per account after authorization and fails open when the binding is absent", async () => {
+    const tracking = fakeWorkerTracking();
+    const worker = createWorker({ createTracking: () => tracking });
+    const runStartLimit = vi.fn(async () => ({ success: false }));
+    const env = {
+      VWIKI_RACE_DB: {} as D1Database,
+      VGAMES_URL: "https://vgames.example",
+      RUN_START_RATE_LIMITER: { limit: runStartLimit },
+    } as unknown as WorkerEnv;
+
+    const response = await worker.fetch(new Request(
+      "https://worker.example/api/v2/runs/start",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer test",
+          "Content-Type": "application/json",
+          "Idempotency-Key": "run-start-key",
+        },
+        body: JSON.stringify({ challengeId: "challenge-0001" }),
+      },
+    ), env);
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("60");
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "run_start_rate_limited" },
+    });
+    expect(runStartLimit).toHaveBeenCalledWith({ key: "acc-1" });
+    expect(tracking.runProtocol?.startRunV2).not.toHaveBeenCalled();
+
+    const openEnv = {
+      VWIKI_RACE_DB: {} as D1Database,
+      VGAMES_URL: "https://vgames.example",
+    } as unknown as WorkerEnv;
+    const openResponse = await worker.fetch(new Request(
+      "https://worker.example/api/v2/runs/start",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer test",
+          "Content-Type": "application/json",
+          "Idempotency-Key": "run-start-key-2",
+        },
+        body: JSON.stringify({ challengeId: "challenge-0001" }),
+      },
+    ), openEnv);
+    expect(openResponse.status).toBe(200);
+  });
+
   it("enforces exact challenge, click, anchor, and display-name limits", async () => {
     const tracking = fakeWorkerTracking();
     const worker = createWorker({ createTracking: () => tracking });

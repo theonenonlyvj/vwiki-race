@@ -36,6 +36,8 @@ export interface Env {
   CLIENT_ERROR_RATE_LIMITER?: RateLimiter;
   DAILY_ADMIN_ACCOUNT_IDS?: string;
   DAILY_ADMIN_RATE_LIMITER?: RateLimiter;
+  IDENTITY_RATE_LIMITER?: RateLimiter;
+  RUN_START_RATE_LIMITER?: RateLimiter;
 }
 
 type AuthorizedVGamesAccount = AuthorizedAccount;
@@ -292,6 +294,7 @@ async function dispatchV2(
   }
   if (request.method === "POST" && url.pathname === "/api/v2/runs/start") {
     const account = await tracking.authorize(request);
+    await enforceRunStartRateLimit(env, account.accountId);
     const input = startInput(await readJson(request));
     return json(
       { run: await protocol(tracking).startRunV2(account, {
@@ -410,6 +413,7 @@ async function dispatchV2(
     return json(outcome, undefined, corsHeaders);
   }
   if (request.method === "POST" && url.pathname === "/api/v2/identity/guest") {
+    await enforceIdentityRateLimit(env, request);
     return json(
       await tracking.identity.quick(guestIdentityInput(await readJson(request))),
       undefined,
@@ -417,6 +421,7 @@ async function dispatchV2(
     );
   }
   if (request.method === "POST" && url.pathname === "/api/v2/identity/secure") {
+    await enforceIdentityRateLimit(env, request);
     return json(
       await tracking.identity.secure(secureIdentityInput(await readJson(request))),
       undefined,
@@ -424,6 +429,7 @@ async function dispatchV2(
     );
   }
   if (request.method === "POST" && url.pathname === "/api/v2/identity/login") {
+    await enforceIdentityRateLimit(env, request);
     return json(
       await tracking.identity.login(loginIdentityInput(await readJson(request))),
       undefined,
@@ -1041,6 +1047,33 @@ async function enforceClientErrorRateLimit(env: Env, key: string): Promise<void>
     throw new ApiError(
       "client_error_rate_limited",
       "Too many client error reports. Try again shortly.",
+      429,
+      60,
+    );
+  }
+}
+
+async function enforceIdentityRateLimit(env: Env, request: Request): Promise<void> {
+  if (!env.IDENTITY_RATE_LIMITER) return;
+  const key = request.headers.get("CF-Connecting-IP") ?? "unknown-client";
+  const result = await env.IDENTITY_RATE_LIMITER.limit({ key });
+  if (!result.success) {
+    throw new ApiError(
+      "identity_rate_limited",
+      "Too many identity requests. Try again shortly.",
+      429,
+      60,
+    );
+  }
+}
+
+async function enforceRunStartRateLimit(env: Env, accountId: string): Promise<void> {
+  if (!env.RUN_START_RATE_LIMITER) return;
+  const result = await env.RUN_START_RATE_LIMITER.limit({ key: accountId });
+  if (!result.success) {
+    throw new ApiError(
+      "run_start_rate_limited",
+      "Too many new runs. Try again shortly.",
       429,
       60,
     );

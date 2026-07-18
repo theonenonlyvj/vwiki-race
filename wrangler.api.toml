@@ -49,3 +49,13 @@ simple = { limit = 20, period = 60 }
 name = "DAILY_ADMIN_RATE_LIMITER"
 namespace_id = "51005"
 simple = { limit = 30, period = 60 }
+
+[[ratelimits]]
+name = "IDENTITY_RATE_LIMITER"
+namespace_id = "51006"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "RUN_START_RATE_LIMITER"
+namespace_id = "51007"
+simple = { limit = 6, period = 60 }
