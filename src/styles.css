@@ -876,6 +876,21 @@ h1 {
   font-size: 0.85rem;
 }
 
+/* F3: the ▲/▼/– trend arrow next to a ranked row's avg placement - stays
+   `.muted` gray in every direction (spec: "muted gray arrows, no
+   red/green"), never a semantic color. */
+.trend-arrow {
+  margin-left: 2px;
+}
+
+/* F6: a failed trends fetch - reuses `.error-banner` rather than the
+   "no one has cleared the guard" empty state. */
+.board-trend-error {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
 .challenge-detail {
   display: grid;
   gap: 14px;

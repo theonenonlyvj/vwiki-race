@@ -129,10 +129,23 @@ export interface ChallengeBoardResponse {
  */
 export type BoardsTrendWindow = "7" | "30" | "lifetime";
 
+/**
+ * F3 (trend arrows): a ranked trend row plus its comparison point - this
+ * account's `avgPlacement` in the immediately-preceding same-length window
+ * (7d: [t-13,t-7]; 30d: [t-59,t-30] - see `dailyTrendPreviousWindowEnd`).
+ * `null` when the account was absent/unranked in that previous window, or
+ * whenever `window` is `"lifetime"` (spec: "no arrow on lifetime" - lifetime
+ * has no meaningful "previous window"). Lower `avgPlacement` is better, so a
+ * lower current value than `prevAvgPlacement` is an improvement (▲).
+ */
+export interface BoardsTrendRankedEntry extends DailyTrendRankedEntry {
+  prevAvgPlacement: number | null;
+}
+
 export interface BoardsTrendsResponse {
   window: BoardsTrendWindow;
   guard: number;
-  ranked: DailyTrendRankedEntry[];
+  ranked: BoardsTrendRankedEntry[];
   unranked: DailyTrendUnrankedEntry[];
 }
 

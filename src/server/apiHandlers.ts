@@ -1,5 +1,5 @@
 import { getSortedChallenges } from "../domain/challenges";
-import { dailyTrendGuard } from "../domain/dailyTrends";
+import { dailyTrendGuard, dailyTrendPreviousWindowEnd } from "../domain/dailyTrends";
 import { optionalNumber, requiredString } from "./http";
 import { ApiError } from "./http";
 import type {
@@ -395,11 +395,36 @@ export function createApiHandlers(
       const window = parseBoardsTrendWindow(windowParam);
       const windowDays = window === "lifetime" ? null : (Number(window) as 7 | 30);
       const guard = dailyTrendGuard(windowDays);
-      const { ranked, unranked } = await dailyProtocol(repository).listDailyTrends(
-        windowDays,
-        requiredString(todayCentral, "invalid_today_central", "A Central date is required."),
-      );
-      return { window, guard, ranked, unranked };
+      const cleanToday = requiredString(todayCentral, "invalid_today_central", "A Central date is required.");
+      const protocol = dailyProtocol(repository);
+      const { ranked, unranked } = await protocol.listDailyTrends(windowDays, cleanToday);
+
+      // F3 (trend arrows): a second `listDailyTrends` call over the
+      // immediately-preceding same-length window, reusing the exact same
+      // guard-filtered `ranked` list rather than raw played counts - an
+      // account that didn't clear the guard in the previous window has no
+      // `avgPlacement` to compare against and renders "-", same as an
+      // account absent from it entirely. Lifetime has no previous window
+      // (spec: "no arrow on lifetime") - `previousAvgByAccount` just stays
+      // empty there, so every ranked row's `prevAvgPlacement` is `null`.
+      let previousAvgByAccount = new Map<string, number>();
+      if (windowDays !== null) {
+        const previousWindowEnd = dailyTrendPreviousWindowEnd(cleanToday, windowDays);
+        const previous = await protocol.listDailyTrends(windowDays, previousWindowEnd);
+        previousAvgByAccount = new Map(
+          previous.ranked.map((entry) => [entry.accountId, entry.avgPlacement]),
+        );
+      }
+
+      return {
+        window,
+        guard,
+        ranked: ranked.map((entry) => ({
+          ...entry,
+          prevAvgPlacement: previousAvgByAccount.get(entry.accountId) ?? null,
+        })),
+        unranked,
+      };
     },
 
     async getRunPath(runId) {

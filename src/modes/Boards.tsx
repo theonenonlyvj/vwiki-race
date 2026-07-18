@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { dailyDateForChallenge, previousCentralDate } from "../domain/challengeSelection";
 import { dailyFlavorLabel } from "../domain/dailyEditorial";
-import { dailyTrendGuard, type TrendWindowDays } from "../domain/dailyTrends";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { Challenge } from "../domain/types";
-import type { BoardsTrendsResponse, BoardsTrendWindow, ChallengeBoardResponse } from "../server/contracts";
+import type {
+  BoardsTrendRankedEntry,
+  BoardsTrendsResponse,
+  BoardsTrendWindow,
+  ChallengeBoardResponse,
+} from "../server/contracts";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 
 export type BoardsSegment = "today" | "yesterday" | "7d" | "30d" | "lifetime";
@@ -26,12 +30,6 @@ const TREND_WINDOW_PARAM: Record<TrendSegment, BoardsTrendWindow> = {
   lifetime: "lifetime",
 };
 
-const TREND_WINDOW_DAYS: Record<TrendSegment, TrendWindowDays> = {
-  "7d": 7,
-  "30d": 30,
-  lifetime: null,
-};
-
 const EMPTY_BOARD: ChallengeBoardResponse = { challengeId: "", placements: [], dnfs: [] };
 
 type RecentDailyDetail =
@@ -51,8 +49,16 @@ function isTrendSegment(segment: BoardsSegment): segment is TrendSegment {
  * rolling-placement trends (Increment 4), reading `GET
  * /api/v2/boards/trends` - ranked rows that have cleared the participation
  * guard, plus a muted "not yet ranked" section framed as progress ("M/{guard}
- * dailies"), never a bare rejection (council note). No trend arrows this
- * increment (spec: explicitly deferred).
+ * dailies"), never a bare rejection (council note). All trend copy (the
+ * guard number itself, and every "N/{guard}" progress line) reads off the
+ * server-echoed `trends.guard` - never re-derived client-side (F5) - so a
+ * future guard-formula change can't silently disagree between server and
+ * client. Each ranked row also gets a muted ▲/▼/– trend arrow (F3) comparing
+ * its `avgPlacement` against the immediately-preceding same-length window
+ * (server-computed as `prevAvgPlacement`); lifetime never gets one (no
+ * "previous window" to compare against). A failed trends fetch renders an
+ * error banner + Retry (F6), never the "no one has cleared the guard" empty
+ * state - that empty state is reserved for a real zero-ranked response.
  *
  * "Today" reuses `todaysHeroChallenge` - the exact same daily-or-fallback
  * challenge AppShell already computed for Home's hero - rather than
@@ -96,6 +102,12 @@ export default function Boards({
   const [segment, setSegment] = useState<BoardsSegment>(initialSegment);
   const [board, setBoard] = useState<ChallengeBoardResponse>(EMPTY_BOARD);
   const [trends, setTrends] = useState<BoardsTrendsResponse | null>(null);
+  // F6: a failed trends fetch is its own state, distinct from "still
+  // loading" and from a genuine zero-ranked response - never silently
+  // reused as the empty state. Scoped to the segment that produced it so a
+  // segment switch doesn't show a stale error from a different window.
+  const [trendsErrorSegment, setTrendsErrorSegment] = useState<TrendSegment | null>(null);
+  const [trendsRetryToken, setTrendsRetryToken] = useState(0);
   const [ownRowExpanded, setOwnRowExpanded] = useState(false);
   const [recentDailyDetails, setRecentDailyDetails] = useState<RecentDailyDetail[]>([]);
 
@@ -140,24 +152,21 @@ export default function Boards({
   useEffect(() => {
     let cancelled = false;
     if (!isTrendSegment(segment)) return;
+    setTrendsErrorSegment(null);
     void apiClient.getBoardsTrends(TREND_WINDOW_PARAM[segment])
       .then((response) => {
         if (!cancelled) setTrends(response);
       })
       .catch(() => {
-        if (!cancelled) {
-          setTrends({
-            window: TREND_WINDOW_PARAM[segment],
-            guard: dailyTrendGuard(TREND_WINDOW_DAYS[segment]),
-            ranked: [],
-            unranked: [],
-          });
-        }
+        // F6: an honest error state + Retry, never the fake "no one has
+        // cleared the guard" empty state - that reads as real board data
+        // when it's actually a fetch failure.
+        if (!cancelled) setTrendsErrorSegment(segment);
       });
     return () => {
       cancelled = true;
     };
-  }, [apiClient, segment]);
+  }, [apiClient, segment, trendsRetryToken]);
 
   // Collapse the drill-down whenever the segment changes - it's scoped to
   // "your row on this specific window," not a standing UI state.
@@ -246,9 +255,14 @@ export default function Boards({
 
   const trendWindow = isTrendSegment(segment) ? TREND_WINDOW_PARAM[segment] : null;
   const trendMatchesSegment = trendWindow !== null && trends?.window === trendWindow;
+  const trendHasError = isTrendSegment(segment) && trendsErrorSegment === segment;
   const rankedRows = trendMatchesSegment ? trends!.ranked : [];
   const unrankedRows = trendMatchesSegment ? trends!.unranked : [];
-  const guard = isTrendSegment(segment) ? dailyTrendGuard(TREND_WINDOW_DAYS[segment]) : 0;
+  // F5: `guard` always reads off the server-echoed `trends.guard` - never a
+  // client-side re-derivation. `null` while this segment's trends haven't
+  // loaded (or errored) yet, so guard-dependent copy just doesn't render
+  // rather than showing a guessed number.
+  const guard = trendMatchesSegment ? trends!.guard : null;
 
   return (
     <section className="boards-mode leaderboard-panel" aria-label="Boards">
@@ -270,75 +284,94 @@ export default function Boards({
       </div>
 
       {isTrendSegment(segment) ? (
-        <>
-          <p className="board-trend-subheader muted">
-            Rolling {SEGMENT_LABEL[segment]} · ranked by average placement · play {"≥"}{guard} dailies to rank
-          </p>
+        trendHasError ? (
+          // F6: an honest error state + Retry - never the "no one has
+          // cleared the guard" empty state below, which is reserved for a
+          // real zero-ranked response.
+          <div className="board-trend-error">
+            <p className="error-banner" role="alert">Couldn&apos;t load this trend.</p>
+            <button onClick={() => setTrendsRetryToken((value) => value + 1)} type="button">
+              Retry
+            </button>
+          </div>
+        ) : !trendMatchesSegment || guard === null ? (
+          <p className="muted">Loading trend…</p>
+        ) : (
+          <>
+            <p className="board-trend-subheader muted">
+              Rolling {SEGMENT_LABEL[segment]} · ranked by average placement · play {"≥"}{guard} dailies to rank
+            </p>
 
-          <section className="board-snippet" aria-label={`${SEGMENT_LABEL[segment]} rolling trend`}>
-            {rankedRows.length ? (
-              <ol>
-                {rankedRows.map((row, index) => {
-                  const isYou = row.accountId === identityAccountId;
-                  return (
-                    <li className={isYou ? "is-you" : undefined} key={row.accountId}>
-                      <button
-                        aria-expanded={isYou ? ownRowExpanded : undefined}
-                        className="trend-row-toggle"
-                        disabled={!isYou}
-                        onClick={isYou ? () => setOwnRowExpanded((value) => !value) : undefined}
-                        type="button"
-                      >
-                        <span className="rank">{index + 1}.</span>
+            <section className="board-snippet" aria-label={`${SEGMENT_LABEL[segment]} rolling trend`}>
+              {rankedRows.length ? (
+                <ol>
+                  {rankedRows.map((row, index) => {
+                    const isYou = row.accountId === identityAccountId;
+                    return (
+                      <li className={isYou ? "is-you" : undefined} key={row.accountId}>
+                        <button
+                          aria-expanded={isYou ? ownRowExpanded : undefined}
+                          className="trend-row-toggle"
+                          disabled={!isYou}
+                          onClick={isYou ? () => setOwnRowExpanded((value) => !value) : undefined}
+                          type="button"
+                        >
+                          <span className="rank">{index + 1}.</span>
+                          <span>
+                            {row.displayName ?? "Unknown"}
+                            {isYou ? <span className="muted"> (you)</span> : null}
+                          </span>
+                          <span>
+                            avg #{row.avgPlacement.toFixed(1)} ({row.playedCount} dailies){" "}
+                            <span aria-label={trendArrowLabel(row)} className="trend-arrow muted">
+                              {trendArrowGlyph(row)}
+                            </span>
+                          </span>
+                        </button>
+                        {isYou && ownRowExpanded ? (
+                          <ol className="board-trend-drilldown muted" aria-label="Recent dailies">
+                            {recentDailyDetails.length ? (
+                              recentDailyDetails.map((detail) => (
+                                <li key={detail.challengeId}>
+                                  <span>{detail.dailyDate}</span>
+                                  <span>{recentDailyDetailText(detail)}</span>
+                                </li>
+                              ))
+                            ) : (
+                              <li>No recent dailies yet.</li>
+                            )}
+                          </ol>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ol>
+              ) : (
+                <p className="muted">No one has cleared the ranking guard yet.</p>
+              )}
+            </section>
+
+            {unrankedRows.length ? (
+              <section className="board-snippet board-trend-unranked muted" aria-label="Not yet ranked">
+                <h3>Not yet ranked</h3>
+                <ol>
+                  {unrankedRows.map((row) => {
+                    const isYou = row.accountId === identityAccountId;
+                    return (
+                      <li key={row.accountId}>
                         <span>
                           {row.displayName ?? "Unknown"}
                           {isYou ? <span className="muted"> (you)</span> : null}
                         </span>
-                        <span>avg #{row.avgPlacement.toFixed(1)} ({row.playedCount} dailies)</span>
-                      </button>
-                      {isYou && ownRowExpanded ? (
-                        <ol className="board-trend-drilldown muted" aria-label="Recent dailies">
-                          {recentDailyDetails.length ? (
-                            recentDailyDetails.map((detail) => (
-                              <li key={detail.challengeId}>
-                                <span>{detail.dailyDate}</span>
-                                <span>{recentDailyDetailText(detail)}</span>
-                              </li>
-                            ))
-                          ) : (
-                            <li>No recent dailies yet.</li>
-                          )}
-                        </ol>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ol>
-            ) : (
-              <p className="muted">No one has cleared the ranking guard yet.</p>
-            )}
-          </section>
-
-          {unrankedRows.length ? (
-            <section className="board-snippet board-trend-unranked muted" aria-label="Not yet ranked">
-              <h3>Not yet ranked</h3>
-              <ol>
-                {unrankedRows.map((row) => {
-                  const isYou = row.accountId === identityAccountId;
-                  return (
-                    <li key={row.accountId}>
-                      <span>
-                        {row.displayName ?? "Unknown"}
-                        {isYou ? <span className="muted"> (you)</span> : null}
-                      </span>
-                      <span>{row.playedCount}/{guard} dailies</span>
-                    </li>
-                  );
-                })}
-              </ol>
-            </section>
-          ) : null}
-        </>
+                        <span>{row.playedCount}/{guard} dailies</span>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </section>
+            ) : null}
+          </>
+        )
       ) : !activeChallenge ? (
         <p className="muted">
           {segment === "yesterday"
@@ -434,4 +467,27 @@ function recentDailyDetailText(detail: RecentDailyDetail): string {
     case "not-played":
       return "Not played";
   }
+}
+
+/**
+ * F3: lower `avgPlacement` is better, so a current average lower than
+ * `prevAvgPlacement` is an improvement (▲). `–` covers both "nothing to
+ * compare" (unranked/absent in the previous window, or lifetime - which
+ * never gets a `prevAvgPlacement` at all, per the spec's "no arrow on
+ * lifetime") and a genuine tie.
+ */
+function trendArrowGlyph(row: BoardsTrendRankedEntry): "▲" | "▼" | "–" {
+  const prevAvgPlacement = row.prevAvgPlacement ?? null;
+  if (prevAvgPlacement === null) return "–";
+  if (row.avgPlacement < prevAvgPlacement) return "▲";
+  if (row.avgPlacement > prevAvgPlacement) return "▼";
+  return "–";
+}
+
+function trendArrowLabel(row: BoardsTrendRankedEntry): string {
+  const prevAvgPlacement = row.prevAvgPlacement ?? null;
+  if (prevAvgPlacement === null) return "No previous window to compare";
+  if (row.avgPlacement < prevAvgPlacement) return "Improved vs. previous window";
+  if (row.avgPlacement > prevAvgPlacement) return "Declined vs. previous window";
+  return "No change vs. previous window";
 }

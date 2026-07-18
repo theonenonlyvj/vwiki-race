@@ -392,7 +392,13 @@ function isDailyTrendRankedEntry(value: unknown): value is BoardsTrendsResponse[
     hasString(value, "accountId") &&
     (value.displayName === null || hasString(value, "displayName")) &&
     hasNumber(value, "avgPlacement") &&
-    hasNumber(value, "playedCount");
+    hasNumber(value, "playedCount") &&
+    // F3: `prevAvgPlacement` is nullable (unranked/absent previous window,
+    // or lifetime - "no arrow"); also tolerated as entirely absent so an
+    // older cached response shape doesn't hard-fail validation.
+    (value.prevAvgPlacement === undefined ||
+      value.prevAvgPlacement === null ||
+      hasNumber(value, "prevAvgPlacement"));
 }
 
 function isDailyTrendUnrankedEntry(value: unknown): value is BoardsTrendsResponse["unranked"][number] {

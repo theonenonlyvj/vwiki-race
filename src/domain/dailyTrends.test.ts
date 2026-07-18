@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dailyTrendGuard, dailyTrendWindowStart } from "./dailyTrends";
+import { dailyTrendGuard, dailyTrendPreviousWindowEnd, dailyTrendWindowStart } from "./dailyTrends";
 
 describe("dailyTrendGuard", () => {
   it("requires exactly 3 for the 7-day window", () => {
@@ -26,5 +26,19 @@ describe("dailyTrendWindowStart", () => {
 
   it("carries a 7-day window across a month/year boundary", () => {
     expect(dailyTrendWindowStart("2026-01-03", 7)).toBe("2025-12-28");
+  });
+});
+
+describe("dailyTrendPreviousWindowEnd", () => {
+  it("computes the 7d previous window as [t-13,t-7]", () => {
+    const previousEnd = dailyTrendPreviousWindowEnd("2026-07-18", 7);
+    expect(previousEnd).toBe("2026-07-11");
+    expect(dailyTrendWindowStart(previousEnd, 7)).toBe("2026-07-05");
+  });
+
+  it("computes the 30d previous window as [t-59,t-30]", () => {
+    const previousEnd = dailyTrendPreviousWindowEnd("2026-07-18", 30);
+    expect(previousEnd).toBe("2026-06-18");
+    expect(dailyTrendWindowStart(previousEnd, 30)).toBe("2026-05-20");
   });
 });

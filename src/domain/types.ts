@@ -212,8 +212,9 @@ export interface AccountStats {
   /**
    * Increment 4 (UX redesign spec §Data requirements - "Streaks"): count of
    * consecutive Central dates, ending today or yesterday, on which this
-   * account has ≥1 eligible completed daily run. Silent reset on a missed
-   * day (no grace period) - see `getAccountDailyStreak`.
+   * account has ≥1 eligible completed OR board-visible-DNF daily run (F2).
+   * Silent reset on a missed day (no grace period) - see
+   * `getAccountDailyStreak`.
    */
   dailyStreak: number;
   /**
@@ -236,9 +237,12 @@ export interface AccountStats {
  * "7d/30d/lifetime" paragraph): one row per canonical account, using the
  * same best-rank-per-account-per-daily definition as `ChallengeBoardPlacement`,
  * aggregated across a window's dailies. A `DailyTrendRankedEntry` has
- * cleared the participation guard (`playedCount >= guard`); accounts below
- * it appear as `DailyTrendUnrankedEntry` instead, with no `avgPlacement` -
- * council: unranked state "should read as progress toward a goal, not a bare
+ * cleared the participation guard (`playedCount >= guard`, and has at least
+ * one finished daily to average - F2: `playedCount` alone counts
+ * board-visible DNF days too, but an all-DNF account has no `avgPlacement`
+ * to rank by and stays unranked); accounts below it appear as
+ * `DailyTrendUnrankedEntry` instead, with no `avgPlacement` - council:
+ * unranked state "should read as progress toward a goal, not a bare
  * rejection", so `playedCount` is still surfaced.
  */
 export interface DailyTrendRankedEntry {

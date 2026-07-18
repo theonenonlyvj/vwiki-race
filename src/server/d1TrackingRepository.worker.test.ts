@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { applyD1Migrations } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { centralDateDaysBefore } from "../domain/challengeSelection";
 import type { AuthorizedAccount } from "../domain/types";
 import { createApiHandlers } from "./apiHandlers";
 import type { ValidateChallengeArticles } from "./wikipediaChallengeValidator";
@@ -3958,6 +3959,54 @@ describe("listDailyTrends (Increment 4)", () => {
 
     expect(ranked.map((entry) => entry.accountId)).toEqual([alpha, beta]);
   });
+
+  it("F2: a board-visible DNF day counts toward playedCount (participation) but never toward avgPlacement", async () => {
+    const accountId = "trend-dnf-account";
+    // 8 solo finishes (each placement 1) across 2026-07-01..08.
+    for (let index = 0; index < 8; index += 1) {
+      const dailyDate = `2026-07-${String(index + 1).padStart(2, "0")}`;
+      const challengeId = `trend-dnf-finish-${index}`;
+      await insertDailyChallenge({ id: challengeId, sortOrder: 3000 + index });
+      await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate, challengeId, selectionSource: "automatic" });
+      await insertCompletedV2({ id: `${challengeId}-run`, accountId, elapsedMs: 5_000, completedAt: `${dailyDate}T01:00:05.000Z`, challengeId });
+    }
+    // 3 DNF-only days across 2026-07-09..11.
+    for (let index = 0; index < 3; index += 1) {
+      const dailyDate = `2026-07-${String(9 + index).padStart(2, "0")}`;
+      const challengeId = `trend-dnf-dnf-${index}`;
+      await insertDailyChallenge({ id: challengeId, sortOrder: 3100 + index });
+      await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate, challengeId, selectionSource: "automatic" });
+      await insertAbandonedV2({ id: `${challengeId}-run`, accountId, clickCount: 2, elapsedMs: 3_000, abandonedAt: `${dailyDate}T01:00:03.000Z`, challengeId });
+    }
+
+    const { repository } = fixture();
+    const { ranked, unranked } = await repository.listDailyTrends(30, "2026-07-18");
+
+    // 11 played (8 finished + 3 DNF) >= the 30d guard (10) -> ranked, but
+    // avgPlacement is over the 8 finishes only (each solo -> placement 1
+    // every time -> avg exactly 1).
+    expect(ranked).toEqual([
+      { accountId, displayName: null, avgPlacement: 1, playedCount: 11 },
+    ]);
+    expect(unranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
+  });
+
+  it("F2: an account whose participation is entirely DNFs clears the guard on playedCount but stays unranked (no avgPlacement to rank by)", async () => {
+    const accountId = "trend-all-dnf-account";
+    for (let index = 0; index < 10; index += 1) {
+      const dailyDate = `2026-07-${String(index + 1).padStart(2, "0")}`;
+      const challengeId = `trend-all-dnf-${index}`;
+      await insertDailyChallenge({ id: challengeId, sortOrder: 3200 + index });
+      await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate, challengeId, selectionSource: "automatic" });
+      await insertAbandonedV2({ id: `${challengeId}-run`, accountId, clickCount: 2, elapsedMs: 3_000, abandonedAt: `${dailyDate}T01:00:03.000Z`, challengeId });
+    }
+
+    const { repository } = fixture();
+    const { ranked, unranked } = await repository.listDailyTrends(30, "2026-07-18");
+
+    expect(ranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
+    expect(unranked.find((entry) => entry.accountId === accountId)).toMatchObject({ playedCount: 10 });
+  });
 });
 
 describe("getAccountDailyStreak (Increment 4)", () => {
@@ -4007,7 +4056,12 @@ describe("getAccountDailyStreak (Increment 4)", () => {
     await expect(repository.getAccountDailyStreak(accountId, "2026-07-18")).resolves.toBe(2);
   });
 
-  it("a DNF-only today still doesn't break the streak (the day hasn't passed)", async () => {
+  it("a DNF today counts as played and extends the streak (F2: DNF counts the same as a finish)", async () => {
+    // Pre-F2 this DNF didn't count at all, so today was simply skipped
+    // (grace) and only yesterday's finish counted (streak 1). F2 makes a
+    // board-visible DNF "played" unconditionally - today is no exception -
+    // so today's DNF now genuinely extends yesterday's finish into a
+    // 2-day streak.
     const accountId = "streak-today-dnf";
     const yesterdayChallengeId = "streak-dnf-yesterday";
     const todayChallengeId = "streak-dnf-today";
@@ -4019,7 +4073,25 @@ describe("getAccountDailyStreak (Increment 4)", () => {
     await insertAbandonedV2({ id: "streak-dnf-today-run", accountId, clickCount: 3, elapsedMs: 5_000, abandonedAt: "2026-07-18T01:00:05.000Z", challengeId: todayChallengeId });
 
     const { repository } = fixture();
-    await expect(repository.getAccountDailyStreak(accountId, "2026-07-18")).resolves.toBe(1);
+    await expect(repository.getAccountDailyStreak(accountId, "2026-07-18")).resolves.toBe(2);
+  });
+
+  it("a DNF-only yesterday keeps the streak alive (F2), with today still in grace (unplayed, not a break)", async () => {
+    const accountId = "streak-dnf-yesterday-alive";
+    const dayBeforeChallengeId = "streak-dnf-alive-daybefore";
+    const yesterdayChallengeId = "streak-dnf-alive-yesterday";
+    await insertDailyChallenge({ id: dayBeforeChallengeId, sortOrder: 1350 });
+    await insertDailyChallenge({ id: yesterdayChallengeId, sortOrder: 1351 });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-16", challengeId: dayBeforeChallengeId, selectionSource: "automatic" });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-17", challengeId: yesterdayChallengeId, selectionSource: "automatic" });
+    await insertCompletedV2({ id: "streak-dnf-alive-daybefore-run", accountId, elapsedMs: 4_000, completedAt: "2026-07-16T01:00:04.000Z", challengeId: dayBeforeChallengeId });
+    await insertAbandonedV2({ id: "streak-dnf-alive-yesterday-run", accountId, clickCount: 2, elapsedMs: 3_000, abandonedAt: "2026-07-17T01:00:03.000Z", challengeId: yesterdayChallengeId });
+    // Today (2026-07-18) has no daily_features row at all here - the walk
+    // hasn't reached it yet either way (grace), so it's irrelevant to this
+    // scenario.
+
+    const { repository } = fixture();
+    await expect(repository.getAccountDailyStreak(accountId, "2026-07-18")).resolves.toBe(2);
   });
 
   it("is alias-resolved", async () => {
@@ -4056,6 +4128,51 @@ describe("getAccountDailyStreak (Increment 4)", () => {
     const { repository } = fixture();
     await expect(repository.getAccountDailyStreak(accountId, "2026-07-18")).resolves.toBe(1);
   });
+});
+
+describe("getAccountDailyStreak - D1 bind-cap regression (F1)", () => {
+  it(
+    "computes a streak across 150 daily_features rows via a single fixed-bind join (D1 caps bound params at ~100/statement; Miniflare doesn't enforce it, so bind-arg count is asserted directly)",
+    async () => {
+      const accountId = "streak-bindcap-account";
+      const total = 150;
+      for (let index = 0; index < total; index += 1) {
+        const dailyDate = centralDateDaysBefore("2026-07-18", index);
+        const challengeId = `streak-bindcap-challenge-${index}`;
+        await insertDailyChallenge({ id: challengeId, sortOrder: 2000 + index });
+        await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate, challengeId, selectionSource: "automatic" });
+        await insertCompletedV2({
+          id: `${challengeId}-run`,
+          accountId,
+          elapsedMs: 4_000,
+          completedAt: `${dailyDate}T01:00:04.000Z`,
+          challengeId,
+        });
+      }
+
+      const { db: countingDb, maxBindArgs } = bindCountingDb(env.VWIKI_RACE_DB);
+      const repository = createD1TrackingRepository({
+        db: countingDb,
+        now: () => new Date("2026-07-18T01:00:00.000Z"),
+        randomId: () => "unused",
+      });
+
+      // Correctness at scale: an unbroken 150-day streak.
+      await expect(repository.getAccountDailyStreak(accountId, "2026-07-18")).resolves.toBe(total);
+
+      // The hard fuse itself: the pre-fix implementation bound one
+      // parameter per daily_features row fetched (an `IN (...)` list), so
+      // at this same 150-row scale it would have bound ~151 params -
+      // Cloudflare D1 caps bound parameters at ~100 per statement, so that
+      // shape 500s in real D1. Miniflare doesn't enforce the cap, so a
+      // naive "does it throw" test can't catch this by construction - the
+      // rewritten single join uses exactly 2 fixed binds (`todayCentral`,
+      // `accountId`) no matter how many dailies exist, so this stays small
+      // and constant regardless of history size.
+      expect(maxBindArgs()).toBeLessThanOrEqual(5);
+    },
+    20_000,
+  );
 });
 
 describe("GET /api/v2/boards/trends", () => {
@@ -4181,6 +4298,41 @@ function fixture(
       randomId: () => (id++ === 0 ? firstId : `${firstId}-generated-${id}`),
     }),
   };
+}
+
+/**
+ * F1 regression harness: wraps a real D1 database so every `.bind(...)`
+ * call made through it is recorded, without mutating the underlying
+ * `env.VWIKI_RACE_DB` binding. Miniflare doesn't enforce D1's real ~100
+ * bound-param-per-statement cap, so a query that binds one parameter per
+ * row (the pre-fix `getAccountDailyStreak` shape) never throws locally at
+ * any row count - this lets a test assert the *structural* fix (bind count
+ * stays small and fixed) instead of relying on an exception that Miniflare
+ * simply won't produce.
+ */
+function bindCountingDb(real: D1DatabaseLike): { db: D1DatabaseLike; maxBindArgs: () => number } {
+  let max = 0;
+  const db: D1DatabaseLike = {
+    prepare(sql: string) {
+      const stmt = real.prepare(sql);
+      return {
+        bind(...values: unknown[]) {
+          max = Math.max(max, values.length);
+          return stmt.bind(...values);
+        },
+        all<T = unknown>() {
+          return stmt.all<T>();
+        },
+        first<T = unknown>() {
+          return stmt.first<T>();
+        },
+        run() {
+          return stmt.run();
+        },
+      };
+    },
+  };
+  return { db, maxBindArgs: () => max };
 }
 
 async function recordTwoNonTerminalClicks(

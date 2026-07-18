@@ -2434,6 +2434,14 @@ export function createD1TrackingRepository(options: {
       // eligible finisher of each daily, not just the first 100 - a
       // truncated per-daily field would silently distort every account's
       // average once aggregated across many dailies.
+      //
+      // F2 (spec §Boards "≥1 eligible/leaderboard-visible run"): a
+      // board-visible DNF (≥1 click abandon, same eligibility shape as
+      // `listChallengeDnfs`) counts toward `played_count` alongside
+      // completed dailies, but `avg_placement` stays over `placements`
+      // only (finished dailies) - `played_days` is a distinct UNION of
+      // finished-challenge and DNF-challenge per account so a day that's
+      // both (unusual, but harmless) doesn't double-count.
       const { results } = await db
         .prepare(
           `WITH windowed_dailies AS (
@@ -2441,23 +2449,26 @@ export function createD1TrackingRepository(options: {
            ), resolved AS (
              SELECT wd.challenge_id,
                     coalesce(a.canonical_account_id, r.canonical_account_id, r.account_id) account_id,
-                    r.id, r.elapsed_ms, r.click_count, r.completed_at
+                    r.id, r.status, r.elapsed_ms, r.click_count, r.completed_at,
+                    r.abandoned_at, r.protocol_version, r.ranked_eligible
              FROM windowed_dailies wd
              JOIN runs r ON r.challenge_id = wd.challenge_id
              LEFT JOIN account_aliases a
                ON a.alias_account_id = coalesce(r.canonical_account_id, r.account_id)
              WHERE r.board_excluded = 0
-               AND r.status = 'completed'
-               AND r.elapsed_ms IS NOT NULL
-               AND r.completed_at IS NOT NULL
-               AND ((r.protocol_version = 2 AND r.ranked_eligible = 1)
-                    OR r.protocol_version = 1)
+           ), finished AS (
+             SELECT * FROM resolved
+             WHERE status = 'completed'
+               AND elapsed_ms IS NOT NULL
+               AND completed_at IS NOT NULL
+               AND ((protocol_version = 2 AND ranked_eligible = 1)
+                    OR protocol_version = 1)
            ), best AS (
              SELECT *, row_number() OVER (
                PARTITION BY challenge_id, account_id
                ORDER BY elapsed_ms ASC, click_count ASC, completed_at ASC, id
              ) attempt_rank
-             FROM resolved
+             FROM finished
            ), placements AS (
              SELECT challenge_id, account_id,
                     row_number() OVER (
@@ -2466,12 +2477,31 @@ export function createD1TrackingRepository(options: {
                     ) placement
              FROM best
              WHERE attempt_rank = 1
+           ), dnf_days AS (
+             SELECT DISTINCT challenge_id, account_id
+             FROM resolved
+             WHERE status = 'abandoned'
+               AND click_count > 0
+               AND elapsed_ms IS NOT NULL
+               AND abandoned_at IS NOT NULL
+           ), played_days AS (
+             SELECT account_id, challenge_id FROM placements
+             UNION
+             SELECT account_id, challenge_id FROM dnf_days
+           ), played AS (
+             SELECT account_id, count(*) played_count
+             FROM played_days
+             GROUP BY account_id
+           ), avgs AS (
+             SELECT account_id, avg(placement) avg_placement
+             FROM placements
+             GROUP BY account_id
            )
-           SELECT placements.account_id, avg(placements.placement) avg_placement,
-                  count(*) played_count, p.public_name AS display_name
-           FROM placements
-           LEFT JOIN account_profiles p ON p.account_id = placements.account_id
-           GROUP BY placements.account_id, p.public_name`,
+           SELECT played.account_id, avgs.avg_placement,
+                  played.played_count, p.public_name AS display_name
+           FROM played
+           LEFT JOIN avgs ON avgs.account_id = played.account_id
+           LEFT JOIN account_profiles p ON p.account_id = played.account_id`,
         )
         .bind(...dateBindings)
         .all<DailyTrendQueryRow>();
@@ -2482,7 +2512,12 @@ export function createD1TrackingRepository(options: {
       for (const row of results) {
         const playedCount = Number(row.played_count);
         const displayName = row.display_name ?? null;
-        if (playedCount >= guard) {
+        // An account can clear the participation guard on DNF days alone
+        // (no finishes at all) - `avg_placement` is then `null` (nothing to
+        // average), and there's no meaningful placement to rank by, so it
+        // reads as unranked-with-progress rather than a ranked row with a
+        // fabricated average.
+        if (playedCount >= guard && row.avg_placement !== null) {
           ranked.push({
             accountId: row.account_id,
             displayName,
@@ -2505,54 +2540,58 @@ export function createD1TrackingRepository(options: {
     },
 
     async getAccountDailyStreak(accountId, todayCentral) {
-      const { results: dailyRows } = await db
+      // F1 (hard fuse): the previous implementation bound one parameter per
+      // `daily_features` row fetched (an `IN (...)` list built from up to
+      // 500 challenge ids) - D1 caps bound parameters at ~100 per
+      // statement, so once the catalog passed ~100 dailies ever played,
+      // this query would 500 on every stats read in real D1 (Miniflare
+      // doesn't enforce the cap, so that never surfaced locally). This is
+      // now a single join with exactly 2 fixed binds (`todayCentral`,
+      // `accountId`) no matter how many dailies exist - see the
+      // "150 daily_features rows" regression test.
+      //
+      // F2: "played" here matches the trends participation guard - a
+      // board-visible DNF (≥1 click abandon, same eligibility shape as
+      // `listChallengeDnfs`/`listDailyTrends`) counts the same as a
+      // completed run. A date only ever lands in the result if
+      // `daily_features` has a row for it AND this account played that
+      // row's challenge - a genuine catalog gap (no `daily_features` row)
+      // can never appear here, so it still breaks the streak exactly like
+      // a missed day.
+      const { results } = await db
         .prepare(
-          `SELECT daily_date, challenge_id FROM daily_features
-           WHERE daily_date <= ?
-           ORDER BY daily_date DESC
-           LIMIT 500`,
-        )
-        .bind(todayCentral)
-        .all<{ daily_date: string; challenge_id: string }>();
-
-      if (!dailyRows.length) return 0;
-
-      const challengeIds = dailyRows.map((row) => row.challenge_id);
-      const placeholders = challengeIds.map(() => "?").join(", ");
-      const { results: playedRows } = await db
-        .prepare(
-          `SELECT DISTINCT r.challenge_id
-           FROM runs r
+          `SELECT DISTINCT df.daily_date
+           FROM daily_features df
+           JOIN runs r ON r.challenge_id = df.challenge_id
            LEFT JOIN account_aliases a
              ON a.alias_account_id = coalesce(r.canonical_account_id, r.account_id)
-           WHERE coalesce(a.canonical_account_id, r.canonical_account_id, r.account_id) = ?
+           WHERE df.daily_date <= ?
+             AND coalesce(a.canonical_account_id, r.canonical_account_id, r.account_id) = ?
              AND r.board_excluded = 0
-             AND r.status = 'completed'
-             AND r.elapsed_ms IS NOT NULL
-             AND r.completed_at IS NOT NULL
-             AND ((r.protocol_version = 2 AND r.ranked_eligible = 1)
-                  OR r.protocol_version = 1)
-             AND r.challenge_id IN (${placeholders})`,
+             AND (
+               (r.status = 'completed' AND r.elapsed_ms IS NOT NULL
+                 AND r.completed_at IS NOT NULL
+                 AND ((r.protocol_version = 2 AND r.ranked_eligible = 1)
+                      OR r.protocol_version = 1))
+               OR (r.status = 'abandoned' AND r.click_count > 0
+                 AND r.elapsed_ms IS NOT NULL AND r.abandoned_at IS NOT NULL)
+             )`,
         )
-        .bind(accountId, ...challengeIds)
-        .all<{ challenge_id: string }>();
+        .bind(todayCentral, accountId)
+        .all<{ daily_date: string }>();
 
-      const playedChallengeIds = new Set(playedRows.map((row) => row.challenge_id));
-      const dailyByDate = new Map(dailyRows.map((row) => [row.daily_date, row.challenge_id]));
-
-      const isPlayed = (date: string): boolean => {
-        const challengeId = dailyByDate.get(date);
-        return challengeId !== undefined && playedChallengeIds.has(challengeId);
-      };
+      const playedDates = new Set(results.map((row) => row.daily_date));
 
       // "Today not yet played doesn't break the streak until the day
       // passes" (spec): only start counting today itself if it was already
       // played; otherwise the walk starts at yesterday, silently skipping
       // over an in-progress/unplayed today rather than treating it as a
-      // miss.
-      let cursor = isPlayed(todayCentral) ? todayCentral : previousCentralDate(todayCentral);
+      // miss. Since F2 makes a DNF "played" too, a DNF recorded today
+      // starts the walk at today and extends the streak by one, same as a
+      // finish would.
+      let cursor = playedDates.has(todayCentral) ? todayCentral : previousCentralDate(todayCentral);
       let streak = 0;
-      while (isPlayed(cursor)) {
+      while (playedDates.has(cursor)) {
         streak += 1;
         cursor = previousCentralDate(cursor);
       }
@@ -4732,7 +4771,9 @@ interface ChallengeDnfQueryRow {
 
 interface DailyTrendQueryRow {
   account_id: string;
-  avg_placement: number;
+  // F2: `null` for an account whose played days are all DNFs (no
+  // finishes at all) - `avgs` is a LEFT JOIN against `played`.
+  avg_placement: number | null;
   played_count: number;
   display_name?: string | null;
 }

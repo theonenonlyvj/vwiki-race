@@ -3341,7 +3341,7 @@ describe("Home v2: guarded streak/trend chip (Increment 4)", () => {
     window.history.pushState({}, "", "/");
   });
 
-  it("pre-play: shows the streak alone when the account hasn't cleared the 30d ranking guard", async () => {
+  it("pre-play: shows the streak plus a below-guard progress chip (F4) when the account hasn't cleared the 30d ranking guard", async () => {
     const fetchImpl = createFetchMock({
       challenges: [twoChallenges()[0]],
       accountDailyStreak: 5,
@@ -3350,6 +3350,22 @@ describe("Home v2: guarded streak/trend chip (Increment 4)", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
     expect(await screen.findByText(/🔥 5-day streak/)).toBeVisible();
+    expect(screen.queryByText(/30-day avg/i)).toBeNull();
+    // F4: below-guard no longer goes silent - it reads as progress, same
+    // framing Boards' own unranked section uses.
+    expect(screen.getByText(/4\/10 dailies/)).toBeVisible();
+  });
+
+  it("F4: shows the below-guard progress chip alone when there's no streak either", async () => {
+    const fetchImpl = createFetchMock({
+      challenges: [twoChallenges()[0]],
+      accountDailyStreak: 0,
+      accountTrend30: { avgPlacement: null, playedCount: 4, ranked: false },
+    });
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    expect(await screen.findByText(/4\/10 dailies/)).toBeVisible();
+    expect(screen.queryByText(/day streak/i)).toBeNull();
     expect(screen.queryByText(/30-day avg/i)).toBeNull();
   });
 
@@ -3675,6 +3691,90 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     expect(within(board).getByText("2026-07-16")).toBeVisible();
     expect(within(board).getByText(/not played/i)).toBeVisible();
   });
+
+  it("shows a muted ▲/▼/– trend arrow per ranked row, comparing avgPlacement to the previous window (F3)", async () => {
+    const fetchImpl = createFetchMock({
+      boardsTrendsByWindow: {
+        "7": {
+          window: "7",
+          guard: 3,
+          ranked: [
+            // Lower avgPlacement than prevAvgPlacement -> improved -> ▲.
+            { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3, prevAvgPlacement: 2.1 },
+            // Higher avgPlacement than prevAvgPlacement -> declined -> ▼.
+            { accountId: "acc-2", displayName: "Ari", avgPlacement: 3.0, playedCount: 4, prevAvgPlacement: 1.5 },
+            // No previous window standing at all -> –.
+            { accountId: "acc-3", displayName: "Sam", avgPlacement: 2.0, playedCount: 3, prevAvgPlacement: null },
+          ],
+          unranked: [],
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: "Boards" }));
+    const board = screen.getByRole("region", { name: "Boards" });
+    await user.click(within(board).getByRole("tab", { name: "7d" }));
+
+    await within(board).findByText(/vijay/i);
+    expect(within(board).getByLabelText(/improved vs\. previous window/i)).toHaveTextContent("▲");
+    expect(within(board).getByLabelText(/declined vs\. previous window/i)).toHaveTextContent("▼");
+    expect(within(board).getByLabelText(/no previous window to compare/i)).toHaveTextContent("–");
+  });
+
+  it("renders every trend copy off the server-echoed guard, never a client re-derivation (F5)", async () => {
+    // A deliberately "wrong" guard (5, not the formula's 3 for a 7d window)
+    // proves the client renders whatever the server echoed rather than
+    // recomputing it locally - if it were re-deriving, this would read 3.
+    const fetchImpl = createFetchMock({
+      boardsTrendsByWindow: {
+        "7": {
+          window: "7",
+          guard: 5,
+          ranked: [],
+          unranked: [{ accountId: "acc-1", displayName: "Vijay", playedCount: 2 }],
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: "Boards" }));
+    const board = screen.getByRole("region", { name: "Boards" });
+    await user.click(within(board).getByRole("tab", { name: "7d" }));
+
+    expect(await within(board).findByText(/play ≥5 dailies to rank/i)).toBeVisible();
+    expect(within(board).getByText(/2\/5 dailies/)).toBeVisible();
+  });
+
+  it("renders an error banner + Retry on a failed trends fetch, never the 'no one has cleared the guard' empty state (F6)", async () => {
+    const fetchImpl = createFetchMock({
+      boardsTrendsFailOnce: true,
+      boardsTrendsByWindow: {
+        "7": {
+          window: "7",
+          guard: 3,
+          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3 }],
+          unranked: [],
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: "Boards" }));
+    const board = screen.getByRole("region", { name: "Boards" });
+    await user.click(within(board).getByRole("tab", { name: "7d" }));
+
+    expect(await within(board).findByRole("alert")).toHaveTextContent(/couldn.t load this trend/i);
+    expect(within(board).queryByText(/no one has cleared the ranking guard yet/i)).toBeNull();
+
+    await user.click(within(board).getByRole("button", { name: /retry/i }));
+
+    expect(await within(board).findByText(/vijay/i)).toBeVisible();
+    expect(within(board).queryByRole("alert")).toBeNull();
+  });
 });
 
 function dailyChallenge(
@@ -3756,9 +3856,18 @@ function createFetchMock(options?: {
   boardsTrendsByWindow?: Record<string, {
     window: string;
     guard: number;
-    ranked: Array<{ accountId: string; displayName: string | null; avgPlacement: number; playedCount: number }>;
+    ranked: Array<{
+      accountId: string;
+      displayName: string | null;
+      avgPlacement: number;
+      playedCount: number;
+      prevAvgPlacement?: number | null;
+    }>;
     unranked: Array<{ accountId: string; displayName: string | null; playedCount: number }>;
   }>;
+  // F6: fails the very next `/api/v2/boards/trends` fetch once, then
+  // succeeds normally (including on a manual Retry).
+  boardsTrendsFailOnce?: boolean;
   leaderboardContext?: { isPersonalBest: boolean; rank: number | null };
   statsUnauthorizedAfterFirst?: boolean;
   creationOutcome?: CreateChallengeOutcome;
@@ -3780,6 +3889,7 @@ function createFetchMock(options?: {
   let unauthorizedCreateRemaining = options?.createUnauthorizedOnce ? 1 : 0;
   let abandonFailuresRemaining = options?.abandonFailsOnce ? 2 : 0;
   let unauthorizedAbandonRemaining = options?.abandonUnauthorizedOnce ? 1 : 0;
+  let boardsTrendsFailRemaining = options?.boardsTrendsFailOnce ? 1 : 0;
   let statsReads = 0;
   let challenges: Challenge[] = options?.challenges ?? [
     {
@@ -3944,6 +4054,10 @@ function createFetchMock(options?: {
     }
 
     if (url.startsWith("/api/v2/boards/trends")) {
+      if (boardsTrendsFailRemaining > 0) {
+        boardsTrendsFailRemaining -= 1;
+        return jsonError("boards_trends_failed", "Could not load trends.", 500);
+      }
       const window = new URL(requestUrl).searchParams.get("window") ?? "7";
       const fixture = options?.boardsTrendsByWindow?.[window];
       return jsonResponse(fixture ?? {

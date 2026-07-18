@@ -688,22 +688,73 @@ describe("api handlers", () => {
     });
   });
 
-  it("composes Boards' rolling-trend response, echoing the validated window and its guard", async () => {
+  it("composes Boards' rolling-trend response, echoing the validated window/guard and each ranked row's prevAvgPlacement", async () => {
     const repository = fakeRepository();
-    const listDailyTrends = vi.fn(async () => ({
-      ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3 }],
-      unranked: [{ accountId: "acc-2", displayName: null, playedCount: 1 }],
-    }));
+    // F3: apiHandlers derives `prevAvgPlacement` from a *second*
+    // `listDailyTrends` call over the immediately-preceding same-length
+    // window - this mock returns a different fixture keyed off which
+    // window it was asked for.
+    const listDailyTrends = vi.fn(async (_windowDays: 7 | 30 | null, todayCentral: string) => {
+      if (todayCentral === "2026-07-18") {
+        return {
+          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3 }],
+          unranked: [{ accountId: "acc-2", displayName: null, playedCount: 1 }],
+        };
+      }
+      return {
+        ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 2.1, playedCount: 4 }],
+        unranked: [],
+      };
+    });
     Object.assign(repository, { listDailyTrends });
     const handlers = createApiHandlers(repository);
 
     await expect(handlers.getBoardsTrends("7", "2026-07-18")).resolves.toEqual({
       window: "7",
       guard: 3,
-      ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3 }],
+      ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3, prevAvgPlacement: 2.1 }],
       unranked: [{ accountId: "acc-2", displayName: null, playedCount: 1 }],
     });
+    // 7d's previous window ends at t-7 (dailyTrendPreviousWindowEnd) -
+    // [t-13,t-7], per spec.
     expect(listDailyTrends).toHaveBeenCalledWith(7, "2026-07-18");
+    expect(listDailyTrends).toHaveBeenCalledWith(7, "2026-07-11");
+    expect(listDailyTrends).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives a null prevAvgPlacement for a ranked account that was unranked/absent in the previous window", async () => {
+    const repository = fakeRepository();
+    const listDailyTrends = vi.fn(async (_windowDays: 7 | 30 | null, todayCentral: string) => {
+      if (todayCentral === "2026-07-18") {
+        return {
+          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3 }],
+          unranked: [],
+        };
+      }
+      return { ranked: [], unranked: [{ accountId: "acc-1", displayName: "Vijay", playedCount: 1 }] };
+    });
+    Object.assign(repository, { listDailyTrends });
+    const handlers = createApiHandlers(repository);
+
+    await expect(handlers.getBoardsTrends("7", "2026-07-18")).resolves.toMatchObject({
+      ranked: [{ accountId: "acc-1", prevAvgPlacement: null }],
+    });
+  });
+
+  it("never derives a previous window for lifetime - every ranked row's prevAvgPlacement is null (spec: no arrow on lifetime)", async () => {
+    const repository = fakeRepository();
+    const listDailyTrends = vi.fn(async () => ({
+      ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 12 }],
+      unranked: [],
+    }));
+    Object.assign(repository, { listDailyTrends });
+    const handlers = createApiHandlers(repository);
+
+    await expect(handlers.getBoardsTrends("lifetime", "2026-07-18")).resolves.toMatchObject({
+      ranked: [{ accountId: "acc-1", prevAvgPlacement: null }],
+    });
+    expect(listDailyTrends).toHaveBeenCalledTimes(1);
+    expect(listDailyTrends).toHaveBeenCalledWith(null, "2026-07-18");
   });
 
   it("maps window=30 to a guard of 10 and window=lifetime to a null windowDays", async () => {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import BoardSnippet from "../components/BoardSnippet";
 import { dailyDateForChallenge, previousCentralDate } from "../domain/challengeSelection";
 import { dailyFlavorLabel } from "../domain/dailyEditorial";
+import { dailyTrendGuard } from "../domain/dailyTrends";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { AccountStats, Challenge, RankedLeaderboardRow } from "../domain/types";
 import { ShareResultButton } from "../race/shared";
@@ -253,26 +254,31 @@ export default function Home({
  * Home's guarded streak/avg-placement chip (Increment 4, UX redesign spec:
  * "slim stats row: 🔥 streak · '30-day avg #2.4 (26 dailies)'"; post-play:
  * "streak/trend row (inherits the Boards §7d/30d participation guard)").
- * The streak piece is omitted entirely at 0 (spec: "(omit when 0)"); the
- * trend piece only ever shows once `trend30.ranked` is true - an unranked
- * account still gets a `playedCount`, but this row isn't where that
- * "N/{guard} dailies" progress copy lives (that's Boards' own unranked
- * section) - Home just stays silent on the trend half until there's a real
- * number to show, per the spec's "muted/hidden until the account clears the
- * ranking threshold."
+ * The streak piece is omitted entirely at 0 (spec: "(omit when 0)").
+ *
+ * F4 (council acceptance): a below-guard trend no longer goes silent - it
+ * shows the same muted "M/{guard} dailies" progress framing Boards' own
+ * unranked section uses, so a below-guard account still sees *something*
+ * moving instead of a chip that just isn't there. `dailyTrendGuard(30)` is
+ * a fixed constant (always 10; see `dailyTrendGuard`), not a value that
+ * could drift from a server-side number, so hardcoding it here doesn't
+ * reintroduce the guard-re-derivation problem F5 fixes on Boards (which
+ * has to pick between 3/10/10 depending on the selected window).
+ * The whole row still disappears when there's truly nothing to show yet -
+ * no streak and zero dailies played, ever (a brand-new account).
  */
 function StreakTrendRow({ stats }: { stats: AccountStats | null }) {
   if (!stats) return null;
   const { dailyStreak, trend30 } = stats;
-  if (dailyStreak <= 0 && !trend30.ranked) return null;
+  if (dailyStreak <= 0 && !trend30.ranked && trend30.playedCount === 0) return null;
 
   return (
     <p className="home-streak-trend-row muted">
       {dailyStreak > 0 ? `🔥 ${dailyStreak}-day streak` : null}
-      {dailyStreak > 0 && trend30.ranked ? " · " : null}
+      {dailyStreak > 0 ? " · " : null}
       {trend30.ranked
         ? `30-day avg #${trend30.avgPlacement?.toFixed(1)} (${trend30.playedCount} dailies)`
-        : null}
+        : `${trend30.playedCount}/${dailyTrendGuard(30)} dailies`}
     </p>
   );
 }
