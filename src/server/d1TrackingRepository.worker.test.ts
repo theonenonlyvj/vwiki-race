@@ -5007,6 +5007,90 @@ describe("POST /api/v2/challenges/random", () => {
     expect(response.status).toBe(429);
     await expect(response.json()).resolves.toMatchObject({ error: { code: "random_challenge_rate_limited" } });
   });
+
+  it("enforces a separate global/IP rate limiter binding, leaving the per-account limiter untouched", async () => {
+    const { repository } = fixture();
+    const worker = randomChallengeWorker(repository, vi.fn(async () => randomCandidate()));
+    const accountLimiter = vi.fn(async () => ({ success: true }));
+    const env = {
+      ...workerEnv(),
+      RANDOM_CHALLENGE_IP_RATE_LIMITER: { limit: async () => ({ success: false }) },
+      RANDOM_CHALLENGE_RATE_LIMITER: { limit: accountLimiter },
+    };
+
+    const response = await worker.fetch(new Request("https://worker.example/api/v2/challenges/random", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer test",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "ip-burst-1",
+        "CF-Connecting-IP": "203.0.113.9",
+      },
+      body: JSON.stringify({}),
+    }), env);
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("60");
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "random_challenge_ip_rate_limited" },
+    });
+    expect(accountLimiter).not.toHaveBeenCalled();
+  });
+
+  it("proceeds when the global/IP rate limiter binding is absent (fail-open)", async () => {
+    const { repository } = fixture();
+    const worker = randomChallengeWorker(repository, vi.fn(async () => randomCandidate()));
+    const env = workerEnv();
+    expect((env as Record<string, unknown>).RANDOM_CHALLENGE_IP_RATE_LIMITER).toBeUndefined();
+
+    const response = await worker.fetch(new Request("https://worker.example/api/v2/challenges/random", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer test",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "ip-absent-1",
+        "CF-Connecting-IP": "203.0.113.9",
+      },
+      body: JSON.stringify({}),
+    }), env);
+
+    expect(response.status).toBe(200);
+  });
+
+  it("enforces the global/IP ceiling before the per-account burst guard", async () => {
+    const { repository } = fixture();
+    const worker = randomChallengeWorker(repository, vi.fn(async () => randomCandidate()));
+    const callOrder: string[] = [];
+    const env = {
+      ...workerEnv(),
+      RANDOM_CHALLENGE_IP_RATE_LIMITER: {
+        limit: async () => {
+          callOrder.push("ip");
+          return { success: true };
+        },
+      },
+      RANDOM_CHALLENGE_RATE_LIMITER: {
+        limit: async () => {
+          callOrder.push("account");
+          return { success: true };
+        },
+      },
+    };
+
+    const response = await worker.fetch(new Request("https://worker.example/api/v2/challenges/random", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer test",
+        "Content-Type": "application/json",
+        "Idempotency-Key": "ip-order-1",
+        "CF-Connecting-IP": "203.0.113.9",
+      },
+      body: JSON.stringify({}),
+    }), env);
+
+    expect(response.status).toBe(200);
+    expect(callOrder).toEqual(["ip", "account"]);
+  });
 });
 
 function fixture(

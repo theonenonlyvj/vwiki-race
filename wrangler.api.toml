@@ -64,3 +64,8 @@ simple = { limit = 6, period = 60 }
 name = "RANDOM_CHALLENGE_RATE_LIMITER"
 namespace_id = "51008"
 simple = { limit = 1, period = 60 }
+
+[[ratelimits]]
+name = "RANDOM_CHALLENGE_IP_RATE_LIMITER"
+namespace_id = "51009"
+simple = { limit = 2, period = 60 }

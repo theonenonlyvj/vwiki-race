@@ -48,6 +48,15 @@ export interface Env {
    * binding's presence.
    */
   RANDOM_CHALLENGE_RATE_LIMITER?: RateLimiter;
+  /**
+   * Increment 5 spec: "a conservative global/IP ceiling" on
+   * `POST /api/v2/challenges/random`, separate from and enforced before the
+   * per-account burst guard above - closes the ghost-farm gap where an
+   * attacker mints many fresh guest accounts from one IP to bypass
+   * per-account limits. Optional/fail-open when absent, same pattern as the
+   * other CF binding-backed limiters.
+   */
+  RANDOM_CHALLENGE_IP_RATE_LIMITER?: RateLimiter;
 }
 
 type AuthorizedVGamesAccount = AuthorizedAccount;
@@ -311,6 +320,7 @@ async function dispatchV2(
   }
   if (request.method === "POST" && url.pathname === "/api/v2/challenges/random") {
     const account = await tracking.authorize(request);
+    await enforceRandomChallengeIpRateLimit(env, request);
     await enforceRandomChallengeRateLimit(env, account.accountId);
     requireEmptyObject(await readJson(request));
     return json(
@@ -1239,6 +1249,34 @@ async function enforceChallengeCreateRateLimit(
     throw new ApiError(
       "challenge_create_rate_limited",
       "Too many challenge validation requests. Try again shortly.",
+      429,
+      60,
+    );
+  }
+}
+
+/**
+ * Global/IP ceiling for `POST /api/v2/challenges/random` (spec: "a
+ * conservative global/IP ceiling"), separate from and enforced BEFORE the
+ * per-account burst guard below. The per-account limiter alone doesn't stop
+ * a ghost farm: an attacker can mint many fresh guest accounts from one IP,
+ * each with its own untouched per-account quota, and still drive ~10
+ * 25-second Wikipedia crawls a minute from a single machine. Keying on
+ * CF-Connecting-IP catches that regardless of how many accounts are behind
+ * it. Optional/fail-open when the binding is absent, same pattern as the
+ * other CF binding-backed limiters.
+ */
+async function enforceRandomChallengeIpRateLimit(
+  env: Env,
+  request: Request,
+): Promise<void> {
+  if (!env.RANDOM_CHALLENGE_IP_RATE_LIMITER) return;
+  const key = request.headers.get("CF-Connecting-IP") ?? "unknown-client";
+  const result = await env.RANDOM_CHALLENGE_IP_RATE_LIMITER.limit({ key });
+  if (!result.success) {
+    throw new ApiError(
+      "random_challenge_ip_rate_limited",
+      "Too many random challenge requests from this network. Try again shortly.",
       429,
       60,
     );
