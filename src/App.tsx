@@ -3,11 +3,10 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
   type RefObject,
-  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
 } from "react";
+import ModalDialog from "./components/ModalDialog";
 import { getSortedChallenges } from "./domain/challenges";
 import {
   centralDateKey,
@@ -42,10 +41,7 @@ import {
 } from "./services/urlRouting";
 import { createWikipediaGateway } from "./services/wikipediaGateway";
 import { useRaceController } from "./hooks/useRaceController";
-import {
-  type TargetPreviewState,
-  useTargetPreview,
-} from "./hooks/useTargetPreview";
+import { useTargetPreview } from "./hooks/useTargetPreview";
 import RaceFlow, { type DnfResultSnapshot } from "./race/RaceFlow";
 import AppShell, { type ChallengesView, type ModeKey } from "./modes/AppShell";
 import type { CreateChallengeInput } from "./modes/challenges/Browse";
@@ -173,6 +169,24 @@ export default function App({
   const [runNotice, setRunNotice] = useState<string | null>(null);
   const [dnfResult, setDnfResult] = useState<DnfResultSnapshot | null>(null);
   const [catalogLoadFailed, setCatalogLoadFailed] = useState(false);
+  // Bumped after every run-ending event (completed or abandoned) to force a
+  // fresh account-stats read - the app-shell teaching gate (migration note
+  // iii) and Results' first-finish ritual hook both need up-to-date
+  // totals.completed, not whatever was cached before this run. See the
+  // account-stats effect below, which now fetches proactively (any
+  // identified session, not just while "You" is open) for this reason.
+  const [statsRefreshVersion, setStatsRefreshVersion] = useState(0);
+  // Local, session-only memory of "ended a run for this challenge" (any
+  // click count) - Home's DNF sub-state (spec: "attempted-not-finished" =
+  // "a DNF row (>=1 click) or an end-run this session"). A 0-click abandon
+  // never produces a leaderboard row at all, so this is the only way Home
+  // can reflect that acknowledgment without a new server endpoint. Reset
+  // only by a full reload (deliberately not persisted - it's "this
+  // session's" memory, distinct from the teaching gate, which must never
+  // read device-local state).
+  const [sessionDnfChallengeIds, setSessionDnfChallengeIds] = useState<
+    ReadonlySet<string>
+  >(new Set());
   const identityTrigger = useRef<HTMLElement | null>(null);
   const endRunTrigger = useRef<HTMLElement | null>(null);
   const requestedPaths = useRef(new Set<string>());
@@ -485,8 +499,16 @@ export default function App({
     return () => window.removeEventListener("popstate", onPopState);
   }, [challengeIsLocked, challenges, race.challenge, race.recoveryRun, selectedChallengeId]);
 
+  // Account stats are fetched proactively for ANY identified session - not
+  // gated on "You" being open - because the app-shell teaching gate
+  // (migration note iii) and Results' first-finish ritual hook both need
+  // totals.completed on Home/Detail/Results, which are usually visited long
+  // before "You" ever is. `statsRefreshVersion` (bumped after every
+  // run-ending event) keeps this fresh across a session without needing the
+  // player to revisit "You" - see followArticleLink/retryPendingClick/
+  // confirmEndRun below.
   useEffect(() => {
-    if (mode !== "you" || !identitySession) return;
+    if (!identitySession) return;
     const token = identitySession.token;
     const request = ++statsRequest.current;
     setAccountStatsProjection({ token, stats: null });
@@ -507,7 +529,7 @@ export default function App({
     return () => {
       if (request === statsRequest.current) statsRequest.current += 1;
     };
-  }, [mode, apiClient, identitySession]);
+  }, [apiClient, identitySession, statsRefreshVersion]);
 
   async function refreshLeaderboard(challengeId: string) {
     const request = ++leaderboardRequest.current;
@@ -525,15 +547,16 @@ export default function App({
     }
   }
 
-  // Used by Home's and Browse's shared ChallengeBrowser mount - both keep
-  // today's exact "select and land on Home" behavior; see that component's
-  // file comment.
-  async function selectChallenge(challengeId: string) {
+  // Plan-drift fix: Browse's cards now open Challenge Detail directly (spec
+  // IA) instead of selecting and landing back on Home - Detail's own "Race
+  // this" is the race entry point from there.
+  async function openChallengeDetail(challengeId: string) {
     if (challengeLockRef.current) return;
     race.resetCompleted();
     setSelectedChallengeId(challengeId);
     syncChallengeUrl(challengeId);
-    setMode("home");
+    setMode("challenges");
+    setChallengesView("detail");
     setError(null);
     setRunNotice(null);
     try {
@@ -543,9 +566,33 @@ export default function App({
     }
   }
 
+  // Home's DAILY hero and Challenge Detail's "Race this" both resolve here:
+  // select the target challenge and open the pre-race preview in one shot,
+  // rather than relying on `selectedChallenge` already matching (Home's
+  // hero specifically targets today's daily, which is often not whatever
+  // challenge was last browsed elsewhere in the app). Named distinctly from
+  // RaceFlow's own `raceChallenge` prop (the currently in-flight challenge)
+  // to avoid confusion between the two.
+  function openRacePreviewFor(challengeId: string) {
+    if (challengeLockRef.current) return;
+    if (!challenges.some((item) => item.id === challengeId)) return;
+    setSelectedChallengeId(challengeId);
+    syncChallengeUrl(challengeId);
+    setRaceStage("preview");
+  }
+
+  // Home's "yesterday's results" card ("see full board ›") - switches
+  // Boards' own selection to that specific daily before navigating, so
+  // Boards never shows a stale/unrelated challenge's board.
+  function goToBoardsFor(challengeId: string) {
+    void selectChallengeForBoards(challengeId);
+    setMode("boards");
+  }
+
   // Boards v0's own selector (spec: "challenge-scoped board with its
-  // selector") - unlike selectChallenge above, this stays on Boards rather
-  // than jumping to Home, since Boards is now a standalone destination.
+  // selector") - unlike openChallengeDetail above, this stays on Boards
+  // rather than jumping to Detail, since Boards is now a standalone
+  // destination.
   async function selectChallengeForBoards(challengeId: string) {
     if (challengeLockRef.current) return;
     setSelectedChallengeId(challengeId);
@@ -616,7 +663,12 @@ export default function App({
         setSelectedChallengeId(challenge.id);
         syncChallengeUrl(challenge.id);
         setLeaderboardProjection({ challengeId: challenge.id, rows: [] });
-        setMode("home");
+        // Plan-drift fix (consistent with Browse's card->Detail change): a
+        // freshly created/found challenge lands on its own Detail, not Home
+        // - Home's hero is always today's daily and would otherwise show no
+        // trace of what was just created.
+        setMode("challenges");
+        setChallengesView("detail");
       }
       setRunNotice(createChallengeNotice(outcome));
       if (!challengeLockRef.current) {
@@ -634,11 +686,6 @@ export default function App({
       setError(errorMessage(caught, "Could not create that challenge."));
       throw caught;
     }
-  }
-
-  function openRacePreview() {
-    if (!selectedChallenge) return;
-    setRaceStage("preview");
   }
 
   function exitRaceFlow(nextMode: ModeKey) {
@@ -906,7 +953,10 @@ export default function App({
       clearStaleIdentity({ type: "retry-click" });
       return;
     }
-    if (outcome.status === "completed") await refreshLeaderboard(outcome.challengeId);
+    if (outcome.status === "completed") {
+      await refreshLeaderboard(outcome.challengeId);
+      bumpStatsRefresh();
+    }
   }
 
   async function retryPendingClick(
@@ -921,7 +971,25 @@ export default function App({
       clearStaleIdentity({ type: "retry-click" });
       return;
     }
-    if (outcome.status === "completed") await refreshLeaderboard(outcome.challengeId);
+    if (outcome.status === "completed") {
+      await refreshLeaderboard(outcome.challengeId);
+      bumpStatsRefresh();
+    }
+  }
+
+  // Forces the account-stats effect above to refetch - see its comment for
+  // why this needs to reach further than just the "You" tab.
+  function bumpStatsRefresh() {
+    setStatsRefreshVersion((version) => version + 1);
+  }
+
+  function markSessionDnf(challengeId: string) {
+    setSessionDnfChallengeIds((current) => {
+      if (current.has(challengeId)) return current;
+      const next = new Set(current);
+      next.add(challengeId);
+      return next;
+    });
   }
 
   async function retryRecovery() {
@@ -980,9 +1048,20 @@ export default function App({
           ? "Run ended. Your DNF and path were saved."
           : "Run ended. The attempt was saved to your stats.");
       }
+      // Home's DNF sub-state (spec: "an end-run this session") - a 0-click
+      // abandon leaves no leaderboard row at all, so this is local memory of
+      // it, not a server read. Harmless to also record clicked DNFs here;
+      // Home's own leaderboard row check already covers those independently.
+      // Recovery's "End Old Run" is excluded (matches dnfSnapshot's own
+      // guard above) - it's a stale/legacy run being cleared out, not "the
+      // account tried and gave up on today's daily this session."
+      if (endedChallengeId && !isRecoveryEnd) {
+        markSessionDnf(endedChallengeId);
+      }
       if (endedChallengeId) {
         await refreshLeaderboard(endedChallengeId);
       }
+      bumpStatsRefresh();
     } else if (outcome.status === "completed") {
       setEndConfirmationOpen(false);
       setDnfResult(null);
@@ -990,6 +1069,7 @@ export default function App({
       if (endedChallengeId) {
         await refreshLeaderboard(endedChallengeId);
       }
+      bumpStatsRefresh();
     } else if (outcome.status === "unauthorized") {
       clearStaleIdentity({ type: "end-run" });
       setEndConfirmationOpen(false);
@@ -1058,6 +1138,7 @@ export default function App({
           todayCentral={currentCentralDate}
           identityStatus={identitySession?.status ?? null}
           identityDisplayName={identitySession?.displayName ?? ""}
+          accountStats={accountStats}
           error={bannerError}
           authBusy={authBusy}
           endRunIsBlocked={endRunIsBlocked}
@@ -1094,15 +1175,16 @@ export default function App({
           onCreateChallenge={createChallenge}
           onDisclosePath={(runId) => void loadRunPath(runId)}
           onExitAdmin={exitAdmin}
-          onSelectChallenge={(challengeId) => void selectChallenge(challengeId)}
+          onGoToBoardsFor={goToBoardsFor}
+          onOpenChallengeDetail={(challengeId) => void openChallengeDetail(challengeId)}
+          onRaceChallenge={openRacePreviewFor}
           onSelectChallengeForBoards={(challengeId) => void selectChallengeForBoards(challengeId)}
           onSelectMode={selectMode}
-          onStartChallenge={openRacePreview}
           previewWikipediaGateway={previewWikipediaGateway}
           runPaths={runPaths}
           selectedChallenge={selectedChallenge}
           selectionLocked={challengeIsLocked}
-          targetPreview={targetPreview}
+          sessionDnfChallengeIds={sessionDnfChallengeIds}
           todayCentral={currentCentralDate}
         />
       )}
@@ -1409,101 +1491,6 @@ function IdentityPrompt({
         ) : null}
     </ModalDialog>
   );
-}
-
-function ModalDialog({
-  busy = false,
-  children,
-  className,
-  onClose,
-  returnFocusRef,
-  titleId,
-}: {
-  busy?: boolean;
-  children: ReactNode;
-  className: string;
-  onClose: () => void;
-  returnFocusRef: RefObject<HTMLElement | null>;
-  titleId: string;
-}) {
-  const dialogRef = useRef<HTMLElement>(null);
-  const focusCycle = useRef(0);
-
-  useEffect(() => {
-    const cycle = ++focusCycle.current;
-    const activeElement = document.activeElement;
-    if (!(activeElement instanceof HTMLElement && dialogRef.current?.contains(activeElement))) {
-      const first = focusableElements(dialogRef.current)[0];
-      (first ?? dialogRef.current)?.focus();
-    }
-    return () => {
-      queueMicrotask(() => {
-        if (focusCycle.current === cycle && returnFocusRef.current?.isConnected) {
-          returnFocusRef.current.focus();
-        }
-      });
-    };
-  }, [returnFocusRef]);
-
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, []);
-
-  function close() {
-    if (busy) return;
-    onClose();
-  }
-
-  function handleKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const focusable = focusableElements(dialogRef.current);
-    if (focusable.length === 0) {
-      event.preventDefault();
-      dialogRef.current?.focus();
-      return;
-    }
-    const first = focusable[0];
-    const last = focusable.at(-1);
-    if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) {
-      event.preventDefault();
-      last?.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first?.focus();
-    }
-  }
-
-  return (
-    <div className="modal-backdrop" role="presentation">
-      <section
-        aria-labelledby={titleId}
-        aria-modal="true"
-        className={className}
-        onKeyDown={handleKeyDown}
-        ref={dialogRef}
-        role="dialog"
-        tabIndex={-1}
-      >
-        {children}
-      </section>
-    </div>
-  );
-}
-
-function focusableElements(container: HTMLElement | null): HTMLElement[] {
-  if (!container) return [];
-  return Array.from(container.querySelectorAll<HTMLElement>(
-    "button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex='-1'])",
-  ));
 }
 
 function createChallengeNotice(outcome: CreateChallengeOutcome): string {

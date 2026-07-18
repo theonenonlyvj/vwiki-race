@@ -1,9 +1,11 @@
 import { useCallback, useRef, type FocusEvent, type MouseEvent, type PointerEvent } from "react";
+import BoardSnippet from "../components/BoardSnippet";
 import { dailyDateForChallenge } from "../domain/challengeSelection";
 import { compressPathForStrip } from "../domain/pathCompression";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { GameSession } from "../domain/gameSession";
 import type {
+  AccountStats,
   Article,
   Challenge,
   LeaderboardContext,
@@ -11,7 +13,7 @@ import type {
 } from "../domain/types";
 import type { VGamesIdentityStatus } from "../services/vgamesIdentity";
 import { WikipediaArticlePanel } from "./RaceMode";
-import { challengeShareUrl, useClipboardShare } from "./shared";
+import { ShareResultButton } from "./shared";
 
 /**
  * Beat 3 of the race flow: Results. Two outcomes share this screen -
@@ -48,6 +50,7 @@ export default function RaceResults({
   todayCentral,
   identityStatus,
   identityDisplayName,
+  accountStats,
   playAgainDisabled,
   playAnotherSuggestion,
   onPlayAgain,
@@ -66,6 +69,11 @@ export default function RaceResults({
   todayCentral: string;
   identityStatus: VGamesIdentityStatus | null;
   identityDisplayName: string;
+  // Ritual hook (spec Race flow beat 3): "the account's first finish of any
+  // kind - not daily-specific - adds... 'come defend your spot'." Wired from
+  // the same getAccountStats source as the app-shell teaching gate - see
+  // showFirstFinishRitual below.
+  accountStats: AccountStats | null;
   playAgainDisabled: boolean;
   playAnotherSuggestion?: PlayAnotherSuggestion | null;
   onPlayAgain: () => void;
@@ -98,6 +106,13 @@ export default function RaceResults({
   // actually today's daily - anything else (an older daily, a custom
   // challenge) gets the generic "on this board"/"Leaderboard" copy instead.
   const isDailyToday = dailyDateForChallenge(challenge) === todayCentral;
+  // Ritual hook (spec beat 3): fires only on the account's literal first-ever
+  // completed race. A completion always increments totals.completed by
+  // exactly one server-side before this screen can read fresh stats, so
+  // "now reads exactly 1" *is* "just transitioned 0 -> 1" - no separate
+  // before/after snapshot needed.
+  const showFirstFinishRitual = outcome.status === "completed" &&
+    accountStats?.totals.completed === 1;
 
   return (
     <section className="race-results">
@@ -107,6 +122,12 @@ export default function RaceResults({
         ) : (
           <DnfResultHeader clicks={outcome.clicks} elapsedMs={outcome.elapsedMs} />
         )}
+
+        {showFirstFinishRitual ? (
+          <p className="ritual-hook" role="status">
+            🔥 Day 1 · New daily drops 5:00 AM — come defend your spot
+          </p>
+        ) : null}
 
         <div className="result-actions">
           <button
@@ -126,7 +147,7 @@ export default function RaceResults({
         ) : null}
 
         <BoardSnippet
-          isDailyToday={isDailyToday}
+          title={isDailyToday ? "Today's board" : "Leaderboard"}
           leaderboard={leaderboard}
           highlightRunId={outcome.runId}
         />
@@ -144,7 +165,12 @@ export default function RaceResults({
                 onClaimIdentity={onClaimIdentity}
               />
             ) : null}
-            <ShareResultButton challenge={challenge} outcome={outcome} />
+            <ShareResultButton
+              challenge={challenge}
+              elapsedMs={outcome.elapsedMs}
+              clicks={outcome.session.clicks}
+              rank={outcome.leaderboardContext?.rank ?? null}
+            />
           </>
         ) : null}
       </aside>
@@ -222,56 +248,6 @@ function PathRecap({ session }: { session: GameSession }) {
   );
 }
 
-function BoardSnippet({
-  isDailyToday,
-  leaderboard,
-  highlightRunId,
-}: {
-  isDailyToday: boolean;
-  leaderboard: RankedLeaderboardRow[];
-  highlightRunId: string | null;
-}) {
-  const boardLabel = isDailyToday ? "Today's board" : "Leaderboard";
-
-  if (leaderboard.length === 0) {
-    return (
-      <section aria-label={boardLabel} className="board-snippet">
-        <h3>{boardLabel}</h3>
-        <p className="muted">No completed runs yet.</p>
-      </section>
-    );
-  }
-
-  const top3 = leaderboard.slice(0, 3);
-  const highlightedRow = highlightRunId
-    ? leaderboard.find((row) => row.runId === highlightRunId) ?? null
-    : null;
-  const highlightedInTop3 = Boolean(highlightedRow) &&
-    top3.some((row) => row.runId === highlightedRow?.runId);
-  const visibleRows = highlightedRow && !highlightedInTop3 ? [...top3, highlightedRow] : top3;
-
-  return (
-    <section aria-label={boardLabel} className="board-snippet">
-      <h3>{boardLabel}</h3>
-      <ol>
-        {visibleRows.map((row) => {
-          const isYou = row.runId === highlightRunId;
-          return (
-            <li className={isYou ? "is-you" : undefined} key={row.runId}>
-              <span className="rank">{row.status === "abandoned" ? "DNF" : `#${row.rank}`}</span>
-              <span>
-                {row.displayName}
-                {isYou ? <span className="muted"> (you)</span> : null}
-              </span>
-              <span>{formatTimeAndClicks(row.elapsedMs, row.clickCount)}</span>
-            </li>
-          );
-        })}
-      </ol>
-    </section>
-  );
-}
-
 function PlayAnotherSlot({
   onBrowseChallenges,
   suggestion,
@@ -320,59 +296,3 @@ function ClaimCta({
   );
 }
 
-function ShareResultButton({
-  challenge,
-  outcome,
-}: {
-  challenge: Challenge;
-  outcome: Extract<RaceResultOutcome, { status: "completed" }>;
-}) {
-  const shareText = composeShareText(challenge, outcome);
-  const { status, copy } = useClipboardShare(shareText);
-
-  return (
-    <div className="share-result">
-      <button
-        disabled={status === "copying"}
-        type="button"
-        onClick={() => void copy()}
-      >
-        Share result
-      </button>
-      {status !== "idle" ? (
-        <span aria-live="polite" role="status">
-          {status === "copying"
-            ? "Copying result..."
-            : status === "copied"
-              ? "Result copied. Paste it anywhere."
-              : "Automatic copy was blocked. Select the text below."}
-        </span>
-      ) : null}
-      {status === "failed" ? (
-        <input
-          aria-label="Share text"
-          onFocus={(event) => event.currentTarget.select()}
-          readOnly
-          value={shareText}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * One-line, real-data share text (no fabricated "daily #N" - the catalog
- * has no such field yet). Always carries time+clicks (invariant 1) when
- * ranked; falls back gracefully when the server didn't return a rank.
- */
-export function composeShareText(
-  challenge: Challenge,
-  outcome: Extract<RaceResultOutcome, { status: "completed" }>,
-): string {
-  const label = challenge.label ?? challenge.id;
-  const rank = outcome.leaderboardContext?.rank ?? null;
-  const scoreLine = rank !== null
-    ? `#${rank} · ${formatTimeAndClicks(outcome.elapsedMs, outcome.session.clicks)}`
-    : formatTimeAndClicks(outcome.elapsedMs, outcome.session.clicks);
-  return `VWiki Race — ${label} — ${scoreLine} — ${challengeShareUrl(challenge.id)}`;
-}

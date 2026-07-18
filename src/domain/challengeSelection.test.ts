@@ -4,6 +4,7 @@ import type { Challenge } from "./types";
 import {
   centralDateKey,
   dailyBadgeLabel,
+  previousCentralDate,
   selectDefaultChallenge,
 } from "./challengeSelection";
 
@@ -104,6 +105,20 @@ describe("default challenge selection", () => {
       requestedChallengeId: "challenge-0001",
       todayUtc: "2026-07-15",
     })?.id).toBe("challenge-0002");
+  });
+});
+
+describe("previousCentralDate", () => {
+  it("walks the calendar back one day", () => {
+    expect(previousCentralDate("2026-07-15")).toBe("2026-07-14");
+  });
+
+  it("carries across a month boundary", () => {
+    expect(previousCentralDate("2026-08-01")).toBe("2026-07-31");
+  });
+
+  it("carries across a year boundary", () => {
+    expect(previousCentralDate("2026-01-01")).toBe("2025-12-31");
   });
 });
 

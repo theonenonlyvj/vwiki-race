@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { extractArticlePreview } from "../domain/articlePreview";
+import { dailyFlavorLabel } from "../domain/dailyEditorial";
 import type {
   DailyFlavor,
   DailyNomination,
@@ -275,8 +276,8 @@ export default function AdminDailies({ apiClient, challenges, previewGateway, to
               {DAILY_FLAVORS.map((flavor) => {
                 const entries = queuedEntries.filter((entry) => entry.flavor === flavor);
                 return (
-                  <section aria-label={`${flavorLabel(flavor)} queue`} className="daily-queue-group" key={flavor} role="region">
-                    <h4>{flavorLabel(flavor)}</h4>
+                  <section aria-label={`${dailyFlavorLabel(flavor)} queue`} className="daily-queue-group" key={flavor} role="region">
+                    <h4>{dailyFlavorLabel(flavor)}</h4>
                     {entries.length === 0 ? (
                       <p className="daily-admin-empty">No queued challenges.</p>
                     ) : (
@@ -376,7 +377,7 @@ function FlavorSegmentedControl({
           onClick={() => onChange(flavor)}
           type="button"
         >
-          {flavorLabel(flavor)}
+          {dailyFlavorLabel(flavor)}
         </button>
       ))}
     </div>
@@ -389,10 +390,6 @@ function replaceQueueEntry(entries: DailyQueueEntry[], entry: DailyQueueEntry): 
 
 function formatScore(value: number | null): string {
   return value === null ? "-" : String(value);
-}
-
-function flavorLabel(flavor: DailyFlavor): string {
-  return `${flavor.slice(0, 1).toUpperCase()}${flavor.slice(1)}`;
 }
 
 function errorMessage(caught: unknown, fallback: string): string {

@@ -11,21 +11,18 @@ export interface CreateChallengeInput {
 /**
  * Challenges/Browse v1 (plan Task 2.3): a verbatim port of App.tsx's old
  * ChallengeBrowser - cards list + create-challenge form - unchanged in
- * behavior. Mounted both as the Challenges mode's own screen (AppShell) and
- * inside Home (the pre-redesign Play/Challenges duplication this increment
- * deliberately preserves; a later increment gives Home its own stateful
- * design and lets this widget become the sole "library" owner). Selecting a
- * card always resolves to the shared `onSelectChallenge` callback the
- * bootstrap wires per-mount - Home's mount keeps you on Home, Browse's mount
- * does the same (both call the same "select and go to Home" handler,
- * matching today's shipped behavior 1:1). Increment 5 gives Browse its own
- * aggregate/state-chip data and a proper detail hand-off.
+ * behavior, except for one plan-drift fix (Increment 2 Task 2): cards now
+ * open Challenge Detail (spec IA) via `onOpenChallenge` instead of
+ * selecting-and-landing-back-on-Home - Detail's own "Race this" is the race
+ * entry point from there. Home no longer embeds this component at all (it
+ * has its own stateful daily hero now); this is Browse's sole mount.
+ * Increment 5 gives Browse its own aggregate/state-chip data.
  */
 export default function ChallengeBrowser({
   canNominateForDaily,
   challenges,
   onCreateChallenge,
-  onSelectChallenge,
+  onOpenChallenge,
   selectionLocked = false,
   selectedChallengeId,
   todayCentral,
@@ -33,7 +30,7 @@ export default function ChallengeBrowser({
   canNominateForDaily: boolean;
   challenges: Challenge[];
   onCreateChallenge: (input: CreateChallengeInput) => Promise<void>;
-  onSelectChallenge: (challengeId: string) => void;
+  onOpenChallenge: (challengeId: string) => void;
   selectionLocked?: boolean;
   selectedChallengeId: string | null;
   todayCentral: string;
@@ -118,7 +115,7 @@ export default function ChallengeBrowser({
               <button
                 aria-pressed={selectedChallengeId === challenge.id}
                 disabled={selectionLocked}
-                onClick={() => onSelectChallenge(challenge.id)}
+                onClick={() => onOpenChallenge(challenge.id)}
                 type="button"
               >
                 <span className="challenge-meta">

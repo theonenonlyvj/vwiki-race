@@ -1,6 +1,12 @@
 import type { MouseEvent, ReactNode } from "react";
 import type { GameSession } from "../domain/gameSession";
-import type { Article, Challenge, LeaderboardContext, RankedLeaderboardRow } from "../domain/types";
+import type {
+  AccountStats,
+  Article,
+  Challenge,
+  LeaderboardContext,
+  RankedLeaderboardRow,
+} from "../domain/types";
 import type { RacePhase } from "../hooks/useRaceController";
 import type { TargetPreviewState } from "../hooks/useTargetPreview";
 import type { VGamesIdentityStatus } from "../services/vgamesIdentity";
@@ -53,6 +59,7 @@ export default function RaceFlow({
   todayCentral,
   identityStatus,
   identityDisplayName,
+  accountStats,
   playAnotherSuggestion,
   error,
   authBusy,
@@ -94,6 +101,7 @@ export default function RaceFlow({
   todayCentral: string;
   identityStatus: VGamesIdentityStatus | null;
   identityDisplayName: string;
+  accountStats: AccountStats | null;
   playAnotherSuggestion?: PlayAnotherSuggestion | null;
   error: string | null;
   authBusy: boolean;
@@ -157,6 +165,7 @@ export default function RaceFlow({
         todayCentral={todayCentral}
         identityStatus={identityStatus}
         identityDisplayName={identityDisplayName}
+        accountStats={accountStats}
         playAgainDisabled={authBusy}
         playAnotherSuggestion={playAnotherSuggestion}
         onPlayAgain={onPlayAgain}
@@ -182,6 +191,7 @@ export default function RaceFlow({
         todayCentral={todayCentral}
         identityStatus={identityStatus}
         identityDisplayName={identityDisplayName}
+        accountStats={accountStats}
         playAgainDisabled={authBusy}
         playAnotherSuggestion={playAnotherSuggestion}
         onPlayAgain={onPlayAgain}

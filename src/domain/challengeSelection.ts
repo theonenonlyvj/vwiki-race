@@ -56,3 +56,18 @@ export function dailyDateForChallenge(challenge: Challenge): string | null {
   if (challenge.dailyFeature) return challenge.dailyFeature.dailyDate;
   return challenge.origin === "daily" ? challenge.dailyDate ?? null : null;
 }
+
+/**
+ * The calendar day immediately before a Central date key (Home's "yesterday's
+ * results" recap card - UX redesign spec, Home §Pre-play). Pure calendar-date
+ * arithmetic on the "YYYY-MM-DD" string itself, not a real-timezone
+ * computation - `dateKey` is already the Central date key produced by
+ * `centralDateKey`, so this only ever needs to walk the calendar back one
+ * day, correctly across month/year boundaries.
+ */
+export function previousCentralDate(dateKey: string): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}

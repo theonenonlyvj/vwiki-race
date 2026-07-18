@@ -1,4 +1,5 @@
 import LeaderboardList from "../../components/LeaderboardList";
+import { dailyBadgeLabel } from "../../domain/challengeSelection";
 import { formatTimeAndClicks } from "../../domain/formatting";
 import type { Challenge, RankedLeaderboardRow, ServerPathStep } from "../../domain/types";
 import { ChallengeShareButton } from "../../race/shared";
@@ -19,6 +20,7 @@ export default function ChallengeDetail({
   onRaceThis,
   raceDisabled,
   runPaths,
+  todayCentral,
 }: {
   challenge: Challenge;
   identityAccountId: string | null;
@@ -28,10 +30,12 @@ export default function ChallengeDetail({
   onRaceThis: () => void;
   raceDisabled: boolean;
   runPaths: Record<string, ServerPathStep[]>;
+  todayCentral: string;
 }) {
   const yourRows = identityAccountId
     ? leaderboard.filter((row) => row.accountId === identityAccountId)
     : [];
+  const dailyBadge = dailyBadgeLabel(challenge, todayCentral);
 
   return (
     <section className="challenge-detail" aria-label="Challenge detail">
@@ -42,6 +46,7 @@ export default function ChallengeDetail({
       <div className="challenge-route" aria-label="Current challenge">
         <div className="challenge-meta">
           <span>{challenge.label ?? challenge.id}</span>
+          {dailyBadge ? <span className="daily-badge">{dailyBadge}</span> : null}
         </div>
         <strong>
           {challenge.start.title} {"->"} {challenge.target.title}

@@ -722,17 +722,59 @@ h1 {
   border-bottom-color: #dffbfb;
 }
 
+/* Home v2 (Increment 2 Task 2 - the stateful daily hub): a single vertical
+   stack of cards (hero, yesterday's-results/today's-board, share, play-
+   another, ritual line), each getting the app's standard bordered-panel
+   look via the child combinator below rather than a `.result-panel`-style
+   nested class, since `.board-snippet`/`.play-another-card`/`.share-result`
+   are shared with Results, where they're sub-sections of one big panel
+   instead. */
 .home-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
   gap: 14px;
-  align-items: start;
 }
 
-.home-target {
-  display: grid;
-  gap: 12px;
-  align-content: start;
+.home-layout > .daily-hero,
+.home-layout > .board-snippet,
+.home-layout > .play-another-card,
+.home-layout > .share-result {
+  border: 1px solid var(--line);
+  background: var(--ink-raised);
+  padding: 16px;
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+
+.daily-hero {
+  border-left: 5px solid var(--coral);
+}
+
+.daily-hero-status {
+  margin: 8px 0 0;
+  font-weight: 850;
+}
+
+.daily-hero-done {
+  color: var(--cyan);
+}
+
+.daily-hero-dnf {
+  color: #ffd7cf;
+}
+
+.route-arrow {
+  color: var(--cyan);
+}
+
+.ritual-line {
+  margin: 0;
+}
+
+.teaching-gate-strip {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--ink-soft);
+  font-family: var(--viota-ui-font);
 }
 
 /* Mode-shell panels new this task: Boards' selector, Challenge Detail, the
@@ -1296,6 +1338,13 @@ h1 {
   margin-top: 2px;
 }
 
+.result-panel .ritual-hook {
+  grid-column: 1 / -1;
+  color: var(--coral);
+  font-weight: 850;
+  margin: 4px 0 0;
+}
+
 .result-actions {
   display: flex;
   grid-column: 1 / -1;
@@ -1462,10 +1511,6 @@ h1 {
   gap: 8px;
   align-items: end;
   margin-top: 12px;
-}
-
-.home-layout .create-challenge-form {
-  grid-template-columns: 1fr;
 }
 
 .create-challenge-form .name-control input {
@@ -1964,7 +2009,6 @@ h1 {
     top: 88px;
   }
 
-  .home-layout,
   .daily-admin-columns {
     grid-template-columns: 1fr;
   }

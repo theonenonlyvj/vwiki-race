@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatTimeAndClicks } from "../domain/formatting";
+import type { Challenge } from "../domain/types";
 import { writeTextWithTimeout } from "../services/challengeShare";
 
 /**
@@ -82,6 +84,76 @@ export function useClipboardShare(text: string): {
   }, [text]);
 
   return { status, copy };
+}
+
+/**
+ * One-line, real-data share text (no fabricated "daily #N" - the catalog has
+ * no such field yet). Always carries time+clicks (invariant 1) when ranked;
+ * falls back gracefully when the server didn't return a rank. Takes plain
+ * result primitives rather than a full `RaceResultOutcome` so both Results
+ * (a live `GameSession`) and Home's post-play card (a persisted leaderboard
+ * row, reachable across reloads) can compose the identical string from
+ * whatever shape of data they each already have on hand.
+ */
+export function composeShareText(
+  challenge: Challenge,
+  result: { elapsedMs: number; clicks: number; rank: number | null },
+): string {
+  const label = challenge.label ?? challenge.id;
+  const scoreLine = result.rank !== null
+    ? `#${result.rank} · ${formatTimeAndClicks(result.elapsedMs, result.clicks)}`
+    : formatTimeAndClicks(result.elapsedMs, result.clicks);
+  return `VWiki Race — ${label} — ${scoreLine} — ${challengeShareUrl(challenge.id)}`;
+}
+
+/**
+ * Shared "Share result" affordance - Results' completed outcome and Home's
+ * post-play card (UX redesign spec: "reuse useClipboardShare + the Results
+ * composition") both render this exact button from whatever result
+ * primitives they have.
+ */
+export function ShareResultButton({
+  challenge,
+  elapsedMs,
+  clicks,
+  rank,
+}: {
+  challenge: Challenge;
+  elapsedMs: number;
+  clicks: number;
+  rank: number | null;
+}) {
+  const shareText = composeShareText(challenge, { elapsedMs, clicks, rank });
+  const { status, copy } = useClipboardShare(shareText);
+
+  return (
+    <div className="share-result">
+      <button
+        disabled={status === "copying"}
+        type="button"
+        onClick={() => void copy()}
+      >
+        Share result
+      </button>
+      {status !== "idle" ? (
+        <span aria-live="polite" role="status">
+          {status === "copying"
+            ? "Copying result..."
+            : status === "copied"
+              ? "Result copied. Paste it anywhere."
+              : "Automatic copy was blocked. Select the text below."}
+        </span>
+      ) : null}
+      {status === "failed" ? (
+        <input
+          aria-label="Share text"
+          onFocus={(event) => event.currentTarget.select()}
+          readOnly
+          value={shareText}
+        />
+      ) : null}
+    </div>
+  );
 }
 
 export function ChallengeShareButton({ challengeId }: { challengeId: string }) {

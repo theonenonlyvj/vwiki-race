@@ -1,7 +1,10 @@
+import { useMemo } from "react";
 import AdminDailies from "../components/AdminDailies";
+import TeachingGate from "../components/TeachingGate";
+import { selectDefaultChallenge } from "../domain/challengeSelection";
+import { shouldShowTeachingGate } from "../domain/teachingGate";
 import type { CreateChallengeInput } from "./challenges/Browse";
 import type { AccountStats, Challenge, RankedLeaderboardRow, ServerPathStep } from "../domain/types";
-import type { TargetPreviewState } from "../hooks/useTargetPreview";
 import { isAdminDailiesRoute } from "../services/urlRouting";
 import type { VGamesIdentitySession } from "../services/vgamesIdentity";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
@@ -31,6 +34,11 @@ const MODE_ITEMS: { key: ModeKey; label: string }[] = [
  * App.tsx keeps `<RaceFlow>` rendered above/outside this component
  * entirely - see the `raceEngaged` branch there - so this file never needs
  * to know about the race flow at all.
+ *
+ * Also owns the first-visit teaching gate (spec: "app-shell level, not
+ * Home-specific... must fire on Challenge Detail too") and the single
+ * "today's playable challenge" derivation shared by Home's hero and the
+ * gate's popup example, so the two can never show a different pair.
  */
 export default function AppShell({
   accountStats,
@@ -50,15 +58,16 @@ export default function AppShell({
   onCreateChallenge,
   onDisclosePath,
   onExitAdmin,
-  onSelectChallenge,
+  onGoToBoardsFor,
+  onOpenChallengeDetail,
+  onRaceChallenge,
   onSelectChallengeForBoards,
   onSelectMode,
-  onStartChallenge,
   previewWikipediaGateway,
   runPaths,
   selectedChallenge,
   selectionLocked,
-  targetPreview,
+  sessionDnfChallengeIds,
   todayCentral,
 }: {
   accountStats: AccountStats | null;
@@ -78,17 +87,28 @@ export default function AppShell({
   onCreateChallenge: (input: CreateChallengeInput) => Promise<void>;
   onDisclosePath: (runId: string) => void;
   onExitAdmin: () => void;
-  onSelectChallenge: (challengeId: string) => void;
+  onGoToBoardsFor: (challengeId: string) => void;
+  onOpenChallengeDetail: (challengeId: string) => void;
+  onRaceChallenge: (challengeId: string) => void;
   onSelectChallengeForBoards: (challengeId: string) => void;
   onSelectMode: (mode: ModeKey) => void;
-  onStartChallenge: () => void;
   previewWikipediaGateway: WikipediaGateway;
   runPaths: Record<string, ServerPathStep[]>;
   selectedChallenge: Challenge | null;
   selectionLocked: boolean;
-  targetPreview: TargetPreviewState;
+  sessionDnfChallengeIds: ReadonlySet<string>;
   todayCentral: string;
 }) {
+  // The one challenge Home's hero races and the teaching-gate popup uses as
+  // its worked example - today's real daily when the catalog has one,
+  // falling back to selectDefaultChallenge's existing "first active
+  // challenge" default otherwise (matches the pre-redesign app's behavior
+  // when no daily is flagged, e.g. many existing test fixtures).
+  const todaysHeroChallenge = useMemo(
+    () => selectDefaultChallenge(challenges, { todayUtc: todayCentral }),
+    [challenges, todayCentral],
+  );
+
   const adminRoute = isAdminDailiesRoute();
 
   if (adminRoute && canManageDailies === true && identitySession) {
@@ -112,6 +132,13 @@ export default function AppShell({
   // pre-redesign fallback, just with no "Admin" nav item to have to hide.
   const visibleMode: ModeKey = adminRoute && canManageDailies !== true ? "home" : mode;
   const showAdminAccessNotice = adminRoute && canManageDailies === false;
+  // First-visit teaching gate (spec: "until an account's first finished
+  // race, whichever screen it first lands on - Home or Challenge Detail -
+  // shows the rules strip"). Fires on both, for as long as the account has
+  // zero completed races - migration note (iii): derived from
+  // accountStats.totals.completed, never device-local storage.
+  const showTeachingGate = shouldShowTeachingGate(accountStats) &&
+    (visibleMode === "home" || (visibleMode === "challenges" && challengesView === "detail"));
 
   return (
     <>
@@ -129,19 +156,22 @@ export default function AppShell({
           This page is not available.
         </p>
       ) : null}
+      {showTeachingGate ? <TeachingGate pairChallenge={todaysHeroChallenge} /> : null}
 
       <section className="content-shell">
         {visibleMode === "home" ? (
           <Home
-            canNominateForDaily={canNominateForDaily}
+            apiClient={apiClient}
             challenges={challenges}
-            onCreateChallenge={onCreateChallenge}
-            onSelectChallenge={onSelectChallenge}
-            onStartChallenge={onStartChallenge}
-            selectedChallenge={selectedChallenge}
-            selectionLocked={selectionLocked}
-            startDisabled={!selectedChallenge || authBusy}
-            targetPreview={targetPreview}
+            heroChallenge={todaysHeroChallenge}
+            identityAccountId={identitySession?.accountId ?? null}
+            onGoToBoards={onGoToBoardsFor}
+            onRaceChallenge={onRaceChallenge}
+            onShowChallenges={() => onSelectMode("challenges")}
+            raceBusy={authBusy}
+            selectedChallengeId={selectedChallenge?.id ?? null}
+            sessionDnfChallengeIds={sessionDnfChallengeIds}
+            sharedLeaderboard={leaderboard}
             todayCentral={todayCentral}
           />
         ) : null}
@@ -166,16 +196,17 @@ export default function AppShell({
               leaderboard={leaderboard}
               onBack={onCloseChallengeDetail}
               onDisclosePath={onDisclosePath}
-              onRaceThis={onStartChallenge}
+              onRaceThis={() => onRaceChallenge(selectedChallenge.id)}
               raceDisabled={!selectedChallenge || authBusy}
               runPaths={runPaths}
+              todayCentral={todayCentral}
             />
           ) : (
             <ChallengeBrowser
               canNominateForDaily={canNominateForDaily}
               challenges={challenges}
               onCreateChallenge={onCreateChallenge}
-              onSelectChallenge={onSelectChallenge}
+              onOpenChallenge={onOpenChallengeDetail}
               selectedChallengeId={selectedChallenge?.id ?? null}
               selectionLocked={selectionLocked}
               todayCentral={todayCentral}

@@ -1,150 +1,239 @@
-import { dailyBadgeLabel } from "../domain/challengeSelection";
-import type { Challenge } from "../domain/types";
-import { type TargetPreviewState } from "../hooks/useTargetPreview";
-import { ChallengeShareButton } from "../race/shared";
-import ChallengeBrowser, { type CreateChallengeInput } from "./challenges/Browse";
+import { useEffect, useMemo, useState } from "react";
+import BoardSnippet from "../components/BoardSnippet";
+import { dailyDateForChallenge, previousCentralDate } from "../domain/challengeSelection";
+import { dailyFlavorLabel } from "../domain/dailyEditorial";
+import { formatTimeAndClicks } from "../domain/formatting";
+import type { Challenge, RankedLeaderboardRow } from "../domain/types";
+import { ShareResultButton } from "../race/shared";
+import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
+
+type DailyState = "not-attempted" | "dnf" | "finished";
 
 /**
- * Home v1 (this task's placeholder scope - the follow-up task makes it the
- * stateful pre-play/DNF/post-play daily hub from the redesign spec). Moves
- * the old PlayPanel content over essentially as-is: the how-to-play line,
- * the current challenge's route + Start/Race button (previously stranded in
- * the app-wide header, now Home-owned per the spec's "Home owns 'play
- * today'"), the target preview card, and the embedded challenge
- * browser/create form (unchanged duplication with Browse - see that file's
- * comment).
+ * Home v2 (Increment 2 Task 2): the stateful daily hub (UX redesign spec,
+ * Home §stateful). Reads today's daily as one of three conditions - not
+ * attempted, attempted-not-finished (DNF), finished - derived entirely from
+ * existing data: `heroChallenge` (today's real daily, or the pre-redesign
+ * default-challenge fallback when the catalog has none - see AppShell) and
+ * that challenge's own leaderboard, fetched here directly (no new
+ * endpoint). Own row = a leaderboard row whose accountId matches the
+ * current identity (works after a guest->claimed upgrade too, since claims
+ * carry the same canonical accountId - see server's account_aliases
+ * resolution). `sessionDnfChallengeIds` covers the one gap a leaderboard
+ * can't: a 0-click abandon leaves no row at all, so App.tsx remembers "ended
+ * a run for this challenge this session" locally for that case only (never
+ * used for the teaching gate, which stays server-derived - migration note
+ * iii).
+ *
+ * Old how-to-play copy is gone - the app-shell teaching gate supersedes it.
+ * The embedded ChallengeBrowser/target-preview card from Home v1 are gone
+ * too - Browse now owns the library, and the Pre-race preview beat owns the
+ * target blurb; Home's hero only needs the pair + a Race button.
  */
 export default function Home({
-  canNominateForDaily,
+  apiClient,
   challenges,
-  onCreateChallenge,
-  onSelectChallenge,
-  onStartChallenge,
-  selectedChallenge,
-  selectionLocked,
-  startDisabled,
-  targetPreview,
+  heroChallenge,
+  identityAccountId,
+  onGoToBoards,
+  onRaceChallenge,
+  onShowChallenges,
+  raceBusy,
+  selectedChallengeId,
+  sessionDnfChallengeIds,
+  sharedLeaderboard,
   todayCentral,
 }: {
-  canNominateForDaily: boolean;
+  apiClient: VWikiRaceApiClient;
   challenges: Challenge[];
-  onCreateChallenge: (input: CreateChallengeInput) => Promise<void>;
-  onSelectChallenge: (challengeId: string) => void;
-  onStartChallenge: () => void;
-  selectedChallenge: Challenge | null;
-  selectionLocked: boolean;
-  startDisabled: boolean;
-  targetPreview: TargetPreviewState;
+  heroChallenge: Challenge | null;
+  identityAccountId: string | null;
+  onGoToBoards: (challengeId: string) => void;
+  onRaceChallenge: (challengeId: string) => void;
+  onShowChallenges: () => void;
+  raceBusy: boolean;
+  // The app shell already fetches/refreshes a leaderboard for whatever
+  // challenge is currently selected elsewhere (Boards/Detail) - when that
+  // happens to be today's daily too (the common case: nothing else has been
+  // browsed yet), Home reuses it instead of firing a second, redundant
+  // request for the exact same endpoint.
+  selectedChallengeId: string | null;
+  sessionDnfChallengeIds: ReadonlySet<string>;
+  sharedLeaderboard: RankedLeaderboardRow[];
   todayCentral: string;
 }) {
-  return (
-    <section className="home-layout">
-      <p className="how-to-play muted">
-        Race from the start article to the target using only links inside the page. Fastest time wins.
-      </p>
+  const yesterdayCentral = useMemo(
+    () => previousCentralDate(todayCentral),
+    [todayCentral],
+  );
+  // The catalog only carries active challenges (spec: Home §Pre-play) - a
+  // genuine "yesterday's daily" is often simply absent once its day passes.
+  // That's expected, not an error - the card below omits itself gracefully.
+  const yesterdaysDaily = useMemo(
+    () => challenges.find((challenge) => dailyDateForChallenge(challenge) === yesterdayCentral) ?? null,
+    [challenges, yesterdayCentral],
+  );
 
-      {selectedChallenge ? (
-        <div className="home-target">
-          <div className="challenge-route" aria-label="Current challenge">
-            <div className="challenge-meta">
-              <span>{selectedChallenge.label ?? "Challenge"}</span>
-              {dailyBadgeLabel(selectedChallenge, todayCentral) ? (
-                <span className="daily-badge">
-                  {dailyBadgeLabel(selectedChallenge, todayCentral)}
-                </span>
-              ) : null}
-            </div>
-            <strong>
-              {selectedChallenge.start.title} {"->"} {selectedChallenge.target.title}
-            </strong>
-          </div>
+  const heroMatchesSelected = Boolean(heroChallenge) && selectedChallengeId === heroChallenge?.id;
+  const [independentTodayBoard, setIndependentTodayBoard] = useState<RankedLeaderboardRow[]>([]);
+  const [yesterdayBoard, setYesterdayBoard] = useState<RankedLeaderboardRow[]>([]);
 
-          <div className="player-gate">
-            <button
-              type="button"
-              disabled={startDisabled}
-              onClick={onStartChallenge}
-            >
-              {`Start ${selectedChallenge.label ?? "Challenge"}`}
-            </button>
-          </div>
+  useEffect(() => {
+    let cancelled = false;
+    if (!heroChallenge || heroMatchesSelected) {
+      // Nothing to fetch, or the app shell's own selection already covers
+      // this exact challenge - see sharedLeaderboard above.
+      return;
+    }
+    void apiClient.listLeaderboard(heroChallenge.id)
+      .then((rows) => {
+        if (!cancelled) setIndependentTodayBoard(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setIndependentTodayBoard([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, heroChallenge?.id, heroMatchesSelected]);
+  const todayBoard = heroMatchesSelected ? sharedLeaderboard : independentTodayBoard;
 
-          <TargetPreviewPanel
-            challenge={selectedChallenge}
-            targetPreview={targetPreview}
-          />
-        </div>
-      ) : (
+  useEffect(() => {
+    let cancelled = false;
+    if (!yesterdaysDaily) {
+      setYesterdayBoard([]);
+      return;
+    }
+    void apiClient.listLeaderboard(yesterdaysDaily.id)
+      .then((rows) => {
+        if (!cancelled) setYesterdayBoard(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setYesterdayBoard([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, yesterdaysDaily?.id]);
+
+  if (!heroChallenge) {
+    return (
+      <section className="home-layout">
         <section className="empty-state">
           <span>Challenge</span>
           <h2>Loading challenge catalog</h2>
-          <p>Pick a challenge.</p>
         </section>
-      )}
+      </section>
+    );
+  }
 
-      <ChallengeBrowser
-        canNominateForDaily={canNominateForDaily}
-        challenges={challenges}
-        onCreateChallenge={onCreateChallenge}
-        onSelectChallenge={onSelectChallenge}
-        selectedChallengeId={selectedChallenge?.id ?? null}
-        selectionLocked={selectionLocked}
-        todayCentral={todayCentral}
-      />
-    </section>
-  );
-}
+  const myRows = identityAccountId
+    ? todayBoard.filter((row) => row.accountId === identityAccountId)
+    : [];
+  // Invariant 2: "A completion is permanent... A later DNF never demotes a
+  // prior checkmark." - a completed row always wins over a DNF row or the
+  // local session flag, regardless of which happened more recently.
+  const myCompletedRow = myRows.find((row) => row.status === "completed") ?? null;
+  const myDnfRow = myRows.find((row) => row.status === "abandoned") ?? null;
+  const dailyState: DailyState = myCompletedRow
+    ? "finished"
+    : myDnfRow || sessionDnfChallengeIds.has(heroChallenge.id)
+      ? "dnf"
+      : "not-attempted";
 
-function TargetPreviewPanel({
-  challenge,
-  targetPreview,
-}: {
-  challenge: Challenge;
-  targetPreview: TargetPreviewState;
-}) {
-  const readyPreview =
-    targetPreview.status === "ready" && targetPreview.challengeId === challenge.id
-      ? targetPreview
-      : null;
-  const unavailable =
-    targetPreview.status === "unavailable" && targetPreview.challengeId === challenge.id;
-  const title = readyPreview?.canonicalTitle ?? challenge.target.title;
+  const yesterdayMyRow = identityAccountId
+    ? yesterdayBoard.find((row) => row.accountId === identityAccountId) ?? null
+    : null;
+  const flavorBadge = heroChallenge.dailyFeature
+    ? dailyFlavorLabel(heroChallenge.dailyFeature.flavor)
+    : null;
 
   return (
-    <section
-      aria-label="Target preview"
-      className="target-preview-panel"
-      role="region"
-    >
-      <div className="target-preview-copy">
-        <span className="target-preview-kicker">Target preview</span>
-        <h2 id="target-preview-title">{title}</h2>
-        {readyPreview ? (
-          <p className="target-preview-blurb">
-            {readyPreview.preview.blurb ?? "Wikipedia does not provide a short lead for this target."}
+    <section className="home-layout">
+      <div className="daily-hero challenge-route" aria-label="Today's daily">
+        <div className="challenge-meta">
+          {flavorBadge ? <span className="daily-badge">{flavorBadge}</span> : null}
+        </div>
+        <strong>
+          {heroChallenge.start.title} <span className="route-arrow">{"->"}</span> {heroChallenge.target.title}
+        </strong>
+
+        {dailyState === "finished" && myCompletedRow ? (
+          <p className="daily-hero-status daily-hero-done">
+            {"✓"} DONE · You finished #{myCompletedRow.rank} ·{" "}
+            {formatTimeAndClicks(myCompletedRow.elapsedMs, myCompletedRow.clickCount)}
           </p>
-        ) : unavailable ? (
-          <p className="target-preview-blurb muted">Preview unavailable. You can still start the challenge.</p>
+        ) : dailyState === "dnf" ? (
+          <>
+            <p className="daily-hero-status daily-hero-dnf">Last try: DNF</p>
+            <div className="player-gate">
+              <button
+                className="start-race-button"
+                disabled={raceBusy}
+                onClick={() => onRaceChallenge(heroChallenge.id)}
+                type="button"
+              >
+                Try again
+              </button>
+            </div>
+          </>
         ) : (
-          <p className="target-preview-blurb muted">Loading target preview...</p>
-        )}
-        {readyPreview ? (
-          <p className="target-preview-attribution">
-            <a href={readyPreview.attributionUrl} rel="noreferrer noopener" target="_blank">
-              Source revision
-            </a>{" "}
-            ·{" "}
-            <a
-              href="https://creativecommons.org/licenses/by-sa/4.0/"
-              rel="noreferrer noopener"
-              target="_blank"
+          <div className="player-gate">
+            <button
+              className="start-race-button"
+              disabled={raceBusy}
+              onClick={() => onRaceChallenge(heroChallenge.id)}
+              type="button"
             >
-              CC BY-SA 4.0
-            </a>
-          </p>
-        ) : null}
-        <ChallengeShareButton challengeId={challenge.id} />
+              {"▶"} Race
+            </button>
+          </div>
+        )}
       </div>
+
+      {dailyState !== "finished" && yesterdaysDaily ? (
+        <BoardSnippet
+          title="Yesterday's results"
+          leaderboard={yesterdayBoard}
+          highlightRunId={yesterdayMyRow?.runId ?? null}
+        >
+          <button
+            className="link-button"
+            onClick={() => onGoToBoards(yesterdaysDaily.id)}
+            type="button"
+          >
+            see full board ›
+          </button>
+        </BoardSnippet>
+      ) : null}
+
+      {dailyState === "finished" && myCompletedRow ? (
+        <>
+          <BoardSnippet
+            title="Today's board"
+            leaderboard={todayBoard}
+            highlightRunId={myCompletedRow.runId}
+          />
+
+          <ShareResultButton
+            challenge={heroChallenge}
+            clicks={myCompletedRow.clickCount}
+            elapsedMs={myCompletedRow.elapsedMs}
+            rank={myCompletedRow.rank}
+          />
+
+          <section aria-label="Play another challenge" className="play-another-card">
+            <h3>Got a few more minutes?</h3>
+            <button className="link-button" onClick={onShowChallenges} type="button">
+              Browse all challenges ›
+            </button>
+          </section>
+
+          <p className="ritual-line muted">
+            New daily drops 5:00 AM Central — come defend your spot.
+          </p>
+        </>
+      ) : null}
     </section>
   );
 }
