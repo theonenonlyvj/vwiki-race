@@ -4,6 +4,8 @@ import type {
   AbandonRunTransition,
   AuthorizedAccount,
   Challenge,
+  ChallengeOutcomeEntry,
+  ChallengeSummaryEntry,
   DailyTrendRankedEntry,
   DailyTrendUnrankedEntry,
   LeaderboardContext,
@@ -77,6 +79,14 @@ export interface CreateChallengeV2Input {
   requestFingerprint?: string;
   nominateForDaily?: boolean;
   dailyClassification?: DailyClassification;
+  /**
+   * Increment 5 (random-challenge endpoint): overrides the `challenges.source`
+   * column's default ('curated') for a manual creation whose articles came
+   * from the random-candidate machinery rather than a person typing titles
+   * in. Omitted (or 'curated') for every other manual-creation caller -
+   * existing behavior is unchanged.
+   */
+  source?: "curated" | "wikipedia_random";
 }
 
 export interface DailyChallengeJob {
@@ -307,4 +317,55 @@ export interface RunProtocolRepository extends TrackingRepository {
   ): Promise<ServerPathStep[]>;
   getAccountStats(account: AuthorizedAccount): Promise<AccountStats>;
   getPublicRunPath(runId: string): Promise<ServerPathStep[]>;
+  /**
+   * Browse's per-card aggregate (Increment 5, unauthenticated, like
+   * `listChallenges`): one entry per active challenge, in no particular
+   * order (the client sorts). See `ChallengeSummaryEntry`.
+   */
+  listChallengesSummary(): Promise<ChallengeSummaryEntry[]>;
+  /**
+   * Browse's bulk per-account state chips (Increment 5, authenticated): one
+   * entry per challenge the caller (alias-resolved) has an eligible run on.
+   * See `ChallengeOutcomeEntry`.
+   */
+  getAccountChallengeOutcomes(
+    account: AuthorizedAccount,
+  ): Promise<ChallengeOutcomeEntry[]>;
+  /**
+   * Home's "Got a few more minutes?" suggestion (Increment 5): the
+   * most-popular active challenge (by `listChallengesSummary`'s
+   * `playerCount`, ties broken by lower `sortOrder`) the caller
+   * (alias-resolved) has never started - "started" here means ANY run row
+   * at all, including a 0-click one, which is a strictly broader bar than
+   * `getAccountChallengeOutcomes`'s "eligible run" (spec: "played OR
+   * attempted excludes it"). Excludes `todayCentral`'s daily. `null` when
+   * every active, non-daily challenge has been started.
+   */
+  getPlayAnotherSuggestion(
+    account: AuthorizedAccount,
+    todayCentral: string,
+  ): Promise<Challenge | null>;
+  /**
+   * On-demand random-challenge concurrency guard (Increment 5): acquires a
+   * per-account lock (so at most one random-challenge attempt is ever
+   * in-flight for a given account) and, only once acquired, checks the
+   * rolling-hour creation quota. Returns `"in_progress"` when another
+   * attempt (a different idempotency key) already holds the lock and
+   * hasn't finished/gone stale; `"quota_exceeded"` when the lock was
+   * acquired but the account has already created
+   * `RANDOM_CHALLENGE_HOURLY_QUOTA` `source: 'wikipedia_random'` challenges
+   * in the last hour (the lock is released as `"rejected"` automatically in
+   * this case); `"ok"` when the caller now holds the lock and must call
+   * `finishRandomChallengeAttempt` exactly once to release it.
+   */
+  beginRandomChallengeAttempt(
+    account: AuthorizedAccount,
+    idempotencyKey: string,
+  ): Promise<"ok" | "in_progress" | "quota_exceeded">;
+  /** Releases the lock `beginRandomChallengeAttempt` acquired. */
+  finishRandomChallengeAttempt(
+    account: AuthorizedAccount,
+    outcome: "accepted" | "rejected",
+    resourceId: string | null,
+  ): Promise<void>;
 }

@@ -59,3 +59,8 @@ simple = { limit = 10, period = 60 }
 name = "RUN_START_RATE_LIMITER"
 namespace_id = "51007"
 simple = { limit = 6, period = 60 }
+
+[[ratelimits]]
+name = "RANDOM_CHALLENGE_RATE_LIMITER"
+namespace_id = "51008"
+simple = { limit = 1, period = 60 }

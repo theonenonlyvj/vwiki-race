@@ -4,10 +4,13 @@ import { optionalNumber, requiredString } from "./http";
 import { ApiError } from "./http";
 import type {
   AbandonRunResponse,
+  AccountChallengeOutcomesResponse,
   BoardsTrendsResponse,
   BoardsTrendWindow,
   ChallengeBoardResponse,
   ChallengesResponse,
+  ChallengesSummaryResponse,
+  ChallengeSuggestionResponse,
   ClickRequest,
   ClickResponse,
   CreateChallengeRequest,
@@ -36,6 +39,11 @@ import type {
   DailyQueueEntry,
 } from "../domain/dailyEditorial";
 import { fingerprintCreateChallengeRequest } from "./runProtocol";
+import {
+  DailyChallengeCandidateError,
+  type DailyCandidateRequest,
+  type DailyChallengeCandidate,
+} from "./dailyChallengeCandidates";
 
 export interface ApiHandlers {
   listChallenges(): Promise<ChallengesResponse>;
@@ -93,11 +101,33 @@ export interface ApiHandlers {
     runId: string,
     excluded: boolean,
   ): Promise<{ runId: string; boardExcluded: boolean } | null>;
+  listChallengesSummary(): Promise<ChallengesSummaryResponse>;
+  getAccountChallengeOutcomes(
+    account: AuthorizedAccount,
+  ): Promise<AccountChallengeOutcomesResponse>;
+  getPlayAnotherSuggestion(
+    account: AuthorizedAccount,
+    todayCentral: string,
+  ): Promise<ChallengeSuggestionResponse>;
+  createRandomChallenge(
+    account: AuthorizedAccount,
+    idempotencyKey: string,
+  ): Promise<CreateChallengeOutcome>;
 }
 
 export interface ApiHandlerOptions {
   validateChallengeArticles?: ValidateChallengeArticles;
   classifyDaily?: ClassifyDailyChallenge;
+  /**
+   * Increment 5 (`POST /api/v2/challenges/random`): the same random-article
+   * selection machinery the daily generator uses (`createDailyChallengeCandidateSource`
+   * / `dailyCandidateEvaluator`), injected exactly like `validateChallengeArticles`
+   * so this file never imports `fetch`/the Wikipedia gateway directly. No
+   * default is provided - `createRandomChallenge` throws a clear 500 if
+   * called without one, since there is no meaningful offline fallback for
+   * "find a random Wikipedia pair."
+   */
+  findRandomCandidate?: (request: DailyCandidateRequest) => Promise<DailyChallengeCandidate>;
 }
 
 export interface DailyClassificationInput {
@@ -547,6 +577,107 @@ export function createApiHandlers(
         dailyRequiredString(runId, "invalid_run_id", "A run id is required."),
         excluded,
       );
+    },
+
+    async listChallengesSummary() {
+      return { challenges: await dailyProtocol(repository).listChallengesSummary() };
+    },
+
+    async getAccountChallengeOutcomes(account) {
+      return {
+        outcomes: await dailyProtocol(repository).getAccountChallengeOutcomes(account),
+      };
+    },
+
+    async getPlayAnotherSuggestion(account, todayCentral) {
+      const cleanToday = requiredString(
+        todayCentral,
+        "invalid_today_central",
+        "A Central date is required.",
+      );
+      return {
+        challenge: await dailyProtocol(repository).getPlayAnotherSuggestion(account, cleanToday),
+      };
+    },
+
+    async createRandomChallenge(account, idempotencyKey) {
+      const cleanIdempotencyKey = boundedRequiredString(
+        idempotencyKey,
+        "invalid_idempotency_key",
+        "An idempotency key is required.",
+        200,
+      );
+      const protocol = dailyProtocol(repository);
+      const lockOutcome = await protocol.beginRandomChallengeAttempt(account, cleanIdempotencyKey);
+      if (lockOutcome === "in_progress") {
+        throw new ApiError(
+          "random_challenge_in_progress",
+          "A random challenge request is already in progress for this account.",
+          429,
+          5,
+        );
+      }
+      if (lockOutcome === "quota_exceeded") {
+        // beginRandomChallengeAttempt already released the lock (rejected) -
+        // nothing more to clean up here.
+        throw new ApiError(
+          "random_challenge_quota_exceeded",
+          "You've reached the hourly limit for random challenges. Try again later.",
+          429,
+          3600,
+        );
+      }
+
+      const findRandomCandidate = options.findRandomCandidate;
+      if (!findRandomCandidate) {
+        await protocol.finishRandomChallengeAttempt(account, "rejected", null);
+        throw new ApiError(
+          "random_candidate_source_unavailable",
+          "Random challenge generation is temporarily unavailable.",
+          500,
+        );
+      }
+
+      let candidate: DailyChallengeCandidate;
+      try {
+        // A fresh random seed per request (not a real calendar date) so
+        // repeated calls sample independently rather than replaying the
+        // same daily-generator selection - `dailyDate` is only ever used
+        // as a stable-sample/log seed inside the evaluator, never parsed.
+        candidate = await findRandomCandidate({
+          dailyDate: `manual-${crypto.randomUUID()}`,
+          flavor: "recognizable",
+        });
+      } catch (caught) {
+        await protocol.finishRandomChallengeAttempt(account, "rejected", null);
+        if (caught instanceof DailyChallengeCandidateError) {
+          throw new ApiError(
+            "random_challenge_unavailable",
+            "Could not find a random challenge right now. Try again.",
+            503,
+            5,
+          );
+        }
+        throw caught;
+      }
+
+      try {
+        const outcome = await protocol.createChallengeV2(account, {
+          startTitle: candidate.startTitle,
+          startPageId: candidate.startPageId,
+          startAllowedLinkCount: candidate.startAllowedLinkCount,
+          targetTitle: candidate.targetTitle,
+          targetPageId: candidate.targetPageId,
+          idempotencyKey: cleanIdempotencyKey,
+          nominateForDaily: false,
+          source: "wikipedia_random",
+        });
+        await protocol.finishRandomChallengeAttempt(account, "accepted", outcome.challenge.id);
+        return outcome;
+      } catch (caught) {
+        await protocol.finishRandomChallengeAttempt(account, "rejected", null);
+        throw caught;
+      }
     },
   };
 }

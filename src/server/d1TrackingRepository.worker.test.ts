@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { centralDateDaysBefore } from "../domain/challengeSelection";
 import type { AuthorizedAccount } from "../domain/types";
 import { createApiHandlers } from "./apiHandlers";
+import { DailyChallengeCandidateError } from "./dailyCandidateEvaluator";
 import type { ValidateChallengeArticles } from "./wikipediaChallengeValidator";
 import {
   createD1TrackingRepository,
@@ -3756,6 +3757,188 @@ describe("listChallengeDnfs", () => {
   });
 });
 
+describe("listChallengesSummary (Increment 5)", () => {
+  it("aggregates distinct player count and the #1 completed placement per challenge, one query across all active challenges", async () => {
+    const accountA = "summary-account-a";
+    const accountB = "summary-account-b";
+    await insertCompletedV2({
+      id: "summary-a-worse", accountId: accountA, elapsedMs: 9_000,
+      completedAt: "2026-07-14T01:00:09.000Z", challengeId: "challenge-0001",
+    });
+    await insertCompletedV2({
+      id: "summary-a-better", accountId: accountA, elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z", challengeId: "challenge-0001",
+    });
+    await insertCompletedV2({
+      id: "summary-b", accountId: accountB, elapsedMs: 6_000,
+      completedAt: "2026-07-14T01:00:06.000Z", challengeId: "challenge-0001",
+    });
+    await insertAbandonedV2({
+      id: "summary-dnf-only", accountId: "summary-account-c", clickCount: 2,
+      elapsedMs: 3_000, abandonedAt: "2026-07-14T01:00:03.000Z", challengeId: "challenge-0002",
+    });
+
+    const { repository } = fixture();
+    const summary = await repository.listChallengesSummary();
+
+    expect(summary.find((s) => s.challengeId === "challenge-0001")).toEqual({
+      challengeId: "challenge-0001",
+      playerCount: 2, // A (deduped across two attempts) + B - DISTINCT ACCOUNTS
+      best: { elapsedMs: 4_000, clickCount: 1 }, // A's best, not latest
+    });
+    expect(summary.find((s) => s.challengeId === "challenge-0002")).toEqual({
+      challengeId: "challenge-0002",
+      playerCount: 1, // a board-visible DNF still counts as a player
+      best: null, // nobody has finished it
+    });
+    expect(summary.find((s) => s.challengeId === "challenge-0003")).toEqual({
+      challengeId: "challenge-0003",
+      playerCount: 0,
+      best: null,
+    });
+  });
+
+  it("excludes a 0-click abandon from player count", async () => {
+    await insertLegacyRun({
+      id: "summary-zero-click", accountId: "summary-zero-account", challengeId: "challenge-0001",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      `UPDATE runs SET status='abandoned', protocol_version=2, click_count=0,
+         abandoned_at='2026-07-14T01:00:02.000Z', elapsed_ms=2000,
+         wall_elapsed_ms=2000 WHERE id='summary-zero-click'`,
+    ).run();
+
+    const { repository } = fixture();
+    const summary = await repository.listChallengesSummary();
+
+    expect(summary.find((s) => s.challengeId === "challenge-0001")?.playerCount).toBe(0);
+  });
+
+  it("respects board exclusion for both player count and best", async () => {
+    await insertCompletedV2({
+      id: "summary-excluded-best", accountId: "summary-excl-account", elapsedMs: 3_000,
+      completedAt: "2026-07-14T01:00:03.000Z", challengeId: "challenge-0001",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      "UPDATE runs SET board_excluded = 1 WHERE id = ?",
+    ).bind("summary-excluded-best").run();
+
+    const { repository } = fixture();
+    const summary = await repository.listChallengesSummary();
+
+    expect(summary.find((s) => s.challengeId === "challenge-0001")).toEqual({
+      challengeId: "challenge-0001", playerCount: 0, best: null,
+    });
+  });
+
+  it("omits an inactive challenge entirely", async () => {
+    await insertReadyChallenge({ id: "summary-inactive", startPageId: 9101, targetPageId: 9102 });
+    await env.VWIKI_RACE_DB.prepare(
+      "UPDATE challenges SET is_active = 0 WHERE id = 'summary-inactive'",
+    ).run();
+
+    const { repository } = fixture();
+    const summary = await repository.listChallengesSummary();
+
+    expect(summary.map((s) => s.challengeId)).not.toContain("summary-inactive");
+  });
+});
+
+describe("getAccountChallengeOutcomes (Increment 5)", () => {
+  it("returns 'completed' with best time·clicks, and 'dnf' with no best for a different challenge", async () => {
+    const me: AuthorizedAccount = {
+      accountId: "outcomes-account", displayName: "Casey", status: "claimed", aliases: [],
+    };
+    await insertCompletedV2({
+      id: "outcomes-completed", accountId: me.accountId, elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z", challengeId: "challenge-0001",
+    });
+    await insertAbandonedV2({
+      id: "outcomes-dnf", accountId: me.accountId, clickCount: 3, elapsedMs: 5_000,
+      abandonedAt: "2026-07-14T01:00:05.000Z", challengeId: "challenge-0002",
+    });
+
+    const { repository } = fixture();
+    const outcomes = await repository.getAccountChallengeOutcomes(me);
+
+    expect(outcomes.find((o) => o.challengeId === "challenge-0001")).toEqual({
+      challengeId: "challenge-0001", outcome: "completed", best: { elapsedMs: 4_000, clickCount: 1 },
+    });
+    expect(outcomes.find((o) => o.challengeId === "challenge-0002")).toEqual({
+      challengeId: "challenge-0002", outcome: "dnf", best: null,
+    });
+  });
+
+  it("invariant 2: a later DNF never demotes a prior completed outcome", async () => {
+    const me: AuthorizedAccount = {
+      accountId: "outcomes-precedence-account", displayName: "Casey", status: "claimed", aliases: [],
+    };
+    await insertCompletedV2({
+      id: "outcomes-first-completed", accountId: me.accountId, elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z", challengeId: "challenge-0001",
+    });
+    await insertAbandonedV2({
+      id: "outcomes-later-dnf", accountId: me.accountId, clickCount: 3, elapsedMs: 5_000,
+      abandonedAt: "2026-07-14T01:00:05.000Z", challengeId: "challenge-0001",
+    });
+
+    const { repository } = fixture();
+    const outcomes = await repository.getAccountChallengeOutcomes(me);
+
+    expect(outcomes.find((o) => o.challengeId === "challenge-0001")).toEqual({
+      challengeId: "challenge-0001", outcome: "completed", best: { elapsedMs: 4_000, clickCount: 1 },
+    });
+  });
+
+  it("omits a challenge where the account's only run was 0-click", async () => {
+    const me: AuthorizedAccount = {
+      accountId: "outcomes-zero-account", displayName: "Casey", status: "claimed", aliases: [],
+    };
+    await insertLegacyRun({ id: "outcomes-zero-click", accountId: me.accountId, challengeId: "challenge-0001" });
+    await env.VWIKI_RACE_DB.prepare(
+      `UPDATE runs SET status='abandoned', protocol_version=2, click_count=0,
+         abandoned_at='2026-07-14T01:00:02.000Z', elapsed_ms=2000,
+         wall_elapsed_ms=2000 WHERE id='outcomes-zero-click'`,
+    ).run();
+
+    const { repository } = fixture();
+    const outcomes = await repository.getAccountChallengeOutcomes(me);
+
+    expect(outcomes.map((o) => o.challengeId)).not.toContain("challenge-0001");
+  });
+
+  it("resolves the canonical account through account_aliases", async () => {
+    const canonical = "outcomes-canonical";
+    const ghost = "outcomes-ghost";
+    await insertCompletedV2({
+      id: "outcomes-ghost-run", accountId: ghost, elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z", challengeId: "challenge-0001",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO account_aliases (alias_account_id, canonical_account_id, updated_at)
+       VALUES (?, ?, '2026-07-14T01:00:00.000Z')`,
+    ).bind(ghost, canonical).run();
+
+    const { repository } = fixture();
+    const outcomes = await repository.getAccountChallengeOutcomes({
+      accountId: canonical, displayName: "Casey", status: "claimed", aliases: [],
+    });
+
+    expect(outcomes.find((o) => o.challengeId === "challenge-0001")).toMatchObject({
+      outcome: "completed",
+    });
+  });
+
+  it("returns nothing for an account that has never touched any challenge", async () => {
+    const me: AuthorizedAccount = {
+      accountId: "outcomes-untouched-account", displayName: "Casey", status: "claimed", aliases: [],
+    };
+    const { repository } = fixture();
+
+    await expect(repository.getAccountChallengeOutcomes(me)).resolves.toEqual([]);
+  });
+});
+
 describe("listDailyTrends (Increment 4)", () => {
   it("computes avg placement per account across a window's dailies, deduping repeat attempts, applying the participation guard", async () => {
     await insertDailyChallenge({ id: "trend-d1", sortOrder: 501 });
@@ -4175,6 +4358,254 @@ describe("getAccountDailyStreak - D1 bind-cap regression (F1)", () => {
   );
 });
 
+describe("getPlayAnotherSuggestion (Increment 5)", () => {
+  it("suggests the most popular active challenge the account has never started", async () => {
+    await insertReadyChallenge({ id: "suggest-popular", startPageId: 9201, targetPageId: 9202 });
+    await insertReadyChallenge({ id: "suggest-quiet", startPageId: 9203, targetPageId: 9204 });
+    await insertCompletedV2({
+      id: "suggest-popular-run-1", accountId: "suggest-other-1", elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z", challengeId: "suggest-popular",
+    });
+    await insertCompletedV2({
+      id: "suggest-popular-run-2", accountId: "suggest-other-2", elapsedMs: 5_000,
+      completedAt: "2026-07-14T01:00:05.000Z", challengeId: "suggest-popular",
+    });
+    await insertCompletedV2({
+      id: "suggest-quiet-run", accountId: "suggest-other-3", elapsedMs: 3_000,
+      completedAt: "2026-07-14T01:00:03.000Z", challengeId: "suggest-quiet",
+    });
+
+    const me: AuthorizedAccount = {
+      accountId: "suggest-account", displayName: "Casey", status: "claimed", aliases: [],
+    };
+    const { repository } = fixture();
+    const suggestion = await repository.getPlayAnotherSuggestion(me, "2026-07-20");
+
+    expect(suggestion?.id).toBe("suggest-popular");
+  });
+
+  it("breaks a popularity tie by lower sort_order", async () => {
+    // startPageId 9301 -> sort_order 9401 (higher); 9205 -> sort_order 9305 (lower).
+    await insertReadyChallenge({ id: "suggest-tie-higher-sort", startPageId: 9301, targetPageId: 9302 });
+    await insertReadyChallenge({ id: "suggest-tie-lower-sort", startPageId: 9205, targetPageId: 9206 });
+    await insertCompletedV2({
+      id: "suggest-tie-a", accountId: "suggest-tie-other-a", elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z", challengeId: "suggest-tie-higher-sort",
+    });
+    await insertCompletedV2({
+      id: "suggest-tie-b", accountId: "suggest-tie-other-b", elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z", challengeId: "suggest-tie-lower-sort",
+    });
+
+    const me: AuthorizedAccount = {
+      accountId: "suggest-tie-account", displayName: "Casey", status: "claimed", aliases: [],
+    };
+    const { repository } = fixture();
+    const suggestion = await repository.getPlayAnotherSuggestion(me, "2026-07-20");
+
+    expect(suggestion?.id).toBe("suggest-tie-lower-sort");
+  });
+
+  it("excludes a challenge the account started with 0 clicks, even though it's popular (broader than 'played')", async () => {
+    await insertReadyChallenge({ id: "suggest-zero-click-popular", startPageId: 9401, targetPageId: 9402 });
+    await insertCompletedV2({
+      id: "suggest-zero-other", accountId: "suggest-zero-other-account", elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z", challengeId: "suggest-zero-click-popular",
+    });
+    const me: AuthorizedAccount = {
+      accountId: "suggest-zero-account", displayName: "Casey", status: "claimed", aliases: [],
+    };
+    await insertLegacyRun({
+      id: "suggest-zero-my-run", accountId: me.accountId, challengeId: "suggest-zero-click-popular",
+    });
+
+    const { repository } = fixture();
+    const suggestion = await repository.getPlayAnotherSuggestion(me, "2026-07-20");
+
+    expect(suggestion?.id).not.toBe("suggest-zero-click-popular");
+  });
+
+  it("excludes today's daily even if it's the most popular unplayed challenge", async () => {
+    await insertDailyChallenge({ id: "suggest-daily-challenge", sortOrder: 9500 });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, {
+      dailyDate: "2026-07-20", challengeId: "suggest-daily-challenge", selectionSource: "automatic",
+    });
+    await insertCompletedV2({
+      id: "suggest-daily-run", accountId: "suggest-daily-other-account", elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z", challengeId: "suggest-daily-challenge",
+    });
+
+    const me: AuthorizedAccount = {
+      accountId: "suggest-daily-account", displayName: "Casey", status: "claimed", aliases: [],
+    };
+    const { repository } = fixture();
+    const suggestion = await repository.getPlayAnotherSuggestion(me, "2026-07-20");
+
+    expect(suggestion?.id).not.toBe("suggest-daily-challenge");
+  });
+
+  it("returns null when the account has started every active, non-daily challenge", async () => {
+    const me: AuthorizedAccount = {
+      accountId: "suggest-exhausted-account", displayName: "Casey", status: "claimed", aliases: [],
+    };
+    // Abandoned (not active) 0-click runs - a single account can only have
+    // one *active* run at a time, but "started" (this method's bar) counts
+    // any run row regardless of status/clicks.
+    await insertAbandonedV2({
+      id: "suggest-exhausted-1", accountId: me.accountId, clickCount: 0, elapsedMs: 1_000,
+      abandonedAt: "2026-07-14T01:00:01.000Z", challengeId: "challenge-0001",
+    });
+    await insertAbandonedV2({
+      id: "suggest-exhausted-2", accountId: me.accountId, clickCount: 0, elapsedMs: 1_000,
+      abandonedAt: "2026-07-14T01:00:01.000Z", challengeId: "challenge-0002",
+    });
+    await insertAbandonedV2({
+      id: "suggest-exhausted-3", accountId: me.accountId, clickCount: 0, elapsedMs: 1_000,
+      abandonedAt: "2026-07-14T01:00:01.000Z", challengeId: "challenge-0003",
+    });
+
+    const { repository } = fixture();
+    const suggestion = await repository.getPlayAnotherSuggestion(me, "2026-07-20");
+
+    expect(suggestion).toBeNull();
+  });
+
+  it("resolves the canonical account through account_aliases so a claimed ghost isn't re-suggested a challenge it already played", async () => {
+    const canonical = "suggest-alias-canonical";
+    const ghost = "suggest-alias-ghost";
+    await insertReadyChallenge({ id: "suggest-alias-popular", startPageId: 9601, targetPageId: 9602 });
+    await insertCompletedV2({
+      id: "suggest-alias-ghost-run", accountId: ghost, elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z", challengeId: "suggest-alias-popular",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO account_aliases (alias_account_id, canonical_account_id, updated_at)
+       VALUES (?, ?, '2026-07-14T01:00:00.000Z')`,
+    ).bind(ghost, canonical).run();
+
+    const { repository } = fixture();
+    const suggestion = await repository.getPlayAnotherSuggestion({
+      accountId: canonical, displayName: "Casey", status: "claimed", aliases: [],
+    }, "2026-07-20");
+
+    expect(suggestion?.id).not.toBe("suggest-alias-popular");
+  });
+});
+
+describe("beginRandomChallengeAttempt / finishRandomChallengeAttempt (Increment 5)", () => {
+  const me: AuthorizedAccount = {
+    accountId: "random-lock-account", displayName: "Casey", status: "claimed", aliases: [],
+  };
+
+  it("acquires the lock for a fresh idempotency key", async () => {
+    const { repository } = fixture();
+
+    await expect(repository.beginRandomChallengeAttempt(me, "key-1")).resolves.toBe("ok");
+  });
+
+  it("rejects a second concurrent different-key request while one is pending", async () => {
+    const { repository } = fixture();
+
+    await expect(repository.beginRandomChallengeAttempt(me, "key-1")).resolves.toBe("ok");
+    await expect(repository.beginRandomChallengeAttempt(me, "key-2")).resolves.toBe("in_progress");
+  });
+
+  it("allows a new attempt once the prior one finishes", async () => {
+    const { repository } = fixture();
+
+    await repository.beginRandomChallengeAttempt(me, "key-1");
+    await repository.finishRandomChallengeAttempt(me, "accepted", "challenge-0099");
+
+    await expect(repository.beginRandomChallengeAttempt(me, "key-2")).resolves.toBe("ok");
+  });
+
+  it("reclaims a stale lock past the TTL without waiting for finish (crashed-worker recovery)", async () => {
+    const clock = { now: "2026-07-14T01:00:00.000Z" };
+    const { repository } = fixture(clock);
+
+    await repository.beginRandomChallengeAttempt(me, "key-1"); // never finished
+    clock.now = "2026-07-14T01:02:00.000Z"; // 2 minutes later, past the 60s stale threshold
+
+    await expect(repository.beginRandomChallengeAttempt(me, "key-2")).resolves.toBe("ok");
+  });
+
+  it("does not reclaim a pending lock before the stale threshold", async () => {
+    const clock = { now: "2026-07-14T01:00:00.000Z" };
+    const { repository } = fixture(clock);
+
+    await repository.beginRandomChallengeAttempt(me, "key-1");
+    clock.now = "2026-07-14T01:00:30.000Z"; // 30s later, still within the 60s window
+
+    await expect(repository.beginRandomChallengeAttempt(me, "key-2")).resolves.toBe("in_progress");
+  });
+
+  it("rejects with quota_exceeded once the hourly cap is reached, and releases the lock rather than leaving it stuck", async () => {
+    const clock = { now: "2026-07-14T01:00:00.000Z" };
+    const { repository } = fixture(clock);
+    for (let index = 0; index < 3; index += 1) {
+      await insertOriginSourceChallenge({
+        id: `random-quota-${index}`,
+        startPageId: 9700 + index,
+        targetPageId: 9800 + index,
+        createdByAccountId: me.accountId,
+        createdAt: "2026-07-14T00:50:00.000Z", // 10 minutes ago - inside the hour window
+      });
+    }
+
+    await expect(repository.beginRandomChallengeAttempt(me, "quota-key-1")).resolves.toBe("quota_exceeded");
+    // A different key immediately afterwards still sees quota_exceeded (not
+    // in_progress) - proof the lock was released, not left dangling.
+    await expect(repository.beginRandomChallengeAttempt(me, "quota-key-2")).resolves.toBe("quota_exceeded");
+  });
+
+  it("does not count another account's random challenges toward this account's quota", async () => {
+    const { repository } = fixture();
+    for (let index = 0; index < 3; index += 1) {
+      await insertOriginSourceChallenge({
+        id: `random-other-account-quota-${index}`,
+        startPageId: 9750 + index,
+        targetPageId: 9850 + index,
+        createdByAccountId: "random-lock-someone-else",
+        createdAt: "2026-07-14T00:50:00.000Z",
+      });
+    }
+
+    await expect(repository.beginRandomChallengeAttempt(me, "not-my-quota")).resolves.toBe("ok");
+  });
+
+  it("does not count a manual (non-random) challenge toward the quota", async () => {
+    const { repository } = fixture();
+    for (let index = 0; index < 3; index += 1) {
+      await insertOriginSourceChallenge({
+        id: `random-manual-not-quota-${index}`,
+        startPageId: 9770 + index,
+        targetPageId: 9870 + index,
+        createdByAccountId: me.accountId,
+        createdAt: "2026-07-14T00:50:00.000Z",
+        source: "curated",
+      });
+    }
+
+    await expect(repository.beginRandomChallengeAttempt(me, "curated-not-quota")).resolves.toBe("ok");
+  });
+
+  it("does not count a random challenge created over an hour ago toward the quota", async () => {
+    const clock = { now: "2026-07-14T01:00:00.000Z" };
+    const { repository } = fixture(clock);
+    for (let index = 0; index < 3; index += 1) {
+      await insertOriginSourceChallenge({
+        id: `random-expired-quota-${index}`,
+        startPageId: 9790 + index,
+        targetPageId: 9890 + index,
+        createdByAccountId: me.accountId,
+        createdAt: "2026-07-14T00:00:00.000Z", // a full hour+ before `clock.now`
+      });
+    }
+
+    await expect(repository.beginRandomChallengeAttempt(me, "aged-out-quota")).resolves.toBe("ok");
+  });
+});
+
 describe("GET /api/v2/boards/trends", () => {
   it("returns window/guard/ranked/unranked, unauthenticated", async () => {
     const challengeId = "boards-trends-route-challenge";
@@ -4283,6 +4714,298 @@ describe("GET /api/v2/challenges/:id/board", () => {
         },
       ],
     });
+  });
+});
+
+describe("GET /api/v2/challenges/summary", () => {
+  it("returns the aggregate for every active challenge, unauthenticated, with public cache headers", async () => {
+    await insertCompletedV2({
+      id: "summary-route-completed", accountId: "summary-route-account", elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z", challengeId: "challenge-0001",
+    });
+
+    const { repository } = fixture();
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: createApiHandlers(repository),
+        identity: {},
+        runProtocol: repository,
+        authorize: async () => account,
+      } as unknown as WorkerTracking),
+    });
+
+    const response = await worker.fetch(
+      new Request("https://worker.example/api/v2/challenges/summary"),
+      workerEnv(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=60");
+    const body = await response.json() as { challenges: Array<{ challengeId: string }> };
+    expect(body.challenges.find((entry) => entry.challengeId === "challenge-0001")).toEqual({
+      challengeId: "challenge-0001",
+      playerCount: 1,
+      best: { elapsedMs: 4_000, clickCount: 1 },
+    });
+  });
+});
+
+describe("GET /api/v2/account/challenge-outcomes", () => {
+  it("returns the caller's outcomes, authenticated", async () => {
+    await insertCompletedV2({
+      id: "outcomes-route-completed", accountId: account.accountId, elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z", challengeId: "challenge-0001",
+    });
+
+    const { repository } = fixture();
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: createApiHandlers(repository),
+        identity: {},
+        runProtocol: repository,
+        authorize: async () => account,
+      } as unknown as WorkerTracking),
+    });
+
+    const response = await worker.fetch(
+      new Request("https://worker.example/api/v2/account/challenge-outcomes", {
+        headers: { Authorization: "Bearer test" },
+      }),
+      workerEnv(),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      outcomes: [
+        { challengeId: "challenge-0001", outcome: "completed", best: { elapsedMs: 4_000, clickCount: 1 } },
+      ],
+    });
+  });
+});
+
+describe("GET /api/v2/challenges/suggestion", () => {
+  it("returns the play-another suggestion for the caller, authenticated", async () => {
+    await insertReadyChallenge({ id: "suggestion-route-popular", startPageId: 9901, targetPageId: 9902 });
+    await insertCompletedV2({
+      id: "suggestion-route-other", accountId: "suggestion-route-other-account", elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z", challengeId: "suggestion-route-popular",
+    });
+
+    const { repository } = fixture({ now: "2026-07-20T12:00:00.000Z" });
+    const worker = createWorker({
+      now: () => new Date("2026-07-20T12:00:00.000Z"),
+      createTracking: () => ({
+        handlers: createApiHandlers(repository),
+        identity: {},
+        runProtocol: repository,
+        authorize: async () => account,
+      } as unknown as WorkerTracking),
+    });
+
+    const response = await worker.fetch(
+      new Request("https://worker.example/api/v2/challenges/suggestion", {
+        headers: { Authorization: "Bearer test" },
+      }),
+      workerEnv(),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { challenge: { id: string } | null };
+    expect(body.challenge?.id).toBe("suggestion-route-popular");
+  });
+
+  it("returns { challenge: null } once every active challenge has been started", async () => {
+    await insertAbandonedV2({
+      id: "suggestion-route-exhausted-1", accountId: account.accountId, clickCount: 0, elapsedMs: 1_000,
+      abandonedAt: "2026-07-14T01:00:01.000Z", challengeId: "challenge-0001",
+    });
+    await insertAbandonedV2({
+      id: "suggestion-route-exhausted-2", accountId: account.accountId, clickCount: 0, elapsedMs: 1_000,
+      abandonedAt: "2026-07-14T01:00:01.000Z", challengeId: "challenge-0002",
+    });
+    await insertAbandonedV2({
+      id: "suggestion-route-exhausted-3", accountId: account.accountId, clickCount: 0, elapsedMs: 1_000,
+      abandonedAt: "2026-07-14T01:00:01.000Z", challengeId: "challenge-0003",
+    });
+
+    const { repository } = fixture({ now: "2026-07-20T12:00:00.000Z" });
+    const worker = createWorker({
+      now: () => new Date("2026-07-20T12:00:00.000Z"),
+      createTracking: () => ({
+        handlers: createApiHandlers(repository),
+        identity: {},
+        runProtocol: repository,
+        authorize: async () => account,
+      } as unknown as WorkerTracking),
+    });
+
+    const response = await worker.fetch(
+      new Request("https://worker.example/api/v2/challenges/suggestion", {
+        headers: { Authorization: "Bearer test" },
+      }),
+      workerEnv(),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ challenge: null });
+  });
+});
+
+describe("POST /api/v2/challenges/random", () => {
+  function randomCandidate(overrides: Partial<{
+    startTitle: string; startPageId: number; startAllowedLinkCount: number;
+    targetTitle: string; targetPageId: number; selectedScore: number;
+  }> = {}) {
+    return {
+      startTitle: "Random Start",
+      startPageId: 8_001,
+      startAllowedLinkCount: 8,
+      targetTitle: "Random Target",
+      targetPageId: 8_002,
+      selectedScore: 42,
+      ...overrides,
+    };
+  }
+
+  function randomChallengeWorker(
+    repository: ReturnType<typeof createD1TrackingRepository>,
+    findRandomCandidate: (request: { dailyDate: string; flavor: string }) => Promise<unknown>,
+  ) {
+    return createWorker({
+      createTracking: () => ({
+        handlers: createApiHandlers(repository, {
+          findRandomCandidate: findRandomCandidate as never,
+        }),
+        identity: {},
+        runProtocol: repository,
+        authorize: async () => account,
+      } as unknown as WorkerTracking),
+    });
+  }
+
+  it("creates a fresh random challenge, attributed to the caller, source='wikipedia_random'/origin='manual'", async () => {
+    const { repository } = fixture();
+    const findRandomCandidate = vi.fn(async () => randomCandidate());
+    const worker = randomChallengeWorker(repository, findRandomCandidate);
+
+    const response = await worker.fetch(new Request("https://worker.example/api/v2/challenges/random", {
+      method: "POST",
+      headers: { Authorization: "Bearer test", "Content-Type": "application/json", "Idempotency-Key": "random-1" },
+      body: JSON.stringify({}),
+    }), workerEnv());
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { challenge: { id: string; createdBy?: { accountId: string } } };
+    expect(body.challenge.createdBy?.accountId).toBe(account.accountId);
+    await expect(scalar(
+      `SELECT count(*) FROM challenges WHERE id = '${body.challenge.id}'
+       AND origin = 'manual' AND source = 'wikipedia_random'
+       AND created_by_account_id = '${account.accountId}'`,
+    )).resolves.toBe(1);
+    expect(findRandomCandidate).toHaveBeenCalledWith(expect.objectContaining({ flavor: "recognizable" }));
+  });
+
+  it("returns 429 with Retry-After once the hourly quota is exceeded", async () => {
+    for (let index = 0; index < 3; index += 1) {
+      await insertOriginSourceChallenge({
+        id: `random-route-quota-${index}`,
+        startPageId: 9_910 + index,
+        targetPageId: 9_920 + index,
+        createdByAccountId: account.accountId,
+        createdAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      });
+    }
+    const { repository } = fixture();
+    const findRandomCandidate = vi.fn(async () => randomCandidate());
+    const worker = randomChallengeWorker(repository, findRandomCandidate);
+
+    const response = await worker.fetch(new Request("https://worker.example/api/v2/challenges/random", {
+      method: "POST",
+      headers: { Authorization: "Bearer test", "Content-Type": "application/json", "Idempotency-Key": "random-quota" },
+      body: JSON.stringify({}),
+    }), workerEnv());
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("3600");
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "random_challenge_quota_exceeded" } });
+    expect(findRandomCandidate).not.toHaveBeenCalled();
+  });
+
+  it("rejects a second concurrent different-key request while one is still in flight", async () => {
+    const { repository } = fixture();
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const findRandomCandidate = vi.fn(async () => {
+      await firstGate;
+      return randomCandidate();
+    });
+    const worker = randomChallengeWorker(repository, findRandomCandidate);
+
+    const firstResponsePromise = worker.fetch(new Request("https://worker.example/api/v2/challenges/random", {
+      method: "POST",
+      headers: { Authorization: "Bearer test", "Content-Type": "application/json", "Idempotency-Key": "concurrent-1" },
+      body: JSON.stringify({}),
+    }), workerEnv());
+    // Give the first request's beginRandomChallengeAttempt a turn to land
+    // before firing the second, so it's genuinely holding the lock.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const secondResponse = await worker.fetch(new Request("https://worker.example/api/v2/challenges/random", {
+      method: "POST",
+      headers: { Authorization: "Bearer test", "Content-Type": "application/json", "Idempotency-Key": "concurrent-2" },
+      body: JSON.stringify({}),
+    }), workerEnv());
+
+    expect(secondResponse.status).toBe(429);
+    await expect(secondResponse.json()).resolves.toMatchObject({
+      error: { code: "random_challenge_in_progress" },
+    });
+
+    releaseFirst();
+    const firstResponse = await firstResponsePromise;
+    expect(firstResponse.status).toBe(200);
+  });
+
+  it("returns a retryable 503 when the candidate machinery can't find a usable pair", async () => {
+    const { repository } = fixture();
+    const findRandomCandidate = vi.fn(async () => {
+      throw new DailyChallengeCandidateError("daily_candidate_unavailable");
+    });
+    const worker = randomChallengeWorker(repository, findRandomCandidate);
+
+    const response = await worker.fetch(new Request("https://worker.example/api/v2/challenges/random", {
+      method: "POST",
+      headers: { Authorization: "Bearer test", "Content-Type": "application/json", "Idempotency-Key": "unavailable-1" },
+      body: JSON.stringify({}),
+    }), workerEnv());
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "random_challenge_unavailable" } });
+
+    // The lock was released on failure, so a fresh attempt isn't blocked.
+    const findRandomCandidateRetry = vi.fn(async () => randomCandidate());
+    const retryWorker = randomChallengeWorker(repository, findRandomCandidateRetry);
+    const retryResponse = await retryWorker.fetch(new Request("https://worker.example/api/v2/challenges/random", {
+      method: "POST",
+      headers: { Authorization: "Bearer test", "Content-Type": "application/json", "Idempotency-Key": "unavailable-2" },
+      body: JSON.stringify({}),
+    }), workerEnv());
+    expect(retryResponse.status).toBe(200);
+  });
+
+  it("enforces the burst rate limiter binding when present", async () => {
+    const { repository } = fixture();
+    const worker = randomChallengeWorker(repository, vi.fn(async () => randomCandidate()));
+    const env = { ...workerEnv(), RANDOM_CHALLENGE_RATE_LIMITER: { limit: async () => ({ success: false }) } };
+
+    const response = await worker.fetch(new Request("https://worker.example/api/v2/challenges/random", {
+      method: "POST",
+      headers: { Authorization: "Bearer test", "Content-Type": "application/json", "Idempotency-Key": "burst-1" },
+      body: JSON.stringify({}),
+    }), env);
+
+    expect(response.status).toBe(429);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "random_challenge_rate_limited" } });
   });
 });
 
@@ -4639,6 +5362,39 @@ async function insertReadyChallenge(input: {
     input.startPageId,
     input.targetPageId,
     input.startPageId,
+  ).run();
+}
+
+/** Increment 5: a manual, `source`-tagged challenge for random-quota tests. */
+async function insertOriginSourceChallenge(input: {
+  id: string;
+  startPageId: number;
+  targetPageId: number;
+  createdByAccountId: string;
+  createdAt: string;
+  origin?: "manual" | "daily";
+  source?: "curated" | "wikipedia_random";
+}): Promise<void> {
+  await env.VWIKI_RACE_DB.prepare(
+    `INSERT INTO challenges
+       (id, label, start_title, target_title, start_page_id, target_page_id,
+        validation_status, ruleset, sort_order, is_active, created_at,
+        created_by_account_id, created_by_display_name, created_by_identity_status,
+        origin, source)
+     VALUES (?, ?, ?, ?, ?, ?, 'ready', 'ranked_classic',
+             300 + ?, 1, ?, ?, 'Random Bot', 'claimed', ?, ?)`,
+  ).bind(
+    input.id,
+    input.id,
+    `Start ${input.startPageId}`,
+    `Target ${input.targetPageId}`,
+    input.startPageId,
+    input.targetPageId,
+    input.startPageId,
+    input.createdAt,
+    input.createdByAccountId,
+    input.origin ?? "manual",
+    input.source ?? "wikipedia_random",
   ).run();
 }
 

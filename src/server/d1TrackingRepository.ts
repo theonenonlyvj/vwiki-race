@@ -1034,12 +1034,13 @@ export function createD1TrackingRepository(options: {
           `INSERT OR IGNORE INTO challenges
              (id, label, start_title, target_title, start_page_id, target_page_id,
               validation_status, ruleset, sort_order, is_active, created_at,
-              created_by_account_id, created_by_display_name, created_by_identity_status)
+              created_by_account_id, created_by_display_name, created_by_identity_status,
+              source)
            SELECT o.resource_id,
                   'Challenge #' || (SELECT next_sort_order - 1 FROM challenge_number_sequence WHERE sequence_name = 'global'),
                   ?, ?, ?, ?, 'ready', 'ranked_classic',
                   (SELECT next_sort_order - 1 FROM challenge_number_sequence WHERE sequence_name = 'global'),
-                  1, ?, ?, ?, ?
+                  1, ?, ?, ?, ?, ?
            FROM operation_idempotency o
            WHERE o.operation = 'create_challenge' AND o.idempotency_key = ?
              AND o.canonical_account_id = ? AND o.request_fingerprint = ?
@@ -1065,7 +1066,7 @@ export function createD1TrackingRepository(options: {
                     AND accepted.created_at >= substr(?, 1, 10) || 'T00:00:00.000Z') < 10`,
         ).bind(
           create.startTitle, create.targetTitle, create.startPageId, create.targetPageId,
-          createdAt, account.accountId, account.displayName, account.status,
+          createdAt, account.accountId, account.displayName, account.status, create.source,
           create.idempotencyKey, account.accountId, fingerprint,
           account.accountId, new Date(Date.parse(createdAt) - 60 * 60 * 1000).toISOString(),
           account.accountId, createdAt,
@@ -2763,6 +2764,240 @@ export function createD1TrackingRepository(options: {
         trend30,
       } satisfies AccountStats;
     },
+
+    async listChallengesSummary() {
+      // One query across every active challenge (council: "no N+1 per
+      // challenge"), reusing the exact eligibility shape `listLeaderboard`/
+      // `listChallengePlacements` already established, just GROUP BY'd
+      // instead of scoped to a single challenge_id.
+      const { results } = await db
+        .prepare(
+          `WITH resolved AS (
+             SELECT r.id, r.challenge_id,
+                    coalesce(a.canonical_account_id, r.canonical_account_id, r.account_id) account_id,
+                    r.status, r.elapsed_ms, r.click_count, r.completed_at, r.abandoned_at,
+                    r.protocol_version, r.ranked_eligible
+             FROM runs r
+             LEFT JOIN account_aliases a
+               ON a.alias_account_id = coalesce(r.canonical_account_id, r.account_id)
+             WHERE r.board_excluded = 0
+           ), eligible AS (
+             SELECT *, CASE WHEN status = 'completed' THEN 0 ELSE 1 END result_group
+             FROM resolved
+             WHERE (
+               status = 'completed' AND elapsed_ms IS NOT NULL AND completed_at IS NOT NULL
+               AND ((protocol_version = 2 AND ranked_eligible = 1) OR protocol_version = 1)
+             ) OR (
+               status = 'abandoned' AND click_count > 0
+               AND elapsed_ms IS NOT NULL AND abandoned_at IS NOT NULL
+             )
+           ), players AS (
+             SELECT challenge_id, COUNT(DISTINCT account_id) player_count
+             FROM eligible
+             GROUP BY challenge_id
+           ), completed_best AS (
+             SELECT challenge_id, account_id, elapsed_ms, click_count, completed_at, id,
+                    row_number() OVER (
+                      PARTITION BY challenge_id, account_id
+                      ORDER BY elapsed_ms ASC, click_count ASC, completed_at ASC, id
+                    ) account_rank
+             FROM eligible
+             WHERE result_group = 0
+           ), overall_best AS (
+             SELECT challenge_id, elapsed_ms, click_count,
+                    row_number() OVER (
+                      PARTITION BY challenge_id
+                      ORDER BY elapsed_ms ASC, click_count ASC, completed_at ASC, id
+                    ) overall_rank
+             FROM completed_best
+             WHERE account_rank = 1
+           )
+           SELECT c.id challenge_id,
+                  coalesce(p.player_count, 0) player_count,
+                  ob.elapsed_ms best_elapsed_ms,
+                  ob.click_count best_click_count
+           FROM challenges c
+           LEFT JOIN players p ON p.challenge_id = c.id
+           LEFT JOIN overall_best ob ON ob.challenge_id = c.id AND ob.overall_rank = 1
+           WHERE c.is_active = 1
+           ORDER BY c.sort_order`,
+        )
+        .all<ChallengeSummaryQueryRow>();
+      return results.map((row) => ({
+        challengeId: row.challenge_id,
+        playerCount: Number(row.player_count),
+        best: row.best_elapsed_ms == null
+          ? null
+          : { elapsedMs: Number(row.best_elapsed_ms), clickCount: Number(row.best_click_count) },
+      }));
+    },
+
+    async getAccountChallengeOutcomes(accountInput) {
+      const account = normalizeAuthorizedAccount(accountInput);
+      const receipt = receiptIdsCte(account);
+      const { results } = await db
+        .prepare(
+          `WITH ${receipt.sql}, owner_runs AS (
+             SELECT r.challenge_id, r.id, r.status, r.elapsed_ms, r.click_count,
+                    r.completed_at, r.abandoned_at, r.protocol_version, r.ranked_eligible
+             FROM runs r
+             LEFT JOIN account_aliases a ON a.alias_account_id = coalesce(r.canonical_account_id, r.account_id)
+             WHERE r.board_excluded = 0
+               AND (
+                 coalesce(r.canonical_account_id, r.account_id) IN (SELECT account_id FROM receipt_ids)
+                 OR a.canonical_account_id IN (SELECT account_id FROM receipt_ids)
+               )
+           ), eligible AS (
+             SELECT *, CASE WHEN status = 'completed' THEN 0 ELSE 1 END result_group
+             FROM owner_runs
+             WHERE (
+               status = 'completed' AND elapsed_ms IS NOT NULL AND completed_at IS NOT NULL
+               AND ((protocol_version = 2 AND ranked_eligible = 1) OR protocol_version = 1)
+             ) OR (
+               status = 'abandoned' AND click_count > 0
+               AND elapsed_ms IS NOT NULL AND abandoned_at IS NOT NULL
+             )
+           ), best_completed AS (
+             SELECT challenge_id, elapsed_ms, click_count,
+                    row_number() OVER (
+                      PARTITION BY challenge_id
+                      ORDER BY elapsed_ms ASC, click_count ASC, completed_at ASC, id
+                    ) rn
+             FROM eligible
+             WHERE result_group = 0
+           )
+           SELECT e.challenge_id challenge_id,
+                  min(e.result_group) best_group,
+                  bc.elapsed_ms best_elapsed_ms,
+                  bc.click_count best_click_count
+           FROM eligible e
+           LEFT JOIN best_completed bc ON bc.challenge_id = e.challenge_id AND bc.rn = 1
+           GROUP BY e.challenge_id`,
+        )
+        .bind(...receipt.bindings)
+        .all<ChallengeOutcomeQueryRow>();
+      return results.map((row) => {
+        const completed = Number(row.best_group) === 0;
+        return {
+          challengeId: row.challenge_id,
+          outcome: completed ? "completed" as const : "dnf" as const,
+          best: completed
+            ? { elapsedMs: Number(row.best_elapsed_ms), clickCount: Number(row.best_click_count) }
+            : null,
+        };
+      });
+    },
+
+    async getPlayAnotherSuggestion(accountInput, todayCentral) {
+      const account = normalizeAuthorizedAccount(accountInput);
+      const receipt = receiptIdsCte(account);
+      const row = await db
+        .prepare(
+          `WITH ${receipt.sql}, touched AS (
+             SELECT DISTINCT r.challenge_id
+             FROM runs r
+             LEFT JOIN account_aliases a ON a.alias_account_id = coalesce(r.canonical_account_id, r.account_id)
+             WHERE coalesce(r.canonical_account_id, r.account_id) IN (SELECT account_id FROM receipt_ids)
+                OR a.canonical_account_id IN (SELECT account_id FROM receipt_ids)
+           ), resolved AS (
+             SELECT r.challenge_id,
+                    coalesce(a2.canonical_account_id, r.canonical_account_id, r.account_id) account_id,
+                    r.status, r.elapsed_ms, r.click_count, r.completed_at, r.abandoned_at,
+                    r.protocol_version, r.ranked_eligible
+             FROM runs r
+             LEFT JOIN account_aliases a2 ON a2.alias_account_id = coalesce(r.canonical_account_id, r.account_id)
+             WHERE r.board_excluded = 0
+           ), eligible AS (
+             SELECT * FROM resolved
+             WHERE (
+               status = 'completed' AND elapsed_ms IS NOT NULL AND completed_at IS NOT NULL
+               AND ((protocol_version = 2 AND ranked_eligible = 1) OR protocol_version = 1)
+             ) OR (
+               status = 'abandoned' AND click_count > 0
+               AND elapsed_ms IS NOT NULL AND abandoned_at IS NOT NULL
+             )
+           ), players AS (
+             SELECT challenge_id, COUNT(DISTINCT account_id) player_count
+             FROM eligible
+             GROUP BY challenge_id
+           )
+           SELECT c.id, c.label, c.start_title, c.target_title, c.ruleset, c.sort_order,
+                  c.is_active, c.start_page_id, c.target_page_id, c.created_by_account_id,
+                  c.created_by_display_name, c.created_by_identity_status, c.origin,
+                  c.daily_date, c.source,
+                  f.daily_date AS feature_daily_date, f.flavor AS feature_flavor,
+                  f.selection_source AS feature_selection_source
+           FROM challenges c
+           LEFT JOIN daily_features f ON f.challenge_id = c.id
+           LEFT JOIN players p ON p.challenge_id = c.id
+           WHERE c.is_active = 1
+             AND c.id NOT IN (SELECT challenge_id FROM touched)
+             AND NOT EXISTS (
+               SELECT 1 FROM daily_features today
+               WHERE today.daily_date = ? AND today.challenge_id = c.id
+             )
+           ORDER BY coalesce(p.player_count, 0) DESC, c.sort_order ASC
+           LIMIT 1`,
+        )
+        .bind(...receipt.bindings, todayCentral)
+        .first<ChallengeRow>();
+      return row ? mapChallengeRow(row) : null;
+    },
+
+    async beginRandomChallengeAttempt(accountInput, idempotencyKey) {
+      const account = normalizeAuthorizedAccount(accountInput);
+      const cleanIdempotencyKey = requireValue(idempotencyKey, "invalid_idempotency_key");
+      const at = timestamp();
+      const staleBefore = new Date(
+        Date.parse(at) - RANDOM_CHALLENGE_LOCK_STALE_MS,
+      ).toISOString();
+      const lockResult = await db
+        .prepare(
+          `INSERT INTO operation_idempotency
+             (operation, idempotency_key, canonical_account_id, request_fingerprint,
+              outcome_status, created_at)
+           VALUES ('random_challenge_lock', ?, ?, ?, 'pending', ?)
+           ON CONFLICT(operation, idempotency_key) DO UPDATE SET
+             request_fingerprint = excluded.request_fingerprint,
+             outcome_status = 'pending',
+             created_at = excluded.created_at
+           WHERE operation_idempotency.outcome_status <> 'pending'
+              OR operation_idempotency.created_at < ?`,
+        )
+        .bind(account.accountId, account.accountId, cleanIdempotencyKey, at, staleBefore)
+        .run();
+      if (mutationChanges(lockResult) !== 1) {
+        return "in_progress";
+      }
+
+      const receipt = receiptIdsCte(account);
+      const hourAgo = new Date(Date.parse(at) - 60 * 60 * 1000).toISOString();
+      const quotaRow = await db
+        .prepare(
+          `WITH ${receipt.sql}
+           SELECT count(*) recent
+           FROM challenges c
+           LEFT JOIN account_aliases a ON a.alias_account_id = c.created_by_account_id
+           WHERE c.origin = 'manual' AND c.source = 'wikipedia_random'
+             AND c.created_at > ?
+             AND (
+               c.created_by_account_id IN (SELECT account_id FROM receipt_ids)
+               OR a.canonical_account_id IN (SELECT account_id FROM receipt_ids)
+             )`,
+        )
+        .bind(...receipt.bindings, hourAgo)
+        .first<{ recent: number }>();
+      if (Number(quotaRow?.recent ?? 0) >= RANDOM_CHALLENGE_HOURLY_QUOTA) {
+        await releaseRandomChallengeLock(db, account.accountId, "rejected", null);
+        return "quota_exceeded";
+      }
+      return "ok";
+    },
+
+    async finishRandomChallengeAttempt(accountInput, outcome, resourceId) {
+      const account = normalizeAuthorizedAccount(accountInput);
+      await releaseRandomChallengeLock(db, account.accountId, outcome, resourceId);
+    },
   };
 
   return repository;
@@ -3378,6 +3613,7 @@ function normalizeCreateChallengeInput(input: CreateChallengeV2Input): CreateCha
     requestFingerprint: input.requestFingerprint === undefined
       ? undefined
       : requireValue(input.requestFingerprint, "invalid_request_fingerprint"),
+    source: input.source === "wikipedia_random" ? "wikipedia_random" : "curated",
   };
 }
 
@@ -4683,6 +4919,42 @@ function mutationChanges(result: unknown): number {
   return Number((result as D1ResultLike | undefined)?.meta?.changes ?? 0);
 }
 
+/**
+ * On-demand random-challenge endpoint (Increment 5): a per-account
+ * concurrency lock, "borrowing" the `operation_idempotency` table (no
+ * migration needed - see the plan's "no migration this increment"
+ * constraint) with `operation = 'random_challenge_lock'` and
+ * `idempotency_key = <canonical accountId>`, so its primary key
+ * `(operation, idempotency_key)` gives at most one row per account for
+ * this operation - a true per-account mutex, not a per-request replay
+ * record like every other `operation_idempotency` consumer. The real
+ * client-supplied idempotency key rides along in `request_fingerprint`
+ * purely for observability. `RANDOM_CHALLENGE_LOCK_STALE_MS` bounds how
+ * long a lock can be held if a Worker invocation dies mid-flight without
+ * reaching `finishRandomChallengeAttempt` (comfortably above the ~25s
+ * worst-case candidate-selection wall time).
+ */
+const RANDOM_CHALLENGE_LOCK_STALE_MS = 60_000;
+
+/** D1-side hourly creation quota (spec: "max 3 creations/hour/account"). */
+const RANDOM_CHALLENGE_HOURLY_QUOTA = 3;
+
+async function releaseRandomChallengeLock(
+  db: D1DatabaseLike,
+  canonicalAccountId: string,
+  outcome: "accepted" | "rejected",
+  resourceId: string | null,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE operation_idempotency
+       SET outcome_status = ?, resource_id = ?
+       WHERE operation = 'random_challenge_lock' AND idempotency_key = ?`,
+    )
+    .bind(outcome, resourceId, canonicalAccountId)
+    .run();
+}
+
 function dailyRetryHours(attemptCount: number): number {
   return [1, 2, 4, 6][Math.min(Math.max(attemptCount - 1, 0), 3)] ?? 6;
 }
@@ -4767,6 +5039,20 @@ interface ChallengeDnfQueryRow {
   click_count: number;
   abandoned_at: string;
   display_name?: string | null;
+}
+
+interface ChallengeSummaryQueryRow {
+  challenge_id: string;
+  player_count: number;
+  best_elapsed_ms: number | null;
+  best_click_count: number | null;
+}
+
+interface ChallengeOutcomeQueryRow {
+  challenge_id: string;
+  best_group: number;
+  best_elapsed_ms: number | null;
+  best_click_count: number | null;
 }
 
 interface DailyTrendQueryRow {

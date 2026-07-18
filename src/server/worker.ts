@@ -39,6 +39,15 @@ export interface Env {
   DAILY_ADMIN_RATE_LIMITER?: RateLimiter;
   IDENTITY_RATE_LIMITER?: RateLimiter;
   RUN_START_RATE_LIMITER?: RateLimiter;
+  /**
+   * Increment 5 burst guard for `POST /api/v2/challenges/random` (spec:
+   * "an explicit low limit... a conservative global/IP ceiling"). Optional/
+   * fail-open when absent (like the other CF binding-backed limiters added
+   * alongside existing critical paths) - the D1-side hourly quota
+   * (`beginRandomChallengeAttempt`) is always enforced regardless of this
+   * binding's presence.
+   */
+  RANDOM_CHALLENGE_RATE_LIMITER?: RateLimiter;
 }
 
 type AuthorizedVGamesAccount = AuthorizedAccount;
@@ -284,6 +293,32 @@ async function dispatchV2(
   if (request.method === "GET" && url.pathname === "/api/v2/challenges") {
     return json(await tracking.handlers.listChallenges(), { headers: publicCacheHeaders() }, corsHeaders);
   }
+  if (request.method === "GET" && url.pathname === "/api/v2/challenges/summary") {
+    return json(
+      await tracking.handlers.listChallengesSummary(),
+      { headers: publicCacheHeaders() },
+      corsHeaders,
+    );
+  }
+  if (request.method === "GET" && url.pathname === "/api/v2/challenges/suggestion") {
+    const account = await tracking.authorize(request);
+    await enforceAccountReadRateLimit(env, account.accountId, "suggestion");
+    return json(
+      await tracking.handlers.getPlayAnotherSuggestion(account, centralDateKey(now)),
+      { headers: noStoreHeaders() },
+      corsHeaders,
+    );
+  }
+  if (request.method === "POST" && url.pathname === "/api/v2/challenges/random") {
+    const account = await tracking.authorize(request);
+    await enforceRandomChallengeRateLimit(env, account.accountId);
+    requireEmptyObject(await readJson(request));
+    return json(
+      await tracking.handlers.createRandomChallenge(account, requireIdempotencyKey(request)),
+      undefined,
+      corsHeaders,
+    );
+  }
   if (request.method === "POST" && url.pathname === "/api/v2/challenges") {
     const account = await tracking.authorize(request);
     await enforceChallengeCreateRateLimit(env, account.accountId);
@@ -291,6 +326,15 @@ async function dispatchV2(
     return json(
       await tracking.handlers.createChallengeV2(account, input, requireIdempotencyKey(request)),
       undefined,
+      corsHeaders,
+    );
+  }
+  if (request.method === "GET" && url.pathname === "/api/v2/account/challenge-outcomes") {
+    const account = await tracking.authorize(request);
+    await enforceAccountReadRateLimit(env, account.accountId, "outcomes");
+    return json(
+      await tracking.handlers.getAccountChallengeOutcomes(account),
+      { headers: noStoreHeaders() },
       corsHeaders,
     );
   }
@@ -684,8 +728,20 @@ async function dispatchLegacy(
 function createTracking(env: Env): WorkerTracking {
   const repository = createD1TrackingRepository({ db: env.VWIKI_RACE_DB });
   const wikipedia = createWikipediaChallengeValidator({ fetchImpl: fetch });
+  // Increment 5: a request-scoped instance of the same random-candidate
+  // machinery the daily generator uses (construction is cheap/no I/O until
+  // `findCandidate` runs) - reused as-is rather than threading the
+  // `scheduled()` cron's memoized instance through `dispatchV2`, which would
+  // require widening the public `WorkerOptions.createTracking` override
+  // signature every existing test relies on.
+  const randomChallengeSource = createDailyChallengeCandidateSource({
+    fetchImpl: fetch,
+    gateway: createWorkerWikipediaGateway(fetch),
+    onDiagnostic: logDailyCandidateDiagnostic,
+  });
   const handlers = createApiHandlers(repository, {
     validateChallengeArticles: wikipedia.validateChallengeArticles,
+    findRandomCandidate: (request) => randomChallengeSource.findCandidate(request),
   });
   const identity = createVGamesIdentityClient({
     baseUrl: env.VGAMES_URL,
@@ -1122,7 +1178,7 @@ async function enforceClickRateLimit(env: Env, accountId: string): Promise<void>
 async function enforceAccountReadRateLimit(
   env: Env,
   accountId: string,
-  route: "active" | "recovery-path" | "stats" | "capabilities",
+  route: "active" | "recovery-path" | "stats" | "capabilities" | "outcomes" | "suggestion",
 ): Promise<void> {
   if (!env.ACCOUNT_READ_RATE_LIMITER) {
     throw new ApiError(
@@ -1183,6 +1239,31 @@ async function enforceChallengeCreateRateLimit(
     throw new ApiError(
       "challenge_create_rate_limited",
       "Too many challenge validation requests. Try again shortly.",
+      429,
+      60,
+    );
+  }
+}
+
+/**
+ * Burst guard for `POST /api/v2/challenges/random` (spec: "an explicit low
+ * limit... a conservative global/IP ceiling"). Optional/fail-open when the
+ * binding is absent, unlike `enforceChallengeCreateRateLimit` - the D1-side
+ * hourly quota in `beginRandomChallengeAttempt` is the durable enforcement
+ * mechanism; this binding is a cheap belt-and-suspenders burst guard on top
+ * of it, not the only thing standing between the account and the Wikipedia
+ * crawl this endpoint kicks off.
+ */
+async function enforceRandomChallengeRateLimit(
+  env: Env,
+  accountId: string,
+): Promise<void> {
+  if (!env.RANDOM_CHALLENGE_RATE_LIMITER) return;
+  const result = await env.RANDOM_CHALLENGE_RATE_LIMITER.limit({ key: accountId });
+  if (!result.success) {
+    throw new ApiError(
+      "random_challenge_rate_limited",
+      "Too many random challenge requests. Try again shortly.",
       429,
       60,
     );

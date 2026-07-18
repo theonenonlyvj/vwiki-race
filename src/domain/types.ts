@@ -291,3 +291,38 @@ export interface ChallengeBoardDnfRow {
   clickCount: number;
   elapsedMs: number;
 }
+
+/**
+ * Browse's per-challenge aggregate card data (Increment 5, UX redesign spec
+ * §Challenges - "N players · best 0:38 · 5 clk"; §Data requirements -
+ * "Browse aggregate + bulk per-account outcome"). `playerCount` is DISTINCT
+ * CANONICAL ACCOUNTS with a board-visible run (completed-eligible OR
+ * ≥1-click DNF, `board_excluded = 0`) - council: "already forge-floored vs
+ * raw run counts," so no extra account-days flooring is needed on top of
+ * this (unlike the rolling multi-daily trends, a single static challenge has
+ * no day dimension to inflate via repeat same-day plays). `best` is the
+ * challenge's #1 placement (completed-only, same ordering as
+ * `listChallengePlacements`); `null` when nobody has finished it yet even if
+ * it has DNFs/players.
+ */
+export interface ChallengeSummaryEntry {
+  challengeId: string;
+  playerCount: number;
+  best: { elapsedMs: number; clickCount: number } | null;
+}
+
+/**
+ * Bulk per-account outcome across the whole catalog (Increment 5, UX
+ * redesign spec §Challenges state chips; invariant 2 precedence - a
+ * completed-eligible run beats a later DNF, permanently: "A completion is
+ * permanent"). Alias-resolved to the caller's canonical account. Only
+ * challenges the account has an ELIGIBLE run on appear here at all (a
+ * 0-click or otherwise ineligible run is absent - the client's default
+ * "NEW" chip covers that case by omission). `best` is populated only for
+ * `outcome: "completed"`.
+ */
+export interface ChallengeOutcomeEntry {
+  challengeId: string;
+  outcome: "completed" | "dnf";
+  best: { elapsedMs: number; clickCount: number } | null;
+}

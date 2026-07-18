@@ -6,6 +6,8 @@ import type {
   Challenge,
   ChallengeBoardDnfRow,
   ChallengeBoardPlacement,
+  ChallengeOutcomeEntry,
+  ChallengeSummaryEntry,
   DailyTrendRankedEntry,
   DailyTrendUnrankedEntry,
   LeaderboardContext,
@@ -168,4 +170,34 @@ export interface DailyCapabilitiesResponse {
 export interface DailyAdminStateResponse {
   nominations: DailyNomination[];
   queueEntries: DailyQueueEntry[];
+}
+
+/**
+ * Browse's per-card aggregate (Increment 5, unauthenticated - `GET
+ * /api/v2/challenges/summary`, "like the catalog" per plan). One entry per
+ * active challenge; the client matches entries to `listChallenges` rows by
+ * `challengeId`.
+ */
+export interface ChallengesSummaryResponse {
+  challenges: ChallengeSummaryEntry[];
+}
+
+/**
+ * Browse's bulk state-chip data for the caller (Increment 5, authenticated -
+ * `GET /api/v2/account/challenge-outcomes`). One entry per challenge the
+ * caller has touched with an eligible run; absence means the client's
+ * default "NEW" chip applies.
+ */
+export interface AccountChallengeOutcomesResponse {
+  outcomes: ChallengeOutcomeEntry[];
+}
+
+/**
+ * Home's Play-another suggestion (Increment 5, authenticated - `GET
+ * /api/v2/challenges/suggestion`). `challenge` is `null` once the caller has
+ * started every active, non-daily challenge - the client falls back to "Create
+ * a random new one" (`POST /api/v2/challenges/random`).
+ */
+export interface ChallengeSuggestionResponse {
+  challenge: Challenge | null;
 }

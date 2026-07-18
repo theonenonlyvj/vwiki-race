@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createApiHandlers } from "./apiHandlers";
+import { DailyChallengeCandidateError } from "./dailyCandidateEvaluator";
 import { ApiError } from "./http";
 import type { TrackingRepository } from "./trackingRepository";
 import { createWorker, type Env as WorkerEnv, type WorkerTracking } from "./worker";
@@ -781,6 +782,139 @@ describe("api handlers", () => {
       code: "invalid_window",
       status: 400,
     });
+  });
+});
+
+describe("createRandomChallenge handler (Increment 5)", () => {
+  const caller = {
+    accountId: "acc-1",
+    displayName: "Casey",
+    status: "claimed" as const,
+    aliases: [] as string[],
+  };
+  const candidate = {
+    startTitle: "Random Start",
+    startPageId: 8_001,
+    startAllowedLinkCount: 8,
+    targetTitle: "Random Target",
+    targetPageId: 8_002,
+    selectedScore: 42,
+  };
+
+  function randomRepository(overrides: Record<string, unknown> = {}) {
+    const repository = fakeRepository();
+    const created = {
+      challenge: { id: "challenge-0042" },
+      disposition: "created" as const,
+      nomination: "not_requested" as const,
+    };
+    Object.assign(repository, {
+      beginRandomChallengeAttempt: vi.fn(async () => "ok" as const),
+      finishRandomChallengeAttempt: vi.fn(async () => undefined),
+      createChallengeV2: vi.fn(async () => created),
+      ...overrides,
+    });
+    return repository as TrackingRepository & {
+      beginRandomChallengeAttempt: ReturnType<typeof vi.fn>;
+      finishRandomChallengeAttempt: ReturnType<typeof vi.fn>;
+      createChallengeV2: ReturnType<typeof vi.fn>;
+    };
+  }
+
+  it("creates via the injected candidate machinery with source='wikipedia_random' and caller attribution, then releases the lock as accepted", async () => {
+    const repository = randomRepository();
+    const findRandomCandidate = vi.fn(async () => candidate);
+    const handlers = createApiHandlers(repository, { findRandomCandidate });
+
+    const outcome = await handlers.createRandomChallenge(caller, "random-key-1");
+
+    expect(outcome.challenge.id).toBe("challenge-0042");
+    expect(findRandomCandidate).toHaveBeenCalledWith(expect.objectContaining({ flavor: "recognizable" }));
+    expect(repository.createChallengeV2).toHaveBeenCalledWith(caller, expect.objectContaining({
+      startTitle: "Random Start",
+      startPageId: 8_001,
+      startAllowedLinkCount: 8,
+      targetTitle: "Random Target",
+      targetPageId: 8_002,
+      idempotencyKey: "random-key-1",
+      nominateForDaily: false,
+      source: "wikipedia_random",
+    }));
+    expect(repository.finishRandomChallengeAttempt).toHaveBeenCalledWith(caller, "accepted", "challenge-0042");
+  });
+
+  it("maps a pending concurrent attempt to a 429 without touching the candidate machinery", async () => {
+    const repository = randomRepository({
+      beginRandomChallengeAttempt: vi.fn(async () => "in_progress" as const),
+    });
+    const findRandomCandidate = vi.fn(async () => candidate);
+    const handlers = createApiHandlers(repository, { findRandomCandidate });
+
+    await expect(handlers.createRandomChallenge(caller, "random-key-2")).rejects.toMatchObject({
+      code: "random_challenge_in_progress",
+      status: 429,
+    });
+    expect(findRandomCandidate).not.toHaveBeenCalled();
+    expect(repository.finishRandomChallengeAttempt).not.toHaveBeenCalled();
+  });
+
+  it("maps an exhausted hourly quota to a 429 with a one-hour Retry-After", async () => {
+    const repository = randomRepository({
+      beginRandomChallengeAttempt: vi.fn(async () => "quota_exceeded" as const),
+    });
+    const findRandomCandidate = vi.fn(async () => candidate);
+    const handlers = createApiHandlers(repository, { findRandomCandidate });
+
+    await expect(handlers.createRandomChallenge(caller, "random-key-3")).rejects.toMatchObject({
+      code: "random_challenge_quota_exceeded",
+      status: 429,
+      retryAfterSeconds: 3600,
+    });
+    expect(findRandomCandidate).not.toHaveBeenCalled();
+    // beginRandomChallengeAttempt released the lock itself on quota rejection.
+    expect(repository.finishRandomChallengeAttempt).not.toHaveBeenCalled();
+  });
+
+  it("maps candidate-machinery failure to a retryable 503 and releases the lock as rejected", async () => {
+    const repository = randomRepository();
+    const findRandomCandidate = vi.fn(async () => {
+      throw new DailyChallengeCandidateError("daily_candidate_unavailable");
+    });
+    const handlers = createApiHandlers(repository, { findRandomCandidate });
+
+    await expect(handlers.createRandomChallenge(caller, "random-key-4")).rejects.toMatchObject({
+      code: "random_challenge_unavailable",
+      status: 503,
+    });
+    expect(repository.finishRandomChallengeAttempt).toHaveBeenCalledWith(caller, "rejected", null);
+    expect(repository.createChallengeV2).not.toHaveBeenCalled();
+  });
+
+  it("releases the lock as rejected when challenge persistence itself throws", async () => {
+    const repository = randomRepository({
+      createChallengeV2: vi.fn(async () => {
+        throw new ApiError("start_has_no_allowed_links", "The start article has no allowed links.", 409);
+      }),
+    });
+    const handlers = createApiHandlers(repository, {
+      findRandomCandidate: vi.fn(async () => candidate),
+    });
+
+    await expect(handlers.createRandomChallenge(caller, "random-key-5")).rejects.toMatchObject({
+      code: "start_has_no_allowed_links",
+    });
+    expect(repository.finishRandomChallengeAttempt).toHaveBeenCalledWith(caller, "rejected", null);
+  });
+
+  it("fails with a clear 500 and releases the lock when no candidate source was injected", async () => {
+    const repository = randomRepository();
+    const handlers = createApiHandlers(repository);
+
+    await expect(handlers.createRandomChallenge(caller, "random-key-6")).rejects.toMatchObject({
+      code: "random_candidate_source_unavailable",
+      status: 500,
+    });
+    expect(repository.finishRandomChallengeAttempt).toHaveBeenCalledWith(caller, "rejected", null);
   });
 });
 
