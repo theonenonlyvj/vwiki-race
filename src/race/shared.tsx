@@ -128,6 +128,42 @@ export function composeShareText(
 }
 
 /**
+ * QF-10 (round-2 quickfix, owner-proxy ruling): tries the OS's native share
+ * sheet first (iOS Safari, Android Chrome, any other navigator.share-
+ * capable browser) before falling back to the existing clipboard flow.
+ * Deliberately NOT folded into `useClipboardShare` above (binding scope) -
+ * both share buttons call this locally from their own onClick, so the
+ * shared hook's clipboard-only contract - and every test already written
+ * against it - stays untouched. A user-cancelled share (AbortError) is a
+ * no-op, not an error; any other failure (including no navigator.share at
+ * all) falls through to the same clipboard-write `copy` the hook already
+ * exposes. Passes `text` only, never a separate `url` field - `text` here
+ * already carries the URL baked in (`composeShareText`/`challengeShareUrl`
+ * both compose it that way), and some share targets (notably iOS Messages)
+ * render the link twice if it's also passed as `url`.
+ */
+async function shareOrCopy(text: string, copy: () => Promise<void>): Promise<void> {
+  if (navigator.share) {
+    try {
+      await navigator.share({ text });
+      return;
+    } catch (error) {
+      // A cancelled share rejects with an `AbortError` DOMException, which
+      // (per spec) does NOT extend `Error` - checked by duck-typed `.name`,
+      // not `instanceof Error`, so this actually catches the real rejection
+      // shape browsers use.
+      const name = error && typeof error === "object" && "name" in error
+        ? (error as { name?: unknown }).name
+        : undefined;
+      if (name === "AbortError") return;
+      // Any other failure falls through to the clipboard fallback below - a
+      // real share failure shouldn't leave the tap with no outcome at all.
+    }
+  }
+  await copy();
+}
+
+/**
  * Shared "Share result" affordance - Results' completed AND (PKG-05) dnf
  * outcomes, plus Home's post-play card (UX redesign spec: "reuse
  * useClipboardShare + the Results composition"), all render this exact
@@ -154,7 +190,7 @@ export function ShareResultButton({
       <button
         disabled={copyStatus === "copying"}
         type="button"
-        onClick={() => void copy()}
+        onClick={() => void shareOrCopy(shareText, copy)}
       >
         Share result
       </button>
@@ -188,7 +224,7 @@ export function ChallengeShareButton({ challengeId }: { challengeId: string }) {
       <button
         className="secondary-button"
         disabled={status === "copying"}
-        onClick={() => void copy()}
+        onClick={() => void shareOrCopy(shareUrl, copy)}
         type="button"
       >
         Copy challenge link

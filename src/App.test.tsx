@@ -2953,6 +2953,53 @@ describe("VWiki Race app", () => {
     }
   });
 
+  it("QF-10: Copy challenge link opens the native OS share sheet when navigator.share is available, without touching the clipboard", async () => {
+    // Ruling widened QF-10 to ChallengeShareButton too (same file, same
+    // useClipboardShare hook, same clipboard-only gap ShareResultButton
+    // had).
+    window.history.pushState({}, "", "/?challenge=challenge-0002");
+    const user = userEvent.setup();
+    const shareDescriptor = Object.getOwnPropertyDescriptor(navigator, "share");
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const share = vi.fn().mockResolvedValue(undefined);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "share", { configurable: true, value: share });
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+
+    try {
+      render(
+        <App
+          apiOrigin={apiOrigin}
+          fetchImpl={createFetchMock({ challenges: twoChallenges() })}
+          storage={claimedStorage()}
+        />,
+      );
+
+      const detail = await screen.findByRole("region", { name: /challenge detail/i });
+      await user.click(
+        within(detail).getByRole("button", { name: /copy challenge link/i }),
+      );
+
+      await waitFor(() => {
+        expect(share).toHaveBeenCalledWith({
+          text: `${window.location.origin}/?challenge=challenge-0002`,
+        });
+      });
+      expect(writeText).not.toHaveBeenCalled();
+    } finally {
+      if (shareDescriptor) {
+        Object.defineProperty(navigator, "share", shareDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "share");
+      }
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "clipboard");
+      }
+    }
+  });
+
   it("shares a composed placement/time/clicks line from the results screen", async () => {
     const user = userEvent.setup();
     const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
@@ -2985,6 +3032,100 @@ describe("VWiki Race app", () => {
         );
       });
     } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "clipboard");
+      }
+    }
+  });
+
+  it("QF-10: Share result opens the native OS share sheet with the same composed text when navigator.share is available, without touching the clipboard", async () => {
+    const user = userEvent.setup();
+    const shareDescriptor = Object.getOwnPropertyDescriptor(navigator, "share");
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const share = vi.fn().mockResolvedValue(undefined);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "share", { configurable: true, value: share });
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+
+    try {
+      render(
+        <App
+          apiOrigin={apiOrigin}
+          fetchImpl={createFetchMock()}
+          storage={claimedStorage()}
+        />,
+      );
+
+      await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+      await user.click(await screen.findByRole("button", { name: /start race/i }));
+      await user.click(await screen.findByRole("link", { name: /fruit/i }));
+
+      expect(await screen.findByText(/you reached it/i)).toBeVisible();
+      await user.click(screen.getByRole("button", { name: /share result/i }));
+
+      await waitFor(() => {
+        // `text` only - never a separate `url` field, which would risk some
+        // share targets (iOS Messages) rendering the link twice.
+        expect(share).toHaveBeenCalledWith({
+          text: `VWiki Race — Challenge #1 — #1 · 0:01 · 1 clk — ${window.location.origin}/?challenge=challenge-0001`,
+        });
+      });
+      expect(writeText).not.toHaveBeenCalled();
+      expect(screen.queryByText(/result copied/i)).toBeNull();
+    } finally {
+      if (shareDescriptor) {
+        Object.defineProperty(navigator, "share", shareDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "share");
+      }
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "clipboard");
+      }
+    }
+  });
+
+  it("QF-10: a user-cancelled native share (AbortError) is a no-op on Share result - no error state, no clipboard fallback", async () => {
+    const user = userEvent.setup();
+    const shareDescriptor = Object.getOwnPropertyDescriptor(navigator, "share");
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    // Per spec, a cancelled share() rejects with an AbortError DOMException
+    // - which does NOT extend Error, so this also exercises the duck-typed
+    // `.name` check in shareOrCopy rather than an `instanceof Error` guard.
+    const share = vi.fn().mockRejectedValue(new DOMException("Share cancelled.", "AbortError"));
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "share", { configurable: true, value: share });
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+
+    try {
+      render(
+        <App
+          apiOrigin={apiOrigin}
+          fetchImpl={createFetchMock()}
+          storage={claimedStorage()}
+        />,
+      );
+
+      await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+      await user.click(await screen.findByRole("button", { name: /start race/i }));
+      await user.click(await screen.findByRole("link", { name: /fruit/i }));
+
+      expect(await screen.findByText(/you reached it/i)).toBeVisible();
+      await user.click(screen.getByRole("button", { name: /share result/i }));
+
+      await waitFor(() => expect(share).toHaveBeenCalled());
+      expect(writeText).not.toHaveBeenCalled();
+      expect(screen.queryByText(/automatic copy was blocked/i)).toBeNull();
+      expect(screen.queryByText(/result copied/i)).toBeNull();
+    } finally {
+      if (shareDescriptor) {
+        Object.defineProperty(navigator, "share", shareDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "share");
+      }
       if (clipboardDescriptor) {
         Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
       } else {
