@@ -4,6 +4,7 @@ import {
   createEditorialTargetPools,
   parseUnusualEntries,
   parseVitalEntries,
+  recognizableVitalEntries,
 } from "./editorialTargetPools";
 
 const vitalHtml = `
@@ -81,9 +82,11 @@ describe("editorial target pools", () => {
     ));
     const pools = createEditorialTargetPools({ fetchImpl: fetchImpl as unknown as typeof fetch, now: () => now });
 
-    await expect(pools.list("recognizable")).resolves.toHaveLength(3);
+    // Level 1 + Level 2 only - Level 3 is excluded from "recognizable"
+    // (owner decision 3, see the "recognizable pool" describe block below).
+    await expect(pools.list("recognizable")).resolves.toHaveLength(2);
     now += 24 * 60 * 60 * 1_000 - 1;
-    await expect(pools.list("recognizable")).resolves.toHaveLength(3);
+    await expect(pools.list("recognizable")).resolves.toHaveLength(2);
 
     expect(fetchImpl).toHaveBeenCalledTimes(4);
     expect(requestHeaders(fetchImpl)).toEqual(expect.objectContaining({
@@ -166,6 +169,50 @@ describe("editorial target pools", () => {
       { title: "Earth", pageId: 101, source: "vital", vitalLevel: 1 },
       { title: "Oddity", source: "unusual" },
     ]);
+  });
+
+  it("excludes a Level 3-only entry from recognizable but keeps it in hard (owner decision 3)", async () => {
+    const fetchImpl = vi.fn(async (url: string) => new Response(
+      url.includes("Unusual") ? unusualHtml : vitalFor(levelFromUrl(url)),
+    ));
+    const pools = createEditorialTargetPools({ fetchImpl: fetchImpl as unknown as typeof fetch });
+
+    const recognizable = await pools.list("recognizable");
+    expect(recognizable.map((entry) => entry.title)).toEqual(["Level 1", "Level 2"]);
+
+    const hard = await pools.list("hard");
+    expect(hard.map((entry) => entry.title)).toContain("Level 3");
+  });
+});
+
+describe("recognizable pool (owner decision 3)", () => {
+  it("keeps only Level 1-2 vital entries", () => {
+    const entries = [
+      { title: "One", source: "vital", vitalLevel: 1 },
+      { title: "Two", source: "vital", vitalLevel: 2 },
+      { title: "Three", source: "vital", vitalLevel: 3 },
+    ] as const;
+
+    expect(recognizableVitalEntries(entries)).toEqual([
+      { title: "One", source: "vital", vitalLevel: 1 },
+      { title: "Two", source: "vital", vitalLevel: 2 },
+    ]);
+  });
+
+  it("degrades to the full vital set and logs a diagnostic when the Level 1-2 subset is empty", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const entries = [
+      { title: "Three", source: "vital", vitalLevel: 3 },
+      { title: "Also three", source: "vital", vitalLevel: 3 },
+    ] as const;
+
+    expect(recognizableVitalEntries(entries)).toEqual(entries);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "editorial_recognizable_subset_empty",
+      expect.stringContaining('"vitalPoolSize":2'),
+    );
+
+    errorSpy.mockRestore();
   });
 });
 

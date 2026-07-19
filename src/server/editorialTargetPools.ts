@@ -282,9 +282,32 @@ function deduplicate(entries: readonly EditorialTarget[]): EditorialTarget[] {
 }
 
 function forFlavor(cache: EditorialPoolCache, flavor: DailyFlavor): EditorialTarget[] {
-  if (flavor === "recognizable") return [...cache.recognizable];
+  if (flavor === "recognizable") return recognizableVitalEntries(cache.recognizable);
   if (flavor === "weird") return [...cache.weird];
+  // hard: the full vital union (Level 1-3) plus unusual - hard days may
+  // lean on obscure Level 3 entries, that is the point (owner decision 3).
   return deduplicate([...cache.recognizable, ...cache.weird]);
+}
+
+const RECOGNIZABLE_MAX_VITAL_LEVEL = 2;
+
+/**
+ * Owner decision 3: the daily "recognizable" pool serves only famous
+ * (Level 1-2) vital articles - Level 3 stays in the vital pool for "hard"
+ * only. `entries` is `cache.recognizable`, the full Level 1-3 vital union.
+ *
+ * If the Level 1-2 subset is ever empty (a parse regression - structurally
+ * shouldn't happen today since `load()` already fails the whole pool load
+ * when any single level's entryCount is 0, but this defends against a
+ * future refactor of that guard), degrade to the full vital set rather
+ * than serving an empty "recognizable" pool - the 2026-07-19
+ * Unusual_articles incident taught us a thin pool must degrade, not die.
+ */
+export function recognizableVitalEntries(entries: readonly EditorialTarget[]): EditorialTarget[] {
+  const famous = entries.filter((entry) => (entry.vitalLevel ?? 3) <= RECOGNIZABLE_MAX_VITAL_LEVEL);
+  if (famous.length > 0) return famous;
+  console.error("editorial_recognizable_subset_empty", JSON.stringify({ vitalPoolSize: entries.length }));
+  return [...entries];
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
