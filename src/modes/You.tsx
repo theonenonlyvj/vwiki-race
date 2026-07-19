@@ -46,6 +46,21 @@ export default function You({
   );
 }
 
+// PKG-11 (council 2026-07-19, Judge A amendment 3, option b): "No data yet."
+// - StatsList's own established convention (below) - covers both
+// "stats haven't resolved yet" (loading/errored/no session; `stats` itself
+// is null - see App.tsx's accountStatsProjection, which conflates all three)
+// AND a resolved account's own genuinely-empty numeric field (`bestClicks`/
+// `bestElapsedMs` are legitimately `null` before a first completion, not a
+// missing-data bug). A confirmed-zero total (0 attempts, 0 completions, a
+// fresh account's 0-day streak) now renders as the real number "0", never a
+// bare "-" that reads like a rendering glitch. Distinguishing "loading" from
+// "errored" from "guest, nothing to fetch" would need new state threaded
+// through App.tsx -> AppShell.tsx -> You.tsx (accountStatsProjection has no
+// such signal today) - descoped to its own ticket per the council rescope;
+// this package only fixes the copy/zero-rendering, not that plumbing gap.
+const NO_DATA_YET = "No data yet.";
+
 function StatsPanel({ stats }: { stats: AccountStats | null }) {
   const totals = stats?.totals;
 
@@ -65,32 +80,32 @@ function StatsPanel({ stats }: { stats: AccountStats | null }) {
         <div>
           <dt>Streak</dt>
           <dd>
-            {stats ? `${stats.dailyStreak} ${stats.dailyStreak === 1 ? "day" : "days"}` : "-"}
+            {stats ? `${stats.dailyStreak} ${stats.dailyStreak === 1 ? "day" : "days"}` : NO_DATA_YET}
           </dd>
         </div>
         <div>
           <dt>Attempts</dt>
-          <dd>{totals?.attempts ?? "-"}</dd>
+          <dd>{totals ? totals.attempts : NO_DATA_YET}</dd>
         </div>
         <div>
           <dt>Completed</dt>
-          <dd>{totals?.completed ?? "-"}</dd>
+          <dd>{totals ? totals.completed : NO_DATA_YET}</dd>
         </div>
         <div>
           <dt>DNFs</dt>
-          <dd>{totals?.abandoned ?? "-"}</dd>
+          <dd>{totals ? totals.abandoned : NO_DATA_YET}</dd>
         </div>
         <div>
           <dt>Best speed</dt>
-          <dd>{totals?.bestElapsedMs === null || totals?.bestElapsedMs === undefined ? "-" : formatElapsed(totals.bestElapsedMs)}</dd>
+          <dd>{totals?.bestElapsedMs === null || totals?.bestElapsedMs === undefined ? NO_DATA_YET : formatElapsed(totals.bestElapsedMs)}</dd>
         </div>
         <div>
           <dt>Best clicks</dt>
-          <dd>{totals?.bestClicks ?? "-"}</dd>
+          <dd>{totals?.bestClicks === null || totals?.bestClicks === undefined ? NO_DATA_YET : totals.bestClicks}</dd>
         </div>
         <div>
           <dt>Completed clicks</dt>
-          <dd>{totals?.totalClicks ?? "-"}</dd>
+          <dd>{totals ? totals.totalClicks : NO_DATA_YET}</dd>
         </div>
       </dl>
       <StatsList
@@ -119,7 +134,7 @@ function StatsList({ title, items }: { title: string; items: string[] }) {
           ))}
         </ol>
       ) : (
-        <p className="muted">No data yet.</p>
+        <p className="muted">{NO_DATA_YET}</p>
       )}
     </section>
   );

@@ -291,23 +291,36 @@ export default function AppShell({
         ) : null}
       </section>
 
+      {/* PKG-11 (council 2026-07-19, Judge A amendment 5): the footer's
+          in-shell placement (every mode screen via this one AppShell render,
+          never during the race takeover - RaceFlow renders as App.tsx's
+          sibling, outside this component entirely) is a deliberate,
+          documented decision, not a leftover default. Verified against a
+          live render (Playwright, 390x844) that it never collides with the
+          fixed `.mode-nav` bar - `.app-shell`'s own bottom padding (PKG-09)
+          already reserves clearance below it; the council's mobile-07-you.png
+          evidence of an overlap was captured on an older build (pre-PKG-09's
+          footer-anchor fix), not the current code. Copy rewritten in product
+          voice ("Bugs or ideas? Tell us...") - was first-person ("Have
+          Feedback?... Want to see my other projects?"), reading like an aside
+          from the developer rather than the app itself. */}
       <footer className="site-footer">
         <p>
-          Have{" "}
+          Bugs or ideas?{" "}
           <a
             href="https://theonenonlyvj.github.io/personal-site/contact"
             rel="noopener noreferrer"
             target="_blank"
           >
-            Feedback
+            Tell us
           </a>
-          ? Want to see my other projects?{" "}
+          {" · "}
           <a
             href="https://theonenonlyvj.github.io/personal-site"
             rel="noopener noreferrer"
             target="_blank"
           >
-            Click here
+            More VGames
           </a>.
         </p>
       </footer>

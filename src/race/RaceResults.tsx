@@ -264,7 +264,7 @@ export default function RaceResults({
             type="button"
             onClick={onPlayAgain}
           >
-            {outcome.status === "dnf" ? "Try again" : "Play Again"}
+            {outcome.status === "dnf" ? "Try again" : "Play again"}
           </button>
           <button className="secondary-button" type="button" onClick={onShowLeaderboard}>
             View leaderboard
@@ -402,8 +402,13 @@ function ClaimCta({
       <h3>Keep your spot</h3>
       <p>You&apos;re on the board as {displayName}. Claim it so it stays yours.</p>
       <div className="claim-cta-actions">
+        {/* PKG-11 (council 2026-07-19): "Make a name" was flagged in the
+            design spec's own council notes as "a pun that may not parse for
+            first-time readers" - replaced with the app-wide account-verb
+            pair ("Create account"/"Log in") every other entry point now
+            uses. */}
         <button type="button" onClick={() => onClaimIdentity("create")}>
-          Make a name
+          Create account
         </button>
         <button className="link-button" type="button" onClick={() => onClaimIdentity("login")}>
           Log in

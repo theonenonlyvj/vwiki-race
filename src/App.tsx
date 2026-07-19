@@ -1450,6 +1450,12 @@ export default function App({
           <p>{endRunConfirmCopy}</p>
           {visibleError ? <p role="alert">{visibleError}</p> : null}
           <button disabled={modeState === "abandoning"} type="button" onClick={() => setEndConfirmationOpen(false)}>Continue run</button>
+          {/* PKG-11 (council 2026-07-19): "End Run" is the sole ratified
+              Title Case exception in the sentence-case sweep (RaceMode's own
+              "End Run" button ships Title Case in mockup-race-flow-v3) - this
+              confirm button and its recovery variant stay Title Case too,
+              as the same naming family, rather than reading as a mismatched
+              "Confirm end run" beside RaceMode's "End Run" trigger. */}
           <button disabled={modeState === "abandoning"} type="button" onClick={() => void confirmEndRun()}>
             {race.recoveryRun ? "Confirm End Old Run" : "Confirm End Run"}
           </button>
@@ -1531,11 +1537,24 @@ function IdentityPrompt({
             ? "Turn this guest into a VGames account without losing any runs. "
             : "Create a VGames account before the timer starts. "}
           Free, no email - keeps your name and stats on every device. One
-          account works across all V games.
+          account works across every VGames title.
         </p>
 
         {error ? <p role="alert">{error}</p> : null}
 
+        {/* PKG-11 (council 2026-07-19, copy sweep): one account-verb pair
+            app-wide - "Create account" / "Log in" - replacing the tab
+            switcher's old "Create New"/"Log In / Existing" (and, below, the
+            create form's old "Create VGames account" submit). The tab and
+            its matching form's submit button now say the exact same thing
+            while that mode is active (e.g. "Log in" tab + "Log in" submit) -
+            a deliberate choice, not an oversight: they're structurally
+            distinct (a `role="group"` mode switcher vs. a form's own
+            submit), so an identical label reads as reinforcement, not
+            confusion, the same way a "Log in" nav link sitting above a
+            "Log in" page button does on most sites. Tests disambiguate the
+            two via container scoping (`within` the switcher group vs.
+            `within` the form), not by giving them different text. */}
         <div
           className="auth-mode-switch"
           role="group"
@@ -1555,7 +1574,7 @@ function IdentityPrompt({
             onClick={() => onSetAuthMode("create")}
             type="button"
           >
-            Create New
+            Create account
           </button>
           <button
             aria-pressed={authMode === "login"}
@@ -1563,7 +1582,7 @@ function IdentityPrompt({
             onClick={() => onSetAuthMode("login")}
             type="button"
           >
-            Log In / Existing
+            Log in
           </button>
         </div>
 
@@ -1659,7 +1678,7 @@ function IdentityPrompt({
               />
             </label>
             <button disabled={authBusy} type="submit">
-              Create VGames account
+              Create account
             </button>
           </form>
         ) : null}

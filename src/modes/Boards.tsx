@@ -34,6 +34,16 @@ const SEGMENT_LABEL: Record<BoardsSegment, string> = {
   lifetime: "Lifetime",
 };
 
+// PKG-11 (council 2026-07-19, Judge A amendment 1): spelled-out prose only
+// for the "Rolling {window}" subheader line beneath the segment tabs - the
+// tabs themselves keep their compact "7d"/"30d" convention (a defensible,
+// common analytics shorthand the judges agreed doesn't need reworking).
+const TREND_PROSE_LABEL: Record<TrendSegment, string> = {
+  "7d": "7 days",
+  "30d": "30 days",
+  lifetime: "Lifetime",
+};
+
 const TREND_WINDOW_PARAM: Record<TrendSegment, BoardsTrendWindow> = {
   "7d": "7",
   "30d": "30",
@@ -416,7 +426,7 @@ export default function Boards({
         ) : (
           <>
             <p className="board-trend-subheader muted">
-              Rolling {SEGMENT_LABEL[segment]} · ranked by average placement · play {"≥"}{guard} dailies to rank
+              Rolling {TREND_PROSE_LABEL[segment]} · ranked by average placement · play {"≥"}{guard} dailies to rank
             </p>
 
             <section className="board-snippet" aria-label={`${SEGMENT_LABEL[segment]} rolling trend`}>
@@ -464,7 +474,16 @@ export default function Boards({
                   })}
                 </ol>
               ) : (
-                <p className="muted">No one has cleared the ranking guard yet.</p>
+                // PKG-11 (council 2026-07-19, owner-proxy ruling): the old
+                // "No one has cleared the ranking guard yet." leaked internal
+                // jargon ("ranking guard" is a design-note term, never
+                // in-app copy) - reworded to the warm, progress-framed voice
+                // Boards' own unranked section already uses below. Reads off
+                // the same server-echoed `guard` this branch's own presence
+                // already guarantees is non-null (F5 - never hardcode it).
+                <p className="muted">
+                  Nobody&apos;s played enough dailies to rank yet — play {guard} to show up here.
+                </p>
               )}
             </section>
 
@@ -523,7 +542,7 @@ export default function Boards({
               )}
             </div>
             <strong>
-              {activeChallenge.start.title} <span className="route-arrow">{"->"}</span>{" "}
+              {activeChallenge.start.title} <span className="route-arrow">{"→"}</span>{" "}
               {activeChallenge.target.title}
             </strong>
           </div>

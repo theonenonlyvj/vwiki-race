@@ -239,7 +239,7 @@ export default function ChallengeBrowser({
               </span>
               <span className="browse-card-title-row">
                 <strong>
-                  {pinnedDaily.start.title} {"->"} {pinnedDaily.target.title}
+                  {pinnedDaily.start.title} {"→"} {pinnedDaily.target.title}
                 </strong>
                 {hasSession ? (
                   <StateChip outcome={outcomesByChallengeId?.get(pinnedDaily.id)} />
@@ -275,7 +275,7 @@ export default function ChallengeBrowser({
                     </span>
                     <span className="browse-card-title-row">
                       <strong>
-                        {challenge.start.title} {"->"} {challenge.target.title}
+                        {challenge.start.title} {"→"} {challenge.target.title}
                       </strong>
                       {hasSession ? (
                         <StateChip outcome={outcomesByChallengeId?.get(challenge.id)} />
@@ -332,7 +332,7 @@ export default function ChallengeBrowser({
           </label>
         ) : null}
         <button type="submit" disabled={selectionLocked || !canCreate || isCreating}>
-          Create Challenge
+          Create challenge
         </button>
       </form>
 

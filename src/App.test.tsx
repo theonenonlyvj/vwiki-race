@@ -153,14 +153,14 @@ describe("VWiki Race app", () => {
 
     render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={storage} />);
 
-    const feedback = await screen.findByRole("link", { name: "Feedback" });
+    const feedback = await screen.findByRole("link", { name: "Tell us" });
     expect(feedback).toHaveAttribute(
       "href",
       "https://theonenonlyvj.github.io/personal-site/contact",
     );
     expect(feedback).toHaveAttribute("target", "_blank");
     expect(feedback.getAttribute("rel")).toContain("noopener");
-    const portfolio = screen.getByRole("link", { name: "Click here" });
+    const portfolio = screen.getByRole("link", { name: "More VGames" });
     expect(portfolio).toHaveAttribute(
       "href",
       "https://theonenonlyvj.github.io/personal-site",
@@ -171,8 +171,8 @@ describe("VWiki Race app", () => {
     const tabbar = screen.getByRole("navigation", { name: /vwiki race views/i });
     for (const tab of ["Boards", "Challenges", "You"]) {
       await userEvent.click(within(tabbar).getByRole("button", { name: tab }));
-      expect(screen.getByRole("link", { name: "Feedback" })).toBeVisible();
-      expect(screen.getByRole("link", { name: "Click here" })).toBeVisible();
+      expect(screen.getByRole("link", { name: "Tell us" })).toBeVisible();
+      expect(screen.getByRole("link", { name: "More VGames" })).toBeVisible();
     }
 
     await userEvent.click(within(tabbar).getByRole("button", { name: "Home" }));
@@ -181,8 +181,8 @@ describe("VWiki Race app", () => {
     );
     await userEvent.click(await screen.findByRole("button", { name: /start race/i }));
     expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
-    expect(screen.queryByRole("link", { name: "Feedback" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Click here" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Tell us" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "More VGames" })).toBeNull();
   });
 
   it("shows the first-visit teaching gate rules strip before start (supersedes the old how-to-play line)", async () => {
@@ -393,7 +393,7 @@ describe("VWiki Race app", () => {
     ).toBeVisible();
   });
 
-  it("defaults the start gate to a VGames Create New account flow", async () => {
+  it("defaults the start gate to a VGames Create account flow", async () => {
     const user = userEvent.setup();
     render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={memoryStorage()} />);
 
@@ -404,14 +404,14 @@ describe("VWiki Race app", () => {
     const options = within(dialog).getByRole("group", { name: /identity options/i });
     expect(within(options).getAllByRole("button").map((button) => button.textContent)).toEqual([
       "Guest",
-      "Create New",
-      "Log In / Existing",
+      "Create account",
+      "Log in",
     ]);
-    expect(within(options).getByRole("button", { name: /create new/i })).toHaveAttribute(
+    expect(within(options).getByRole("button", { name: /create account/i })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    expect(within(dialog).getByText(/one account works across all v games/i)).toBeVisible();
+    expect(within(dialog).getByText(/one account works across every vgames title/i)).toBeVisible();
     expect(within(dialog).getByLabelText(/vgames username/i)).toBeVisible();
     expect(within(dialog).getByLabelText(/confirm password/i)).toBeVisible();
     expect(within(dialog).queryByLabelText(/^display name$/i)).toBeNull();
@@ -429,7 +429,7 @@ describe("VWiki Race app", () => {
     await user.type(screen.getByLabelText(/vgames username/i), "vijay");
     await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
     await user.type(screen.getByLabelText(/confirm password/i), "secret-pass");
-    await user.click(screen.getByRole("button", { name: /create vgames account/i }));
+    await user.click(createAccountSubmitButton());
 
     expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
     expect(JSON.parse(storage.getItem("vwiki-race:vgames-session") ?? "{}")).toEqual({
@@ -454,7 +454,7 @@ describe("VWiki Race app", () => {
     await user.type(screen.getByLabelText(/vgames username/i), "vijay");
     await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
     await user.type(screen.getByLabelText(/confirm password/i), "different-pass");
-    await user.click(screen.getByRole("button", { name: /create vgames account/i }));
+    await user.click(createAccountSubmitButton());
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/passwords do not match/i);
     expect(fetchImpl).not.toHaveBeenCalledWith(
@@ -481,7 +481,7 @@ describe("VWiki Race app", () => {
     await user.type(screen.getByLabelText(/vgames username/i), "Mike Smith");
     await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
     await user.type(screen.getByLabelText(/confirm password/i), "secret-pass");
-    await user.click(screen.getByRole("button", { name: /create vgames account/i }));
+    await user.click(createAccountSubmitButton());
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /use 3-20 lowercase letters, numbers, or underscores/i,
@@ -509,7 +509,7 @@ describe("VWiki Race app", () => {
     await user.type(screen.getByLabelText(/vgames username/i), "vijay");
     await user.type(screen.getByLabelText(/^password$/i), "abc");
     await user.type(screen.getByLabelText(/confirm password/i), "abc");
-    await user.click(screen.getByRole("button", { name: /create vgames account/i }));
+    await user.click(createAccountSubmitButton());
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /use a password between 6 and 128 characters/i,
@@ -540,7 +540,7 @@ describe("VWiki Race app", () => {
     await user.type(screen.getByLabelText(/vgames username/i), "vijay");
     await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
     await user.type(screen.getByLabelText(/confirm password/i), "secret-pass");
-    await user.click(screen.getByRole("button", { name: /create vgames account/i }));
+    await user.click(createAccountSubmitButton());
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "That VGames username is already taken.",
@@ -576,7 +576,7 @@ describe("VWiki Race app", () => {
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    await user.click(screen.getByRole("button", { name: /log in \/ existing/i }));
+    await user.click(screen.getByRole("button", { name: /^log in$/i }));
     const username = screen.getByLabelText(/^username$/i) as HTMLInputElement;
     const password = screen.getByLabelText(/^password$/i) as HTMLInputElement;
     const valueSetter = Object.getOwnPropertyDescriptor(
@@ -618,7 +618,7 @@ describe("VWiki Race app", () => {
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    await user.click(screen.getByRole("button", { name: /log in \/ existing/i }));
+    await user.click(screen.getByRole("button", { name: /^log in$/i }));
     await user.type(screen.getByLabelText(/^username$/i), "vijay");
     await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
     const form = screen.getByLabelText(/^password$/i).closest("form") as HTMLFormElement;
@@ -631,8 +631,8 @@ describe("VWiki Race app", () => {
     )).toHaveLength(1);
     expect(screen.getByRole("button", { name: /logging in/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /^guest$/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /^create new$/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /log in \/ existing/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^create account$/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^log in$/i })).toBeDisabled();
 
     pendingLogin.resolve();
     expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
@@ -660,10 +660,14 @@ describe("VWiki Race app", () => {
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    await user.click(screen.getByRole("button", { name: /log in \/ existing/i }));
+    await user.click(screen.getByRole("button", { name: /^log in$/i }));
     await user.type(screen.getByLabelText(/^username$/i), "vijay");
     await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
-    await user.click(screen.getByRole("button", { name: /^log in$/i }));
+    // Scoped to the login form itself: the mode-switcher tab is ALSO named
+    // "Log in" while this tab is active (PKG-11's account-verb unification),
+    // so an unscoped query is ambiguous here.
+    const loginForm = screen.getByLabelText(/^password$/i).closest("form");
+    await user.click(within(loginForm as HTMLFormElement).getByRole("button", { name: /^log in$/i }));
 
     expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
     expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull();
@@ -744,7 +748,7 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: /start race/i }));
 
     expect(await screen.findByRole("dialog", { name: /save your stats/i })).toBeVisible();
-    expect(screen.getByRole("button", { name: /create vgames account/i })).toBeVisible();
+    expect(createAccountSubmitButton()).toBeVisible();
     expect(screen.getByLabelText(/vgames username/i)).toHaveValue("vijay");
     expect(screen.queryByRole("button", { name: /continue as guest/i })).toBeNull();
     await user.click(screen.getByRole("button", { name: /^guest$/i }));
@@ -1294,7 +1298,7 @@ describe("VWiki Race app", () => {
       expect(window.location.search).toBe("?challenge=challenge-0002");
     });
     const detail = await screen.findByRole("region", { name: /challenge detail/i });
-    expect(within(detail).getByRole("button", { name: /race this/i })).toBeEnabled();
+    expect(within(detail).getByRole("button", { name: /^▶ race$/i })).toBeEnabled();
   });
 
   it("clears the completed result when another challenge is opened from Browse (plan-drift fix: opens Detail)", async () => {
@@ -1575,7 +1579,7 @@ describe("VWiki Race app", () => {
     await waitFor(() => expect(leaderboardCalls(fetchImpl, "challenge-0001")).toBe(2));
     window.history.pushState({}, "", "/?challenge=challenge-0002");
     window.dispatchEvent(new PopStateEvent("popstate"));
-    expect((await screen.findAllByText(/mars -> water/i)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/mars → water/i)).length).toBeGreaterThan(0);
     await waitFor(() => expect(leaderboardCalls(fetchImpl, "challenge-0002")).toBeGreaterThan(0));
   });
 
@@ -1593,7 +1597,7 @@ describe("VWiki Race app", () => {
     expect(runPathCalls(fetchImpl, "run-ranked")).toBe(0);
     const disclosure = await screen.findByText(/view winning path/i);
     await user.click(disclosure);
-    expect((await screen.findAllByText(/apple -> fruit/i)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/apple → fruit/i)).length).toBeGreaterThan(0);
     await user.click(disclosure);
     await user.click(disclosure);
     expect(runPathCalls(fetchImpl, "run-ranked")).toBe(1);
@@ -1849,7 +1853,7 @@ describe("VWiki Race app", () => {
     await user.click(within(loginForm as HTMLFormElement).getByRole("button", { name: /^log in$/i }));
 
     expect(await screen.findByRole("region", { name: /challenge detail/i })).toBeVisible();
-    expect(screen.getByRole("button", { name: /race this/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^▶ race$/i })).toBeVisible();
     expect(createChallengeCalls(fetchImpl)).toBe(2);
     expect(createChallengeBodies(fetchImpl)).toEqual([
       { startTitle: "Mars", targetTitle: "Water", nominateForDaily: true },
@@ -1945,13 +1949,13 @@ describe("VWiki Race app", () => {
     // text is split across element boundaries - RTL's default text matcher
     // only concatenates a node's direct text-node children, not text
     // contributed by child elements (see fullTextMatch's doc comment).
-    expect((await screen.findAllByText(fullTextMatch(/mars -> water/i))).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(fullTextMatch(/mars → water/i))).length).toBeGreaterThan(0);
     await act(async () => {
       staleCatalog.resolve();
       await staleCatalog.promise;
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    await waitFor(() => expect(screen.queryByText(/apple -> fruit/i)).toBeNull());
+    await waitFor(() => expect(screen.queryByText(/apple → fruit/i)).toBeNull());
     catalogView.unmount();
 
     const staleLeaderboard = createDeferredResponse({ leaderboard: [leaderboardRow({ displayName: "Apple Runner", runId: "run-apple" })] });
@@ -2082,7 +2086,7 @@ describe("VWiki Race app", () => {
     // Home (see App.tsx's createChallengeWithSession) - "Race this" is the
     // Detail-native stand-in for the old "Start Challenge #2" button.
     expect(await screen.findByRole("region", { name: /challenge detail/i })).toBeVisible();
-    expect(screen.getByRole("button", { name: /race this/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^▶ race$/i })).toBeVisible();
     expect(within(nav).getByRole("button", { name: "Challenges" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -2100,7 +2104,7 @@ describe("VWiki Race app", () => {
     await act(async () => { await staleCatalog.promise; });
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /race this/i })).toBeVisible();
+      expect(screen.getByRole("button", { name: /^▶ race$/i })).toBeVisible();
       expect(window.location.search).toBe("?challenge=challenge-0002");
     });
     expect(within(nav).getByRole("button", { name: "Challenges" })).toHaveAttribute(
@@ -2189,7 +2193,7 @@ describe("VWiki Race app", () => {
     expect(
       await screen.findByRole("region", { name: /challenge detail/i }),
     ).toBeVisible();
-    expect((await screen.findAllByText(/mars -> water/i)).length).toBeGreaterThan(
+    expect((await screen.findAllByText(/mars → water/i)).length).toBeGreaterThan(
       0,
     );
     await waitFor(() => {
@@ -2336,7 +2340,7 @@ describe("VWiki Race app", () => {
     expect(await screen.findByText(notice)).toBeVisible();
     // Plan-drift fix: lands on the new/existing challenge's own Detail.
     expect(await screen.findByRole("region", { name: /challenge detail/i })).toBeVisible();
-    expect(screen.getByRole("button", { name: /race this/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^▶ race$/i })).toBeVisible();
   });
 
   it("preserves authoritative catalog Daily metadata from a legacy duplicate outcome", async () => {
@@ -2492,7 +2496,7 @@ describe("VWiki Race app", () => {
     // Plan-drift fix: still lands on Detail even when the leaderboard
     // refresh itself failed - the selection/navigation isn't gated on it.
     expect(await screen.findByRole("region", { name: /challenge detail/i })).toBeVisible();
-    expect(screen.getByRole("button", { name: /race this/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^▶ race$/i })).toBeVisible();
     expect(window.location.search).toBe("?challenge=challenge-0012");
   });
 
@@ -2541,12 +2545,12 @@ describe("VWiki Race app", () => {
 
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
 
-    expect((await screen.findAllByText(/mars -> water/i)).length).toBeGreaterThan(
+    expect((await screen.findAllByText(/mars → water/i)).length).toBeGreaterThan(
       0,
     );
     expect(screen.getByRole("button", { name: /← challenges/i })).toBeVisible();
     expect(screen.queryByRole("button", { name: /start challenge #2/i })).toBeNull();
-    await user.click(await screen.findByRole("button", { name: /race this/i }));
+    await user.click(await screen.findByRole("button", { name: /^▶ race$/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
 
     await waitFor(() => {
@@ -2834,7 +2838,7 @@ describe("VWiki Race app", () => {
       render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
       const detail = await screen.findByRole("region", { name: /challenge detail/i });
-      expect(within(detail).getByRole("button", { name: /race this/i })).toBeVisible();
+      expect(within(detail).getByRole("button", { name: /^▶ race$/i })).toBeVisible();
       // The fixture row's accountId defaults to claimedStorage's own "acc-1"
       // - it shows up on BOTH the main deduped board (by display name, "Ari")
       // and "Your history" (a plain "#1 · 0:01 · 1 clk" line, no name) -
@@ -2851,7 +2855,7 @@ describe("VWiki Race app", () => {
       render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={claimedStorage()} />);
 
       const detail = await screen.findByRole("region", { name: /challenge detail/i });
-      const raceThis = within(detail).getByRole("button", { name: /race this/i });
+      const raceThis = within(detail).getByRole("button", { name: /^▶ race$/i });
       // PKG-04 (owner-proxy ruling): Detail's "Race this" only opens the
       // preview - it's non-committal, same as Home's hero and Boards' CTA,
       // so it carries their shared teal `.race-preview-button` class, never
@@ -3157,7 +3161,7 @@ describe("Race flow: full-screen takeover", () => {
     const shareButton = screen.getByRole("button", { name: /share result/i });
     expect(claimCta.compareDocumentPosition(shareButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
-    await user.click(within(claimCta).getByRole("button", { name: /make a name/i }));
+    await user.click(within(claimCta).getByRole("button", { name: /create account/i }));
     expect(await screen.findByRole("dialog", { name: /save your stats/i })).toBeVisible();
   });
 
@@ -3844,7 +3848,7 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
     await user.click(await screen.findByRole("button", { name: /challenge #2/i }));
 
     const detail = await screen.findByRole("region", { name: /challenge detail/i });
-    expect(within(detail).getByRole("button", { name: /race this/i })).toBeVisible();
+    expect(within(detail).getByRole("button", { name: /^▶ race$/i })).toBeVisible();
     expect(within(detail).getByText(/water/i)).toBeVisible();
     expect(window.location.search).toBe("?challenge=challenge-0002");
   });
@@ -3962,7 +3966,7 @@ describe("Home board dedup + pre-drop hero (desktop pass, FIX 3/FIX 4)", () => {
       />,
     );
 
-    expect(await screen.findByText(fullTextMatch(/Mars -> Water/), { selector: "strong" })).toBeVisible();
+    expect(await screen.findByText(fullTextMatch(/Mars → Water/), { selector: "strong" })).toBeVisible();
     expect(screen.getByText(/yesterday's daily · weird/i)).toBeVisible();
     // PKG-07 (owner-proxy ruling (d)): the old static "New daily drops 5:00
     // AM Central." sentence is gone, replaced by a live "time left today"
@@ -3979,7 +3983,7 @@ describe("Home board dedup + pre-drop hero (desktop pass, FIX 3/FIX 4)", () => {
     const yesterdayCard = screen.getByRole("region", { name: /yesterday's results/i });
     expect(within(yesterdayCard).getByText(/no completed runs yet\./i)).toBeVisible();
     // And the silent fallback pair must NOT be the hero.
-    expect(screen.queryByText(fullTextMatch(/Apple -> Fruit/), { selector: "strong" })).toBeNull();
+    expect(screen.queryByText(fullTextMatch(/Apple → Fruit/), { selector: "strong" })).toBeNull();
   });
 
   it("PKG-06: pre-drop, a populated hero board renders as the 'Yesterday's results' recap with a single board fetch (reuse, not a duplicate request)", async () => {
@@ -4063,7 +4067,7 @@ describe("Home board dedup + pre-drop hero (desktop pass, FIX 3/FIX 4)", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
     expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
-    expect(screen.getByText(fullTextMatch(/Apple -> Fruit/), { selector: "strong" })).toBeVisible();
+    expect(screen.getByText(fullTextMatch(/Apple → Fruit/), { selector: "strong" })).toBeVisible();
     expect(screen.queryByText(/yesterday's daily/i)).toBeNull();
     expect(screen.queryByText(/new daily drops/i)).toBeNull();
     expect(screen.queryByText(/left today/i)).toBeNull();
@@ -4261,6 +4265,33 @@ describe("PKG-07 (council 2026-07-19, owner-proxy ruling): daily ritual identity
     expect(screen.getByRole("heading", { name: "Stats" })).toBeVisible();
     expect(await screen.findByText("Streak")).toBeVisible();
     expect(screen.getByText("9 days")).toBeVisible();
+  });
+
+  it("You's stat tiles show real zeros for confirmed-zero totals and 'No data yet.' (never a bare '-') for a never-completed account (PKG-11)", async () => {
+    const fetchImpl = createFetchMock();
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: "You" }));
+    await screen.findByText("Streak");
+
+    const grid = document.querySelector(".stat-grid") as HTMLElement;
+    const valueFor = (label: string) =>
+      within(grid).getByText(label).nextElementSibling?.textContent;
+
+    // Confirmed zeros (the fixture's default: an identified account that has
+    // never played) render as real numbers, not a placeholder.
+    await waitFor(() => expect(valueFor("Attempts")).toBe("0"));
+    expect(valueFor("Streak")).toBe("0 days");
+    expect(valueFor("Completed")).toBe("0");
+    expect(valueFor("DNFs")).toBe("0");
+    expect(valueFor("Completed clicks")).toBe("0");
+    // `bestElapsedMs`/`bestClicks` are legitimately `null` (no completion to
+    // measure yet, not a missing-data bug) - "No data yet." matches
+    // StatsList's own established convention rather than a bare "-".
+    expect(valueFor("Best speed")).toBe("No data yet.");
+    expect(valueFor("Best clicks")).toBe("No data yet.");
+    expect(within(grid).queryByText("-")).toBeNull();
   });
 
   it("How-to-play establishes the daily cadence, not just the rules (acceptance criterion 3)", async () => {
@@ -4782,7 +4813,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     const board = screen.getByRole("region", { name: "Boards" });
     await user.click(within(board).getByRole("tab", { name: "7d" }));
 
-    expect(await within(board).findByText(/rolling 7d · ranked by average placement · play ≥3 dailies to rank/i)).toBeVisible();
+    expect(await within(board).findByText(/rolling 7 days · ranked by average placement · play ≥3 dailies to rank/i)).toBeVisible();
     expect(within(board).getByText("1.")).toBeVisible();
     expect(within(board).getByText(/vijay/i)).toBeVisible();
     expect(within(board).getByText(/avg #1\.3 \(3 dailies\)/)).toBeVisible();
@@ -4811,7 +4842,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     const board = screen.getByRole("region", { name: "Boards" });
     await user.click(within(board).getByRole("tab", { name: "30d" }));
 
-    expect(await within(board).findByText(/rolling 30d · ranked by average placement · play ≥10 dailies to rank/i)).toBeVisible();
+    expect(await within(board).findByText(/rolling 30 days · ranked by average placement · play ≥10 dailies to rank/i)).toBeVisible();
     expect(within(board).getByText(/4\/10 dailies/)).toBeVisible();
   });
 
@@ -4935,7 +4966,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     await user.click(within(board).getByRole("tab", { name: "7d" }));
 
     expect(await within(board).findByRole("alert")).toHaveTextContent(/couldn.t load this trend/i);
-    expect(within(board).queryByText(/no one has cleared the ranking guard yet/i)).toBeNull();
+    expect(within(board).queryByText(/nobody.s played enough dailies to rank yet/i)).toBeNull();
 
     await user.click(within(board).getByRole("button", { name: /retry/i }));
 
@@ -5498,13 +5529,28 @@ function createFetchMock(options?: {
  * the "teal arrow" styling the spec calls for). RTL's default string/regex
  * matcher only concatenates a candidate node's direct text-node children -
  * it does not walk into child elements - so a plain regex silently fails to
- * find text like "Mars -> Water" once any part of it is wrapped in markup.
+ * find text like "Mars → Water" once any part of it is wrapped in markup.
  * This checks the full `element.textContent` (which does walk descendants)
  * instead.
  */
 function fullTextMatch(expected: RegExp) {
   return (_content: string, element: Element | null): boolean =>
     Boolean(element?.textContent && expected.test(element.textContent));
+}
+
+/**
+ * PKG-11 (council 2026-07-19): the identity dialog's create-form submit
+ * button and its own mode-switcher tab are both named "Create account" while
+ * that tab is active (a deliberate app-wide account-verb-pair unification -
+ * see App.tsx's doc comment on `.auth-mode-switch`), so an unscoped
+ * `getByRole` query is ambiguous the instant both are on screen at once.
+ * Scopes to the create form itself (identified by its unique "VGames
+ * username" field) the same way the file's existing `loginForm` local
+ * disambiguates the login tab from the login form's own submit button.
+ */
+function createAccountSubmitButton(): HTMLElement {
+  const form = screen.getByLabelText(/vgames username/i).closest("form") as HTMLFormElement;
+  return within(form).getByRole("button", { name: /^create account$/i });
 }
 
 function jsonResponse(body: unknown): Response {

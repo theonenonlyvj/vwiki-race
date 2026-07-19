@@ -94,7 +94,7 @@ export default function ChallengeDetail({
             {dailyBadge ? <span className="daily-badge">{dailyBadge}</span> : null}
           </div>
           <strong>
-            {challenge.start.title} {"->"} {challenge.target.title}
+            {challenge.start.title} {"→"} {challenge.target.title}
           </strong>
           {challenge.createdBy ? (
             <em>Created by {challenge.createdBy.displayName}</em>
@@ -112,7 +112,7 @@ export default function ChallengeDetail({
             disabled={raceDisabled}
             onClick={onRaceThis}
           >
-            Race this
+            {"▶"} Race
           </button>
         </div>
       </div>
@@ -169,7 +169,7 @@ export default function ChallengeDetail({
                     {runPaths[row.runId] ? (
                       <ol className="winning-path">
                         {runPaths[row.runId].map((step) => (
-                          <li key={step.stepNumber}>{step.sourceTitle} {"->"} {step.destinationTitle}</li>
+                          <li key={step.stepNumber}>{step.sourceTitle} {"→"} {step.destinationTitle}</li>
                         ))}
                       </ol>
                     ) : <p>Loading path...</p>}

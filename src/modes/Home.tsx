@@ -232,7 +232,7 @@ export default function Home({
             {flavorBadge ? <span className="daily-badge">{flavorBadge}</span> : null}
           </div>
           <strong>
-            {heroChallenge.start.title} <span className="route-arrow">{"->"}</span> {heroChallenge.target.title}
+            {heroChallenge.start.title} <span className="route-arrow">{"→"}</span> {heroChallenge.target.title}
           </strong>
 
           {dailyState === "finished" && myPlacement ? (
