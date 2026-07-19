@@ -112,7 +112,23 @@ export function useClipboardShare(text: string): {
  * fixtures/responses (see `DailyFeature`'s own doc comment), so a daily
  * challenge missing it falls back to the pre-PKG-07 `label`/`id` line
  * rather than shipping a "Daily #undefined" share.
+ *
+ * FB-5 (owner decision 9, "emoji-grid share text, whatever's sexy, keep
+ * small"): a one-line Wordle-style click trail sits under the label/score
+ * line - one 🟦 per click, capped at 10 before switching to a compact
+ * "🟦×N" form (a 40-click DNF shouldn't paste forty squares into iMessage).
+ * The trail ends in 🏁 for a completed run or "🟥 DNF" for a DNF - spoiler-
+ * safe (no article titles) either way. The URL keeps its own contract of
+ * staying the LAST thing in the text, now on its own trailing line rather
+ * than appended to the label line.
  */
+const CLICK_TRAIL_CAP = 10;
+
+function clickTrail(clicks: number, status: "completed" | "dnf"): string {
+  const squares = clicks > CLICK_TRAIL_CAP ? `🟦×${clicks}` : "🟦".repeat(clicks);
+  return `${squares}${status === "dnf" ? "🟥 DNF" : "🏁"}`;
+}
+
 export function composeShareText(
   challenge: Challenge,
   result: { elapsedMs: number; clicks: number; rank: number | null; status: "completed" | "dnf" },
@@ -124,7 +140,8 @@ export function composeShareText(
     : result.rank !== null
       ? `#${result.rank} · ${timeAndClicks}`
       : timeAndClicks;
-  return `VWiki Race — ${label} — ${scoreLine} — ${challengeShareUrl(challenge.id)}`;
+  const trail = clickTrail(result.clicks, result.status);
+  return `VWiki Race — ${label} — ${scoreLine}\n${trail}\n${challengeShareUrl(challenge.id)}`;
 }
 
 /**

@@ -1637,7 +1637,7 @@ describe("VWiki Race app", () => {
       await user.click(screen.getByRole("button", { name: /share result/i }));
       await waitFor(() => {
         expect(writeText).toHaveBeenCalledWith(
-          `VWiki Race — Challenge #1 — #4 · 0:01 · 1 clk — ${window.location.origin}/?challenge=challenge-0001`,
+          `VWiki Race — Challenge #1 — #4 · 0:01 · 1 clk\n🟦🏁\n${window.location.origin}/?challenge=challenge-0001`,
         );
       });
 
@@ -3127,7 +3127,7 @@ describe("VWiki Race app", () => {
       );
       await waitFor(() => {
         expect(writeText).toHaveBeenCalledWith(
-          `VWiki Race — Challenge #1 — #1 · 0:01 · 1 clk — ${window.location.origin}/?challenge=challenge-0001`,
+          `VWiki Race — Challenge #1 — #1 · 0:01 · 1 clk\n🟦🏁\n${window.location.origin}/?challenge=challenge-0001`,
         );
       });
     } finally {
@@ -3168,7 +3168,7 @@ describe("VWiki Race app", () => {
         // `text` only - never a separate `url` field, which would risk some
         // share targets (iOS Messages) rendering the link twice.
         expect(share).toHaveBeenCalledWith({
-          text: `VWiki Race — Challenge #1 — #1 · 0:01 · 1 clk — ${window.location.origin}/?challenge=challenge-0001`,
+          text: `VWiki Race — Challenge #1 — #1 · 0:01 · 1 clk\n🟦🏁\n${window.location.origin}/?challenge=challenge-0001`,
         });
       });
       expect(writeText).not.toHaveBeenCalled();
@@ -4407,7 +4407,7 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
       await user.click(await screen.findByRole("button", { name: /share result/i }));
 
       await waitFor(() => expect(writeText).toHaveBeenCalledWith(
-        `VWiki Race — Challenge #1 — #3 · 0:42 · 6 clk — ${window.location.origin}/?challenge=challenge-0001`,
+        `VWiki Race — Challenge #1 — #3 · 0:42 · 6 clk\n🟦🟦🟦🟦🟦🟦🏁\n${window.location.origin}/?challenge=challenge-0001`,
       ));
     } finally {
       if (clipboardDescriptor) {
@@ -4451,7 +4451,7 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
       await user.click(await screen.findByRole("button", { name: /share result/i }));
 
       await waitFor(() => expect(writeText).toHaveBeenCalledWith(
-        `VWiki Race — Daily #7 — #3 · 0:42 · 6 clk — ${window.location.origin}/?challenge=challenge-0001`,
+        `VWiki Race — Daily #7 — #3 · 0:42 · 6 clk\n🟦🟦🟦🟦🟦🟦🏁\n${window.location.origin}/?challenge=challenge-0001`,
       ));
     } finally {
       if (clipboardDescriptor) {
@@ -4501,7 +4501,7 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
       await user.click(screen.getByRole("button", { name: /share result/i }));
 
       await waitFor(() => expect(writeText).toHaveBeenCalledWith(
-        `VWiki Race — Challenge #1 — DNF · 0:08 · 1 clk — beat that — ${window.location.origin}/?challenge=challenge-0001`,
+        `VWiki Race — Challenge #1 — DNF · 0:08 · 1 clk — beat that\n🟦🟥 DNF\n${window.location.origin}/?challenge=challenge-0001`,
       ));
     } finally {
       if (clipboardDescriptor) {
