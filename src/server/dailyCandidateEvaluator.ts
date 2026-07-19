@@ -279,6 +279,11 @@ function createWikimediaBudget(options: {
   timeout: () => void;
 }): WikimediaBudget {
   let requestCount = 0;
+  // Detach before calling: invoking the global fetch as a method of the
+  // options object makes workerd bind `this` to that object and throw
+  // "TypeError: Illegal invocation" on EVERY request — this killed the
+  // 07-18/07-19 daily drops (see fetchBinding.test.ts).
+  const fetchImpl = options.fetchImpl;
 
   return {
     signal: options.signal,
@@ -292,7 +297,7 @@ function createWikimediaBudget(options: {
     async fetch(input, init) {
       takeRequest();
       try {
-        return await options.fetchImpl(input, {
+        return await fetchImpl(input, {
           ...init,
           headers: { "Api-User-Agent": USER_AGENT, "User-Agent": USER_AGENT, ...init?.headers },
           signal: options.signal,

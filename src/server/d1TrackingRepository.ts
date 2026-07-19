@@ -5068,15 +5068,18 @@ async function releaseRandomChallengeLock(
 /**
  * PKG-13: the 2026-07-18 incident's backoff reached 6h and jumped past the
  * next day's 5:00 AM Central drop, leaving the daily unattempted for hours.
- * Graduated but hard-capped at 60 minutes so the hourly `17 * * * *` retry
- * trigger always sees a due job again within the hour, regardless of how
- * many times a daily has already failed (attempt_count keeps growing for
- * observability - only the backoff window itself is capped).
+ * Graduated but hard-capped BELOW one hour: attempts run from the hourly
+ * `17 * * * *` cron at ~HH:17:5x, so a cap of exactly 60 minutes made the
+ * next due time HH+1:17:5x — ~55 seconds AFTER the next cron fired, which
+ * silently doubled recovery latency to 2 hours (observed 2026-07-19: the
+ * 18:17 and 19:17 attempts each skipped a due-59s-later job). 55 minutes
+ * guarantees the very next hourly trigger claims the job. attempt_count
+ * keeps growing for observability - only the backoff window is capped.
  */
-const MAX_DAILY_RETRY_MINUTES = 60;
+const MAX_DAILY_RETRY_MINUTES = 55;
 
 function dailyRetryMinutes(attemptCount: number): number {
-  const minutes = [15, 30, 45, 60][Math.min(Math.max(attemptCount - 1, 0), 3)] ?? MAX_DAILY_RETRY_MINUTES;
+  const minutes = [15, 30, 45, 55][Math.min(Math.max(attemptCount - 1, 0), 3)] ?? MAX_DAILY_RETRY_MINUTES;
   return Math.min(minutes, MAX_DAILY_RETRY_MINUTES);
 }
 

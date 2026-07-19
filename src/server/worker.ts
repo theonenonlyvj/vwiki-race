@@ -81,7 +81,9 @@ export function createWorker(options: WorkerOptions = {}) {
   const now = options.now ?? (() => new Date());
   const buildDailyCandidateSource = options.createDailyCandidateSource ?? (() =>
     createDailyChallengeCandidateSource({
-      fetchImpl: fetch,
+      // Wrapped, never bare: a receiver calling `options.fetchImpl(...)`
+      // method-style on the bare global throws "Illegal invocation" in workerd.
+      fetchImpl: (input, init) => fetch(input, init),
       gateway: createWorkerWikipediaGateway(fetch),
       onDiagnostic: logDailyCandidateDiagnostic,
     }));
@@ -737,7 +739,7 @@ async function dispatchLegacy(
 
 function createTracking(env: Env): WorkerTracking {
   const repository = createD1TrackingRepository({ db: env.VWIKI_RACE_DB });
-  const wikipedia = createWikipediaChallengeValidator({ fetchImpl: fetch });
+  const wikipedia = createWikipediaChallengeValidator({ fetchImpl: (input, init) => fetch(input, init) });
   // Increment 5: a request-scoped instance of the same random-candidate
   // machinery the daily generator uses (construction is cheap/no I/O until
   // `findCandidate` runs) - reused as-is rather than threading the
@@ -745,7 +747,7 @@ function createTracking(env: Env): WorkerTracking {
   // require widening the public `WorkerOptions.createTracking` override
   // signature every existing test relies on.
   const randomChallengeSource = createDailyChallengeCandidateSource({
-    fetchImpl: fetch,
+    fetchImpl: (input, init) => fetch(input, init),
     gateway: createWorkerWikipediaGateway(fetch),
     onDiagnostic: logDailyCandidateDiagnostic,
   });
