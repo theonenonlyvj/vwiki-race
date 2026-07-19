@@ -317,4 +317,53 @@ describe("Browse: pinned daily row (PKG-01 - one source of truth for 'today's da
     await screen.findByRole("button", { name: /challenge #1/i });
     expect(screen.queryByLabelText("Today's daily")).toBeNull();
   });
+
+  it("QF-03: never lists today's pinned daily a second time in All challenges", async () => {
+    renderBrowse({
+      // The pinned challenge IS a member of `challenges` here (unlike this
+      // suite's other fixtures) - the exact shape that reproduced the
+      // shipped duplicate-listing bug: without the id-exclusion fix, this
+      // same card renders both as the pinned row above and as an ordinary
+      // catalog row below.
+      challenges: [pinnedChallenge, challengeOne],
+      heroSelection: { challenge: pinnedChallenge, kind: "today-daily" },
+    });
+
+    await screen.findByLabelText("Today's daily");
+    const matches = await screen.findAllByRole("button", {
+      name: /coffee.*great molasses flood/i,
+    });
+    expect(matches).toHaveLength(1);
+
+    // The rest of the catalog is unaffected - challengeOne still shows.
+    expect(screen.getByRole("button", { name: /challenge #1/i })).toBeVisible();
+  });
+
+  it("QF-03: routes the pinned card's badge through the flavor+number format", async () => {
+    const dailyFeatureChallenge: Challenge = {
+      ...pinnedChallenge,
+      dailyFeature: { dailyDate: "2026-07-18", flavor: "hard", selectionSource: "automatic", dailyNumber: 7 },
+    };
+
+    renderBrowse({
+      heroSelection: { challenge: dailyFeatureChallenge, kind: "today-daily" },
+    });
+    const pinned = await screen.findByRole("button", { name: /coffee.*great molasses flood/i });
+    expect(pinned.querySelector(".daily-badge")?.textContent).toBe("⭐ Hard · Daily #7");
+  });
+
+  it("QF-03: honors pre-drop yesterday framing on the pinned card's flavor badge, matching Home/Boards", async () => {
+    const dailyFeatureChallenge: Challenge = {
+      ...pinnedChallenge,
+      dailyFeature: { dailyDate: "2026-07-18", flavor: "hard", selectionSource: "automatic", dailyNumber: 7 },
+    };
+
+    renderBrowse({
+      heroSelection: { challenge: dailyFeatureChallenge, kind: "yesterday-daily" },
+    });
+    const pinned = await screen.findByRole("button", { name: /coffee.*great molasses flood/i });
+    expect(pinned.querySelector(".daily-badge")?.textContent).toBe(
+      "⭐ Yesterday's daily · Hard · Daily #7",
+    );
+  });
 });

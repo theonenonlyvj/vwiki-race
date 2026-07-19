@@ -3,6 +3,7 @@ import StateChip from "../../components/StateChip";
 import { formatChallengeCardMeta } from "../../domain/challengeCard";
 import { dailyBadgeLabel, type HomeHeroSelection } from "../../domain/challengeSelection";
 import { filterChallengesByQuery, resolveChallengeIdFromSearchInput } from "../../domain/challengeSearch";
+import { dailyFlavorBadgeText } from "../../domain/dailyEditorial";
 import { RANDOM_CHALLENGE_LOADING_COPY } from "../../domain/playAnother";
 import type { Challenge, ChallengeOutcomeEntry, ChallengeSummaryEntry } from "../../domain/types";
 import type { VWikiRaceApiClient } from "../../services/vwikiRaceApiClient";
@@ -143,10 +144,6 @@ export default function ChallengeBrowser({
   }, [apiClient, identityToken]);
 
   const hasSession = identityToken !== null;
-  const visibleChallenges = useMemo(
-    () => filterChallengesByQuery(challenges, searchQuery),
-    [challenges, searchQuery],
-  );
   // PKG-01: the pin only shows for a real daily (today's or yesterday's,
   // still-playable) - the "default" kind means no daily exists anywhere in
   // the catalog, and pinning its arbitrary fallback challenge would repeat
@@ -156,6 +153,16 @@ export default function ChallengeBrowser({
   const pinnedDaily = heroSelection && heroSelection.kind !== "default"
     ? heroSelection.challenge
     : null;
+  // QF-03: exclude the pinned daily from the catalog below it - it's
+  // already pinned as standing chrome above, so leaving it in
+  // `visibleChallenges` too duplicated it onto the screen twice.
+  const visibleChallenges = useMemo(
+    () =>
+      filterChallengesByQuery(challenges, searchQuery).filter(
+        (challenge) => challenge.id !== pinnedDaily?.id,
+      ),
+    [challenges, searchQuery, pinnedDaily],
+  );
 
   function handleSearchChange(value: string) {
     setSearchQuery(value);
@@ -234,7 +241,13 @@ export default function ChallengeBrowser({
             >
               <span className="challenge-meta">
                 <span className="daily-badge">
-                  {"⭐"} {dailyBadgeLabel(pinnedDaily, todayCentral) ?? "Daily"}
+                  {"⭐"}{" "}
+                  {pinnedDaily.dailyFeature
+                    ? dailyFlavorBadgeText(
+                        pinnedDaily.dailyFeature,
+                        heroSelection?.kind === "yesterday-daily" ? "yesterday" : "today",
+                      )
+                    : dailyBadgeLabel(pinnedDaily, todayCentral) ?? "Daily"}
                 </span>
               </span>
               <span className="browse-card-title-row">

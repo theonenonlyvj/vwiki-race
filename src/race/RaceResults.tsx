@@ -12,6 +12,7 @@ import BoardSnippet from "../components/BoardSnippet";
 import { boardSnippetRowsForResult, dedupedRankForJustFinished } from "../domain/boardSnippet";
 import PlayAnotherCard from "../components/PlayAnotherCard";
 import { isDailyToday as isChallengeDailyToday } from "../domain/challengeSelection";
+import { dailyNumberLabel } from "../domain/dailyEditorial";
 import { compressPathForStrip } from "../domain/pathCompression";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { GameSession } from "../domain/gameSession";
@@ -348,7 +349,11 @@ export default function RaceResults({
       {outcome.status === "completed" && article ? (
         <WikipediaArticlePanel
           article={article}
-          challengeLabel={outcome.session.challenge.label ?? outcome.session.challenge.mode}
+          challengeLabel={
+            dailyNumberLabel(outcome.session.challenge.dailyFeature?.dailyNumber) ??
+            outcome.session.challenge.label ??
+            outcome.session.challenge.mode
+          }
           acceptedPageId={outcome.session.currentPage.pageId}
           onClick={stableArticleClick}
           onFocus={stableArticleFocus}

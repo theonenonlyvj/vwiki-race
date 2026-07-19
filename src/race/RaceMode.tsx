@@ -7,6 +7,7 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from "react";
+import { dailyNumberLabel } from "../domain/dailyEditorial";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { GameSession } from "../domain/gameSession";
 import { compressPathForStrip } from "../domain/pathCompression";
@@ -126,7 +127,12 @@ export default function RaceMode({
       {article ? (
         <WikipediaArticlePanel
           article={article}
-          challengeLabel={session?.challenge.label ?? session?.challenge.mode ?? ""}
+          challengeLabel={
+            dailyNumberLabel(session?.challenge.dailyFeature?.dailyNumber) ??
+            session?.challenge.label ??
+            session?.challenge.mode ??
+            ""
+          }
           acceptedPageId={session?.currentPage.pageId}
           onClick={stableArticleClick}
           onFocus={stableArticleFocus}
