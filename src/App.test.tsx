@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type {
   CreateChallengeOutcome,
@@ -3595,6 +3595,50 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
     }
   });
 
+  it("PKG-07 (owner-proxy ruling (c)): a daily's share text leads with 'Daily #N', not its generic 'Challenge #N' label", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    try {
+      const todayChallenge = dailyChallenge("challenge-0001", {
+        dailyDate: "2026-07-17",
+        flavor: "weird",
+        dailyNumber: 7,
+      });
+      const fetchImpl = createFetchMock({
+        challenges: [todayChallenge],
+        leaderboardRows: [
+          leaderboardRow({ rank: 3, runId: "run-1", accountId: "acc-1", displayName: "Vijay", elapsedMs: 42_000, clickCount: 6 }),
+        ],
+      });
+      render(
+        <App
+          apiOrigin={apiOrigin}
+          fetchImpl={fetchImpl}
+          storage={claimedStorage()}
+          todayUtc={() => "2026-07-17"}
+        />,
+      );
+
+      await user.click(await screen.findByRole("button", { name: /share result/i }));
+
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(
+        `VWiki Race — Daily #7 — #3 · 0:42 · 6 clk — ${window.location.origin}/?challenge=challenge-0001`,
+      ));
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "clipboard");
+      }
+    }
+  });
+
   it("composes DNF share text with an explicit DNF marker - not indistinguishable from a win (PKG-05, owner-proxy ruling)", async () => {
     // Un-gating ShareResultButton for DNF alone would produce a bare
     // "time · clicks" line with no rank - reading exactly like a real (if
@@ -3840,7 +3884,7 @@ describe("Home board dedup + pre-drop hero (desktop pass, FIX 3/FIX 4)", () => {
     expect(boardCalls(fetchImpl, "challenge-0001")).toBeGreaterThan(0);
   });
 
-  it("pre-drop (FIX 4): heroes YESTERDAY's daily with an explicit badge, drop-time line, and a live Race button", async () => {
+  it("pre-drop (FIX 4): heroes YESTERDAY's daily with an explicit badge, a live countdown, and a live Race button", async () => {
     const yesterdayChallenge = dailyChallenge("challenge-0002", {
       dailyDate: "2026-07-16",
       flavor: "weird",
@@ -3865,7 +3909,11 @@ describe("Home board dedup + pre-drop hero (desktop pass, FIX 3/FIX 4)", () => {
 
     expect(await screen.findByText(fullTextMatch(/Mars -> Water/), { selector: "strong" })).toBeVisible();
     expect(screen.getByText(/yesterday's daily · weird/i)).toBeVisible();
-    expect(screen.getByText(/new daily drops 5:00 am central\./i)).toBeVisible();
+    // PKG-07 (owner-proxy ruling (d)): the old static "New daily drops 5:00
+    // AM Central." sentence is gone, replaced by a live "time left today"
+    // readout.
+    expect(screen.queryByText(/new daily drops 5:00 am central\./i)).toBeNull();
+    expect(screen.getByText(/\d+(:\d{2}){1,2} left today/)).toBeVisible();
     expect(screen.getByRole("button", { name: /▶ race/i })).toBeEnabled();
     // PKG-06: the hero IS yesterday's daily, so the "Yesterday's results"
     // recap now reuses the hero's own (already-fetched) board - one card,
@@ -3928,7 +3976,7 @@ describe("Home board dedup + pre-drop hero (desktop pass, FIX 3/FIX 4)", () => {
     expect(await screen.findByRole("heading", { name: "Boards" })).toBeVisible();
   });
 
-  it("post-drop stays unchanged: today's daily heroes with its plain flavor badge and no drop-time line", async () => {
+  it("post-drop: today's daily heroes with its plain flavor badge, unchanged, but now also carries a live countdown to tomorrow's drop (PKG-07)", async () => {
     const todayChallenge = dailyChallenge("challenge-0001", {
       dailyDate: "2026-07-17",
       flavor: "recognizable",
@@ -3948,10 +3996,14 @@ describe("Home board dedup + pre-drop hero (desktop pass, FIX 3/FIX 4)", () => {
     expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
     expect(screen.getByText("Recognizable")).toBeVisible();
     expect(screen.queryByText(/yesterday's daily/i)).toBeNull();
+    // PKG-07: the mockup's own Step-1-Home shows a countdown for a real
+    // TODAY's daily too (counting down to TOMORROW's drop), not just the
+    // pre-drop yesterday-framed case the old static sentence was limited to.
     expect(screen.queryByText(/new daily drops 5:00 am central\./i)).toBeNull();
+    expect(screen.getByText(/\d+(:\d{2}){1,2} left today/)).toBeVisible();
   });
 
-  it("no dailies at all: keeps the default-challenge hero with no badge and no drop-time line", async () => {
+  it("no dailies at all: keeps the default-challenge hero with no badge and no drop-time line or countdown", async () => {
     const fetchImpl = createFetchMock({ challenges: [twoChallenges()[0]] });
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
@@ -3959,6 +4011,7 @@ describe("Home board dedup + pre-drop hero (desktop pass, FIX 3/FIX 4)", () => {
     expect(screen.getByText(fullTextMatch(/Apple -> Fruit/), { selector: "strong" })).toBeVisible();
     expect(screen.queryByText(/yesterday's daily/i)).toBeNull();
     expect(screen.queryByText(/new daily drops/i)).toBeNull();
+    expect(screen.queryByText(/left today/i)).toBeNull();
   });
 });
 
@@ -4059,6 +4112,112 @@ describe("Home v2: guarded streak/trend chip (Increment 4)", () => {
     expect(screen.queryByText(/start your streak today/i)).toBeNull();
     expect(screen.queryByText(/day streak/i)).toBeNull();
     expect(screen.queryByText(/30-day avg/i)).toBeNull();
+  });
+});
+
+describe("PKG-07 (council 2026-07-19, owner-proxy ruling): daily ritual identity", () => {
+  beforeEach(() => {
+    window.history.pushState({}, "", "/");
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("'Daily #N' appears identically on Home's hero, Boards' Today segment, and the pre-race preview for the same daily", async () => {
+    const user = userEvent.setup();
+    const todayChallenge = dailyChallenge("challenge-0001", {
+      dailyDate: "2026-07-17",
+      flavor: "weird",
+      dailyNumber: 7,
+    });
+    const fetchImpl = createFetchMock({ challenges: [todayChallenge] });
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={fetchImpl}
+        storage={claimedStorage()}
+        todayUtc={() => "2026-07-17"}
+      />,
+    );
+
+    // Home's hero.
+    expect(await screen.findByText(/weird · daily #7/i)).toBeVisible();
+
+    // Boards' Today segment.
+    const nav = await screen.findByRole("navigation", { name: /vwiki race views/i });
+    await user.click(within(nav).getByRole("button", { name: "Boards" }));
+    expect(await screen.findByText(/weird · daily #7/i)).toBeVisible();
+
+    // The pre-race preview, reached from Home's Race button.
+    await user.click(within(nav).getByRole("button", { name: "Home" }));
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    expect(await screen.findByRole("button", { name: /start race/i })).toBeVisible();
+    expect(screen.getByText(/weird · daily #7/i)).toBeVisible();
+  });
+
+  it("Home pre-play shows a live 'time left today' countdown that visibly decreases across a reload, replacing the static drop-time sentence (acceptance criterion 2)", async () => {
+    const todayChallenge = dailyChallenge("challenge-0001", { dailyDate: "2026-07-17" });
+
+    // 4:59:58 AM Central - `todayUtc` pins the DAILY selection deterministically;
+    // the countdown itself reads the real (here, mocked) system clock
+    // independently, exactly as it does in production.
+    vi.setSystemTime(new Date("2026-07-17T09:59:58.000Z"));
+    const first = render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock({ challenges: [todayChallenge] })}
+        storage={claimedStorage()}
+        todayUtc={() => "2026-07-17"}
+      />,
+    );
+    expect(await first.findByText("0:02 left today")).toBeVisible();
+    expect(first.queryByText(/new daily drops 5:00 am central\./i)).toBeNull();
+    first.unmount();
+    // `first` mounting itself synced `?challenge=challenge-0001` onto the
+    // real, file-shared `window.location` (App's own syncChallengeUrl) -
+    // reset it, the same way `beforeEach` does before every test, so
+    // `second` below boots fresh on Home rather than reading that leftover
+    // query param as "the user navigated straight to Detail."
+    window.history.pushState({}, "", "/");
+
+    // A later "reload" (a fresh mount, standing in for App.tsx's own
+    // remount-on-refresh) two seconds later reads a smaller remainder -
+    // the acceptance bar's literal "visibly decreases across a reload".
+    vi.setSystemTime(new Date("2026-07-17T10:00:00.000Z")); // exactly the drop
+    const second = render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock({ challenges: [todayChallenge] })}
+        storage={claimedStorage()}
+        todayUtc={() => "2026-07-17"}
+      />,
+    );
+    expect(await second.findByText("24:00:00 left today")).toBeVisible();
+  });
+
+  it("You shows a streak tile reusing accountStats.dailyStreak", async () => {
+    const fetchImpl = createFetchMock({ accountDailyStreak: 9 });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: "You" }));
+
+    expect(screen.getByRole("heading", { name: "Stats" })).toBeVisible();
+    expect(await screen.findByText("Streak")).toBeVisible();
+    expect(screen.getByText("9 days")).toBeVisible();
+  });
+
+  it("How-to-play establishes the daily cadence, not just the rules (acceptance criterion 3)", async () => {
+    const fetchImpl = createFetchMock({ challenges: [twoChallenges()[0]] });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: /how to play/i }));
+    const dialog = await screen.findByRole("dialog", { name: /how to play/i });
+    expect(
+      within(dialog).getByText(/a new pair drops every day at 5:00 am central.*keep your streak alive/i),
+    ).toBeVisible();
   });
 });
 
@@ -4739,6 +4898,10 @@ function dailyChallenge(
     start?: string;
     target?: string;
     selectionSource?: "automatic" | "community" | "admin";
+    // PKG-07: server-computed sequential daily number - optional (see
+    // DailyFeature's own doc comment), so fixtures that don't care about
+    // numbering can keep omitting it without any behavior change.
+    dailyNumber?: number;
   },
 ): Challenge {
   const selectionSource = overrides.selectionSource ?? "admin";
@@ -4756,6 +4919,7 @@ function dailyChallenge(
       dailyDate: overrides.dailyDate,
       flavor: overrides.flavor ?? "recognizable",
       selectionSource,
+      dailyNumber: overrides.dailyNumber,
     },
     source: selectionSource === "automatic" ? "wikipedia_random" : "curated",
   };

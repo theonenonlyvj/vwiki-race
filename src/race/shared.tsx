@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { dailyNumberLabel } from "../domain/dailyEditorial";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { Challenge } from "../domain/types";
 import { writeTextWithTimeout } from "../services/challengeShare";
@@ -87,13 +88,13 @@ export function useClipboardShare(text: string): {
 }
 
 /**
- * One-line, real-data share text (no fabricated "daily #N" - the catalog has
- * no such field yet). Always carries time+clicks (invariant 1) when ranked;
- * falls back gracefully when the server didn't return a rank. Takes plain
- * result primitives rather than a full `RaceResultOutcome` so both Results
- * (a live `GameSession`) and Home's post-play card (a persisted leaderboard
- * row, reachable across reloads) can compose the identical string from
- * whatever shape of data they each already have on hand.
+ * One-line, real-data share text. Always carries time+clicks (invariant 1)
+ * when ranked; falls back gracefully when the server didn't return a rank.
+ * Takes plain result primitives rather than a full `RaceResultOutcome` so
+ * both Results (a live `GameSession`) and Home's post-play card (a
+ * persisted leaderboard row, reachable across reloads) can compose the
+ * identical string from whatever shape of data they each already have on
+ * hand.
  *
  * PKG-05 (council 2026-07-19, owner-proxy ruling): `status` is required, not
  * inferred from `rank`. A DNF has no rank, and a bare "time · clicks" line
@@ -102,12 +103,21 @@ export function useClipboardShare(text: string): {
  * failed 1-click abandon. DNF gets its own explicit "DNF · ..." line (with a
  * self-deprecating "beat that" nudge, not a brag) so sharing a loss never
  * misrepresents it as a win.
+ *
+ * PKG-07 (council 2026-07-19, owner-proxy ruling): a daily challenge leads
+ * with "Daily #N" (Wordle's own "Wordle 942" convention) instead of its
+ * generic `label` ("Challenge #47", a global creation counter across every
+ * challenge type - misleading for a daily, and not the number a player saw
+ * on Home/Boards/Preview). `dailyNumber` postdates this field on older
+ * fixtures/responses (see `DailyFeature`'s own doc comment), so a daily
+ * challenge missing it falls back to the pre-PKG-07 `label`/`id` line
+ * rather than shipping a "Daily #undefined" share.
  */
 export function composeShareText(
   challenge: Challenge,
   result: { elapsedMs: number; clicks: number; rank: number | null; status: "completed" | "dnf" },
 ): string {
-  const label = challenge.label ?? challenge.id;
+  const label = dailyNumberLabel(challenge.dailyFeature?.dailyNumber) ?? challenge.label ?? challenge.id;
   const timeAndClicks = formatTimeAndClicks(result.elapsedMs, result.clicks);
   const scoreLine = result.status === "dnf"
     ? `DNF · ${timeAndClicks} — beat that`

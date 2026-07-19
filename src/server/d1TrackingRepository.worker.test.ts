@@ -1766,11 +1766,17 @@ describe("Task 4 D1 projections", () => {
         id: "old-automatic-pair",
         origin: "daily",
         dailyDate: "2026-07-20",
-        dailyFeature: {
+        // PKG-07: `dailyFeature` now also carries a server-computed
+        // `dailyNumber` - wrapped in its own `objectContaining` (rather
+        // than a bare literal) so this assertion keeps checking exactly
+        // the fields it cares about without also having to hardcode the
+        // ordinal (covered on its own by the "dailyNumber is server-
+        // computed..." test below).
+        dailyFeature: expect.objectContaining({
           dailyDate: "2026-07-20",
           flavor: "recognizable",
           selectionSource: "automatic",
-        },
+        }),
       }),
     ]));
 
@@ -1792,6 +1798,41 @@ describe("Task 4 D1 projections", () => {
     await expect(scalar(
       "SELECT next_sort_order FROM challenge_number_sequence WHERE sequence_name = 'global'",
     )).resolves.toBe(4);
+  });
+
+  it("PKG-07 (council 2026-07-19, owner-proxy ruling (c)): dailyNumber is a permanent COUNT against daily_features, stable even once an older daily ages out of the active catalog", async () => {
+    const { repository } = fixture();
+    await insertReadyChallenge({ id: "daily-a", startPageId: 7101, targetPageId: 7102 });
+    await insertReadyChallenge({ id: "daily-b", startPageId: 7201, targetPageId: 7202 });
+    await insertReadyChallenge({ id: "daily-c", startPageId: 7301, targetPageId: 7302 });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, {
+      dailyDate: "2026-07-17", challengeId: "daily-a", selectionSource: "automatic",
+    });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, {
+      dailyDate: "2026-07-18", challengeId: "daily-b", selectionSource: "automatic",
+    });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, {
+      dailyDate: "2026-07-19", challengeId: "daily-c", selectionSource: "automatic",
+    });
+
+    const challenges = await repository.listChallenges();
+    expect(challenges.find((c) => c.id === "daily-a")?.dailyFeature).toMatchObject({ dailyNumber: 1 });
+    expect(challenges.find((c) => c.id === "daily-b")?.dailyFeature).toMatchObject({ dailyNumber: 2 });
+    expect(challenges.find((c) => c.id === "daily-c")?.dailyFeature).toMatchObject({ dailyNumber: 3 });
+
+    // Home/Boards' own comments document that `listChallenges` only ever
+    // carries active challenges - a real daily is expected to age out of it
+    // once retired. `dailyNumber` must NOT be recomputed against whatever's
+    // still active when that happens (the exact client-side derivation risk
+    // Judges A/B both flagged) - "daily-b"/"daily-c" must keep their
+    // original numbers, not collapse to 1/2 once "daily-a" is trimmed.
+    await env.VWIKI_RACE_DB.prepare(
+      "UPDATE challenges SET is_active = 0 WHERE id = 'daily-a'",
+    ).run();
+    const afterTrim = await repository.listChallenges();
+    expect(afterTrim.find((c) => c.id === "daily-a")).toBeUndefined();
+    expect(afterTrim.find((c) => c.id === "daily-b")?.dailyFeature).toMatchObject({ dailyNumber: 2 });
+    expect(afterTrim.find((c) => c.id === "daily-c")?.dailyFeature).toMatchObject({ dailyNumber: 3 });
   });
 
   it("serializes concurrent automatic acceptance into one feature and one allocated number", async () => {

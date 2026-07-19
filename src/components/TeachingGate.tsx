@@ -87,6 +87,13 @@ function TeachingGatePopup({
       ) : null}
       <p>Only links inside the article count — no search, no back button cheese.</p>
       <p>Fastest time wins; fewest clicks breaks ties.</p>
+      {/* PKG-07 (council 2026-07-19, owner-proxy ruling (b)): the popup
+          never established cadence at all - a first-time reader had no way
+          to learn there even IS a daily rhythm to keep up with, distinct
+          from the already-shipped Results-screen ritual hook (RaceResults'
+          "Day 1 · New daily drops 5:00 AM — come defend your spot", a
+          first-finish-only trigger, not persistent teaching copy). */}
+      <p>A new pair drops every day at 5:00 AM Central — keep your streak alive.</p>
     </ModalDialog>
   );
 }

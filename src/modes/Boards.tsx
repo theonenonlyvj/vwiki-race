@@ -10,7 +10,7 @@ import {
   previousCentralDate,
   type HomeHeroSelection,
 } from "../domain/challengeSelection";
-import { dailyFlavorLabel } from "../domain/dailyEditorial";
+import { dailyFlavorBadgeText } from "../domain/dailyEditorial";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { Challenge } from "../domain/types";
 import type {
@@ -332,10 +332,11 @@ export default function Boards({
   // PKG-01: pre-drop, Today's badge mirrors Home's exact "Yesterday's
   // daily · <flavor>" prefix (never a bare flavor pill that reads as if
   // today's real daily) - see Home.tsx's identically-shaped `flavorBadge`.
+  // PKG-07: both branches now go through the same shared
+  // `dailyFlavorBadgeText` Home/Preview also use, so the "Daily #N" suffix
+  // can't independently drift between screens.
   const flavorBadge = activeChallenge?.dailyFeature
-    ? todayShowsYesterdayFraming
-      ? `Yesterday's daily · ${dailyFlavorLabel(activeChallenge.dailyFeature.flavor)}`
-      : dailyFlavorLabel(activeChallenge.dailyFeature.flavor)
+    ? dailyFlavorBadgeText(activeChallenge.dailyFeature, todayShowsYesterdayFraming ? "yesterday" : "today")
     : null;
 
   const trendWindow = isTrendSegment(segment) ? TREND_WINDOW_PARAM[segment] : null;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dailyFlavorForCentralDate } from "./dailyEditorial";
+import { dailyFlavorBadgeText, dailyFlavorForCentralDate, dailyNumberLabel } from "./dailyEditorial";
 import type { Challenge } from "./types";
 import {
   centralDateDaysBefore,
@@ -222,6 +222,31 @@ describe("isDailyToday (PKG-05: shared by RaceResults' header copy and App.tsx's
   it("is false for a challenge that is not a daily at all (no dailyFeature/origin)", () => {
     const custom = challenge("challenge-custom");
     expect(isDailyToday(custom, "2026-07-19")).toBe(false);
+  });
+});
+
+describe("dailyNumberLabel (PKG-07)", () => {
+  it("formats a known dailyNumber", () => {
+    expect(dailyNumberLabel(7)).toBe("Daily #7");
+  });
+
+  it("is null when dailyNumber is absent or explicitly null", () => {
+    expect(dailyNumberLabel(undefined)).toBeNull();
+    expect(dailyNumberLabel(null)).toBeNull();
+  });
+});
+
+describe("dailyFlavorBadgeText (PKG-07: the shared Home/Boards/Preview badge)", () => {
+  it("degrades to exactly the pre-PKG-07 text when dailyNumber is unknown", () => {
+    expect(dailyFlavorBadgeText({ flavor: "hard", dailyNumber: undefined })).toBe("Hard");
+    expect(dailyFlavorBadgeText({ flavor: "weird", dailyNumber: undefined }, "yesterday"))
+      .toBe("Yesterday's daily · Weird");
+  });
+
+  it("appends the 'Daily #N' fragment once dailyNumber is known", () => {
+    expect(dailyFlavorBadgeText({ flavor: "hard", dailyNumber: 7 })).toBe("Hard · Daily #7");
+    expect(dailyFlavorBadgeText({ flavor: "weird", dailyNumber: 7 }, "yesterday"))
+      .toBe("Yesterday's daily · Weird · Daily #7");
   });
 });
 

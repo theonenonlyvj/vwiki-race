@@ -597,7 +597,11 @@ function isDailyFeature(value: unknown): value is NonNullable<Challenge["dailyFe
   return isRecord(value) &&
     isStrictCalendarDate(value.dailyDate) &&
     isDailyFlavor(value.flavor) &&
-    isDailySelectionSource(value.selectionSource);
+    isDailySelectionSource(value.selectionSource) &&
+    // PKG-07: optional, not required - `dailyNumber` postdates this field
+    // (see DailyFeature's own doc comment) and older responses/fixtures
+    // may not carry it yet.
+    hasOptionalNumber(value, "dailyNumber");
 }
 
 function isDailyFlavor(value: unknown): value is DailyFlavor {

@@ -7,12 +7,13 @@ import {
   previousCentralDate,
   type HomeHeroSelection,
 } from "../domain/challengeSelection";
-import { dailyFlavorLabel } from "../domain/dailyEditorial";
+import { dailyFlavorBadgeText } from "../domain/dailyEditorial";
 import { dailyTrendGuard } from "../domain/dailyTrends";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { PlayAnotherSuggestionState } from "../domain/playAnother";
 import type { AccountStats, Challenge } from "../domain/types";
 import type { ChallengeBoardResponse } from "../server/contracts";
+import { useDailyCountdown } from "../hooks/useDailyCountdown";
 import { ShareResultButton } from "../race/shared";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 
@@ -153,6 +154,22 @@ export default function Home({
     };
   }, [apiClient, yesterdaysDaily?.id, yesterdayIsHero]);
 
+  // PKG-07 (council 2026-07-19, owner-proxy ruling (d)): "live countdown to
+  // 5:00 AM Central on Home pre-play... update every second while visible".
+  // Called unconditionally, ABOVE the loading-state early return below (a
+  // conditional hook call would violate the rules of hooks the moment
+  // `hero` flips from null to a real value on the same mounted instance).
+  // `kind === "default"` (no daily anywhere in the catalog) never counts
+  // down - there's no drop this counts toward - matching the badge/ritual-
+  // line's own "default never gets daily-specific copy" convention below.
+  // Deliberately NOT also gated on the post-play `dailyState` (computed
+  // just below, and only safely computable once `heroChallenge` is known
+  // non-null) - the interval simply keeps ticking, unrendered, for a
+  // finished Home; negligible cost, and it avoids duplicating the
+  // placement/DNF lookup above the loading guard just to add one more
+  // gating bit.
+  const countdownText = useDailyCountdown({ active: Boolean(hero) && hero?.kind !== "default" });
+
   if (!hero || !heroChallenge) {
     return (
       <section className="home-layout">
@@ -194,9 +211,7 @@ export default function Home({
   // lands, instead of silently presenting a stand-in as "the daily".
   const heroIsYesterday = hero.kind === "yesterday-daily";
   const flavorBadge = heroChallenge.dailyFeature
-    ? heroIsYesterday
-      ? `Yesterday's daily · ${dailyFlavorLabel(heroChallenge.dailyFeature.flavor)}`
-      : dailyFlavorLabel(heroChallenge.dailyFeature.flavor)
+    ? dailyFlavorBadgeText(heroChallenge.dailyFeature, heroIsYesterday ? "yesterday" : "today")
     : null;
   const heroBoardTitle = heroIsYesterday ? "Yesterday's board" : "Today's board";
 
@@ -226,10 +241,16 @@ export default function Home({
             <p className="daily-hero-status daily-hero-dnf">Last try: DNF</p>
           ) : null}
 
-          {/* Finished state already closes with the "come defend your spot"
-              ritual line below - don't say "drops 5:00 AM" twice. */}
-          {heroIsYesterday && dailyState !== "finished" ? (
-            <p className="ritual-line muted">New daily drops 5:00 AM Central.</p>
+          {/* PKG-07 (owner-proxy ruling (d)): the live "time left today"
+              countdown replaces the old static "New daily drops 5:00 AM
+              Central." sentence, and now shows pre-play for BOTH hero kinds
+              that have a real drop to count toward - not just the yesterday-
+              framed one the static line used to gate on (the mockup's own
+              Step-1-Home shows it for a real TODAY's daily too). Finished
+              state already closes with the "come defend your spot" ritual
+              line below - don't show both. */}
+          {hero.kind !== "default" && dailyState !== "finished" && countdownText ? (
+            <p className="ritual-line muted">{countdownText}</p>
           ) : null}
         </div>
 

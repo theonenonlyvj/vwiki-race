@@ -53,6 +53,21 @@ function StatsPanel({ stats }: { stats: AccountStats | null }) {
     <section className="stats-panel">
       <h2>Stats</h2>
       <dl className="stat-grid">
+        {/* PKG-07 (council 2026-07-19, owner-proxy ruling (a)): the ritual-
+            identity streak, reusing `accountStats.dailyStreak` - Home
+            already fetches this same field for its own streak/trend chip
+            (StreakTrendRow in Home.tsx), so You never has to introduce a
+            second source of truth for it. No "best streak" tile alongside
+            it - `AccountStats` doesn't track a lifetime-best streak
+            anywhere server-side, and this repo's data-fidelity convention
+            is to never fabricate a number the server hasn't actually
+            computed. */}
+        <div>
+          <dt>Streak</dt>
+          <dd>
+            {stats ? `${stats.dailyStreak} ${stats.dailyStreak === 1 ? "day" : "days"}` : "-"}
+          </dd>
+        </div>
         <div>
           <dt>Attempts</dt>
           <dd>{totals?.attempts ?? "-"}</dd>

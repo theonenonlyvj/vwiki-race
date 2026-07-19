@@ -823,7 +823,9 @@ export function createD1TrackingRepository(options: {
                   c.created_by_account_id, c.created_by_display_name,
                   c.created_by_identity_status, c.origin, c.daily_date, c.source,
                   f.daily_date AS feature_daily_date, f.flavor AS feature_flavor,
-                  f.selection_source AS feature_selection_source
+                  f.selection_source AS feature_selection_source,
+                  (SELECT COUNT(*) FROM daily_features df2 WHERE df2.daily_date <= f.daily_date)
+                    AS feature_daily_number
            FROM challenges c
            LEFT JOIN daily_features f ON f.challenge_id = c.id
            WHERE c.is_active = 1
@@ -4562,6 +4564,14 @@ function mapChallengeRow(row: ChallengeRow): Challenge {
           dailyDate: row.feature_daily_date,
           flavor: row.feature_flavor,
           selectionSource: row.feature_selection_source,
+          // PKG-07: only `listChallenges` currently selects
+          // `feature_daily_number` (see its query) - every other caller of
+          // `mapChallengeRow` leaves it `undefined`/`null` on the row, which
+          // correctly produces an absent `dailyNumber` here rather than a
+          // fabricated 0/NaN.
+          dailyNumber: row.feature_daily_number != null
+            ? Number(row.feature_daily_number)
+            : undefined,
         }
       : null;
   const origin = dailyFeature || row.origin === "daily" ? "daily" : "manual";
@@ -4706,6 +4716,7 @@ interface ChallengeRow {
   feature_daily_date?: string | null;
   feature_flavor?: DailyFlavor | null;
   feature_selection_source?: "automatic" | "community" | "admin" | null;
+  feature_daily_number?: number | null;
 }
 
 interface DailyNominationRow {

@@ -1,3 +1,4 @@
+import { dailyFlavorBadgeText } from "../domain/dailyEditorial";
 import type { Challenge } from "../domain/types";
 import type { TargetPreviewState } from "../hooks/useTargetPreview";
 
@@ -29,6 +30,13 @@ export default function PreRacePreview({
   const unavailable =
     targetPreview.status === "unavailable" && targetPreview.challengeId === challenge.id;
   const title = readyPreview?.canonicalTitle ?? challenge.target.title;
+  // PKG-07 (council 2026-07-19, owner-proxy ruling): the same "Daily #N"
+  // badge as Home's hero/Boards' Today, so the number a player just saw on
+  // Home is still on screen once they commit to the preview. No yesterday-
+  // specific framing here (unlike Home/Boards) - Preview isn't currently
+  // threaded the hero's "today"/"yesterday" kind, and the ruling's own
+  // acceptance bar only requires the number itself to agree across screens.
+  const dailyBadge = challenge.dailyFeature ? dailyFlavorBadgeText(challenge.dailyFeature) : null;
 
   return (
     <section className="pre-race-preview" aria-label="Pre-race preview">
@@ -42,6 +50,11 @@ export default function PreRacePreview({
       </button>
 
       <div className="pre-race-copy">
+        {dailyBadge ? (
+          <div className="challenge-meta">
+            <span className="daily-badge">{dailyBadge}</span>
+          </div>
+        ) : null}
         <span className="target-preview-kicker">Your target</span>
         <h2>{title}</h2>
         {readyPreview ? (

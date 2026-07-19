@@ -195,4 +195,23 @@ describe("Boards: Today shares Home's honest hero selection (PKG-01)", () => {
     const yesterdayHeader = document.querySelector<HTMLElement>(".board-segment-header")?.textContent;
     expect(yesterdayHeader).toContain("Coffee");
   });
+
+  it("PKG-07: Today's badge carries the server-computed 'Daily #N' alongside the flavor, once the challenge carries a dailyNumber", async () => {
+    const numberedDaily: Challenge = {
+      ...todaysDaily,
+      dailyFeature: { ...todaysDaily.dailyFeature!, dailyNumber: 7 },
+    };
+    renderBoards({
+      challenges: [randomUserChallenge, yesterdaysDaily, numberedDaily],
+      heroSelection: { challenge: numberedDaily, kind: "today-daily" },
+    });
+
+    const header = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>(".board-segment-header");
+      if (!el) throw new Error("header not rendered yet");
+      return el;
+    });
+    expect(within(header).getByText("Today")).toBeVisible();
+    expect(within(header).getByText("Hard · Daily #7")).toBeVisible();
+  });
 });
