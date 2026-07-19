@@ -10,6 +10,7 @@ import ModalDialog from "./components/ModalDialog";
 import { getSortedChallenges } from "./domain/challenges";
 import {
   centralDateKey,
+  isDailyToday,
   selectDefaultChallenge,
 } from "./domain/challengeSelection";
 import type { CreateChallengeOutcome } from "./domain/dailyEditorial";
@@ -1327,9 +1328,27 @@ export default function App({
           onSeeOtherChallengesFromPreview={() => exitRaceFlow("challenges")}
           onStartFromPreview={() => void startSelectedChallenge()}
           onPlayAgain={() => void startSelectedChallenge()}
-          onShowLeaderboard={() => exitCompletedRaceTo("boards")}
+          onShowLeaderboard={() => {
+            // PKG-05 (council 2026-07-19, owner-proxy ruling): challenge-
+            // aware, not a blind exit to global (daily-only) Boards - an
+            // older daily or a custom challenge has no place on Boards, so
+            // it routes to that challenge's own Challenge Detail leaderboard
+            // instead (the same exitCompletedRaceToChallenge onOpenChallenge
+            // already uses). `session` (completed) falls back to
+            // `dnfResult` (DNF) - useRaceController.endRun wipes `session`
+            // on a genuine abandon, so only one of the two is ever set here.
+            // Same `isDailyToday` calc RaceResults' own header/board-title
+            // copy uses, so the two can't independently drift.
+            const racedChallenge = session?.challenge ?? dnfResult?.challenge ?? null;
+            if (racedChallenge && !isDailyToday(racedChallenge, currentCentralDate)) {
+              exitCompletedRaceToChallenge(racedChallenge.id);
+              return;
+            }
+            exitCompletedRaceTo("boards");
+          }}
           onShowChallenges={() => exitCompletedRaceTo("challenges")}
           onClaimIdentity={(mode) => openAuthPrompt({ type: "claim" }, mode)}
+          onGoHome={() => exitCompletedRaceTo("home")}
           handleArticleClick={handleArticleClick}
           handleArticlePrewarm={handleArticlePrewarm}
         />

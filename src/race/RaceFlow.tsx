@@ -76,6 +76,7 @@ export default function RaceFlow({
   onShowLeaderboard,
   onShowChallenges,
   onClaimIdentity,
+  onGoHome,
   handleArticleClick,
   handleArticlePrewarm,
 }: {
@@ -132,6 +133,9 @@ export default function RaceFlow({
   onShowLeaderboard: () => void;
   onShowChallenges: () => void;
   onClaimIdentity: (mode: "create" | "login") => void;
+  // PKG-05: Results' low-emphasis Home exit link (see RaceResults' own
+  // onGoHome doc comment).
+  onGoHome: () => void;
   handleArticleClick: (event: MouseEvent<HTMLElement>) => void;
   handleArticlePrewarm: (target: EventTarget | null) => void;
 }) {
@@ -192,6 +196,7 @@ export default function RaceFlow({
         onShowLeaderboard={onShowLeaderboard}
         onShowChallenges={onShowChallenges}
         onClaimIdentity={onClaimIdentity}
+        onGoHome={onGoHome}
         handleArticleClick={handleArticleClick}
         handleArticlePrewarm={handleArticlePrewarm}
       />
@@ -223,6 +228,7 @@ export default function RaceFlow({
         onShowLeaderboard={onShowLeaderboard}
         onShowChallenges={onShowChallenges}
         onClaimIdentity={onClaimIdentity}
+        onGoHome={onGoHome}
         handleArticleClick={handleArticleClick}
         handleArticlePrewarm={handleArticlePrewarm}
       />

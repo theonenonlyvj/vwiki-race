@@ -19,6 +19,13 @@ import type { PlayAnotherSuggestionState } from "../domain/playAnother";
  * `"loading"`/`"error"` degrade to just the Browse-all link, matching
  * Boards' F6 discipline: never silently show the wrong state as if it were
  * real data.
+ *
+ * PKG-05 (council 2026-07-19): the suggestion/random-challenge button uses
+ * the existing `.secondary-button` treatment (mockup-race-flow-v3 panel 3's
+ * smaller bordered card) rather than the default solid-cyan button weight -
+ * this is a shared component, so the demotion is a twofer: it fixes both
+ * Results' Play-another slot AND Home's "Got a few more minutes?" card in
+ * one change, intentionally (not a side effect discovered mid-implementation).
  */
 export default function PlayAnotherCard({
   suggestion,
@@ -41,6 +48,7 @@ export default function PlayAnotherCard({
 
       {suggestion.status === "ready" ? (
         <button
+          className="secondary-button"
           type="button"
           onClick={() => onOpenChallenge(suggestion.challenge.id)}
         >
@@ -49,6 +57,7 @@ export default function PlayAnotherCard({
       ) : suggestion.status === "empty" ? (
         <>
           <button
+            className="secondary-button"
             disabled={randomChallengeBusy}
             type="button"
             onClick={onCreateRandomChallenge}

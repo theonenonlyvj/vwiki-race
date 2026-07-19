@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FocusEvent, type MouseEv
 import BoardSnippet from "../components/BoardSnippet";
 import { boardSnippetRowsForResult } from "../domain/boardSnippet";
 import PlayAnotherCard from "../components/PlayAnotherCard";
-import { dailyDateForChallenge } from "../domain/challengeSelection";
+import { isDailyToday as isChallengeDailyToday } from "../domain/challengeSelection";
 import { compressPathForStrip } from "../domain/pathCompression";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { GameSession } from "../domain/gameSession";
@@ -60,6 +60,7 @@ export default function RaceResults({
   onShowLeaderboard,
   onShowChallenges,
   onClaimIdentity,
+  onGoHome,
   handleArticleClick,
   handleArticlePrewarm,
 }: {
@@ -99,6 +100,11 @@ export default function RaceResults({
   onShowLeaderboard: () => void;
   onShowChallenges: () => void;
   onClaimIdentity: (mode: "create" | "login") => void;
+  // PKG-05 (council 2026-07-19): low-emphasis, nice-to-have exit straight to
+  // Home - not load-bearing (the daily ritual already round-trips through
+  // Home via the mode-nav once View leaderboard/Browse land), just a
+  // cheaper way back for anyone who's done for the day.
+  onGoHome: () => void;
   handleArticleClick: (event: MouseEvent<HTMLElement>) => void;
   handleArticlePrewarm: (target: EventTarget | null) => void;
 }) {
@@ -163,7 +169,9 @@ export default function RaceResults({
   // "Today"/"Today's board" is only accurate when the raced challenge is
   // actually today's daily - anything else (an older daily, a custom
   // challenge) gets the generic "on this board"/"Leaderboard" copy instead.
-  const isDailyToday = dailyDateForChallenge(challenge) === todayCentral;
+  // Same helper App.tsx's "View leaderboard" exit routing uses (PKG-05), so
+  // the two can't independently drift on the same calculation.
+  const isDailyToday = isChallengeDailyToday(challenge, todayCentral);
   // Ritual hook (spec beat 3): fires only on the account's literal first-ever
   // completed race - i.e. the pre-race snapshot was exactly 0 completions,
   // regardless of how long the post-race stats refetch takes (M2 fix).
@@ -185,15 +193,46 @@ export default function RaceResults({
           </p>
         ) : null}
 
+        {/* PKG-05 (council 2026-07-19): Share and (for a still-unclaimed
+            guest) the claim nudge move directly under the header - un-gated
+            from `status === "completed"` so a DNF is no longer a dead end
+            (a losing run is still shareable and a guest can still claim
+            their spot). Both read off `justFinishedRow`, the same
+            one-source-of-truth data the header/board row above already use
+            (PKG-03 change 5), so a DNF's share text carries its own
+            explicit "DNF" marker rather than reading like a blazing win. */}
+        {isGuest ? (
+          <ClaimCta
+            displayName={identityDisplayName}
+            onClaimIdentity={onClaimIdentity}
+          />
+        ) : null}
+        <ShareResultButton
+          challenge={challenge}
+          clicks={justFinishedRow.clickCount}
+          elapsedMs={justFinishedRow.elapsedMs}
+          rank={justFinishedRow.rank}
+          status={justFinishedRow.status}
+        />
+
+        {/* Hierarchy (PKG-05): the clock-commit action gets the same coral
+            `.start-race-button` class PreRacePreview's "Start race" uses -
+            Play Again/Try again restarts the race clock immediately, same
+            as Start, so it earns the same "clock-commit" treatment (design
+            spec: "coral reserved for primary/destructive race actions").
+            "View leaderboard" only opens a board, so it gets the existing
+            `.secondary-button` treatment (already used by
+            ChallengeShareButton) instead of matching solid-cyan weight. */}
         <div className="result-actions">
           <button
+            className="start-race-button"
             disabled={playAgainDisabled}
             type="button"
             onClick={onPlayAgain}
           >
             {outcome.status === "dnf" ? "Try again" : "Play Again"}
           </button>
-          <button type="button" onClick={onShowLeaderboard}>
+          <button className="secondary-button" type="button" onClick={onShowLeaderboard}>
             View leaderboard
           </button>
         </div>
@@ -216,22 +255,15 @@ export default function RaceResults({
           suggestion={playAnotherSuggestion}
         />
 
-        {outcome.status === "completed" ? (
-          <>
-            {isGuest ? (
-              <ClaimCta
-                displayName={identityDisplayName}
-                onClaimIdentity={onClaimIdentity}
-              />
-            ) : null}
-            <ShareResultButton
-              challenge={challenge}
-              elapsedMs={outcome.elapsedMs}
-              clicks={outcome.session.clicks}
-              rank={outcome.leaderboardContext?.rank ?? null}
-            />
-          </>
-        ) : null}
+        {/* Judge A amendment 2: nice-to-have, not load-bearing - the daily
+            ritual already closes fine via View leaderboard/Browse (both
+            round-trip through the mode-nav, Home one tap away). Just a
+            cheaper, lower-emphasis way back for anyone done for the day. */}
+        <div className="result-home-exit">
+          <button className="link-button" type="button" onClick={onGoHome}>
+            Home
+          </button>
+        </div>
       </aside>
 
       {outcome.status === "completed" && article ? (
@@ -274,7 +306,11 @@ function CompletedResultHeader({
 function DnfResultHeader({ clicks, elapsedMs }: { clicks: number; elapsedMs: number }) {
   return (
     <>
-      <span className="result-kicker">DNF</span>
+      {/* PKG-05: "DNF" is never spelled out anywhere else in the app - a
+          first-time viewer has no way to learn what it means. The kicker is
+          the one place that can carry the expansion without disturbing the
+          compact "DNF · time · clicks" score line invariant 1 requires. */}
+      <span className="result-kicker">DNF — Did not finish</span>
       <h2>That one got away</h2>
       {/* Invariant 1 ("Time AND clicks, always") applies to DNF too. */}
       <p className="result-score">DNF · {formatTimeAndClicks(elapsedMs, clicks)}</p>

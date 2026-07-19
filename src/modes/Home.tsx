@@ -271,6 +271,7 @@ export default function Home({
             clicks={myPlacement.clickCount}
             elapsedMs={myPlacement.elapsedMs}
             rank={myPlacement.placement}
+            status="completed"
           />
 
           <PlayAnotherCard

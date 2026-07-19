@@ -1062,7 +1062,7 @@ describe("VWiki Race app", () => {
     expect(screen.getByRole("link", { name: /fruit/i })).toBe(link);
   });
 
-  it("refreshes the completed challenge leaderboard exactly once after acceptance", async () => {
+  it("refreshes the completed challenge leaderboard exactly once after acceptance, gives Play Again/View leaderboard hierarchy classes, and routes 'View leaderboard' to that challenge's own board (not Boards) since it isn't today's daily", async () => {
     const storage = claimedStorage();
     const fetchImpl = createFetchMock();
     const user = userEvent.setup();
@@ -1080,25 +1080,62 @@ describe("VWiki Race app", () => {
     const result = screen.getByText(/you reached it/i).closest("aside");
     const article = screen.getByRole("article");
     expect(result?.compareDocumentPosition(article)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(screen.getByRole("button", { name: /play again/i })).toBeVisible();
 
-    // "View leaderboard" exits the full-screen results takeover back to the
-    // normal shell - now Boards (Increment 3 rebuild), not a "Leaderboard"
-    // tab (Results itself stays unchanged this increment - see the
-    // race-flow spec's Results beat). PKG-01: this fixture challenge isn't a
-    // real daily (no dailyFeature/origin), so `selectHomeHeroChallenge`
-    // resolves it as kind "default" - Boards' Today segment now shows its
-    // own honest empty state for that kind rather than re-fetching this
-    // challenge's board a second time under a "TODAY" label (the pre-PKG-01
-    // fallback this test used to exercise). Two /board calls total: Home's
-    // own hero board read on initial mount, plus Results' own deduped-board
-    // self-fetch for its snippet (PKG-03) - Boards contributes none here.
+    // PKG-05: hierarchy - the clock-commit "Play Again" gets the coral
+    // `.start-race-button` class (same as PreRacePreview's "Start race"),
+    // "View leaderboard" gets the existing `.secondary-button` treatment,
+    // neither is a bare default-cyan button anymore.
+    const playAgain = screen.getByRole("button", { name: /play again/i });
+    expect(playAgain).toBeVisible();
+    expect(playAgain).toHaveClass("start-race-button");
+    const viewLeaderboard = screen.getByRole("button", { name: /view leaderboard/i });
+    expect(viewLeaderboard).toHaveClass("secondary-button");
+    expect(viewLeaderboard).not.toHaveClass("start-race-button");
+
+    // PKG-05: this fixture challenge isn't flagged as today's daily (no
+    // dailyFeature/origin) - "View leaderboard" now routes to ITS OWN
+    // Challenge Detail leaderboard via exitCompletedRaceToChallenge, not
+    // global Boards. (Previously this test asserted a "Boards" landing that
+    // only happened to look right because of Boards' daily-or-fallback hero
+    // mechanism, not because the routing was actually challenge-aware - see
+    // the PKG-05 council brief and its Judge B amendment.)
+    await user.click(viewLeaderboard);
+    expect(await screen.findByRole("region", { name: "Challenge detail" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Leaderboard" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Boards" })).toBeNull();
+    // Home's own hero board read on initial mount, plus Results' own
+    // deduped-board self-fetch for its snippet (PKG-03), plus Challenge
+    // Detail's own board-fetch effect on landing here (PKG-05).
+    await waitFor(() => expect(boardCalls(fetchImpl, "challenge-0001")).toBe(3));
+    expect(completeRunCalls(fetchImpl)).toBe(0);
+  });
+
+  it("routes 'View leaderboard' to Boards' Today segment when the raced challenge really is today's actual daily (PKG-05)", async () => {
+    // The genuine-daily half of the routing split above: proves the fix is
+    // actually challenge-aware in both directions, not just "always
+    // Challenge Detail now."
+    const fetchImpl = createFetchMock({
+      challenges: [dailyChallenge("challenge-0001", { dailyDate: "2026-07-17" })],
+    });
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={fetchImpl}
+        storage={claimedStorage()}
+        todayUtc={() => "2026-07-17"}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(await screen.findByRole("link", { name: /fruit/i }));
+    expect(await screen.findByText(/#1 today · 0:01 · 1 clk/)).toBeVisible();
+
     await user.click(screen.getByRole("button", { name: /view leaderboard/i }));
     expect(screen.getByRole("heading", { name: "Boards" })).toBeVisible();
     expect(screen.getByRole("navigation", { name: /vwiki race views/i })).toBeVisible();
-    expect(await screen.findByText(/no daily challenge right now/i)).toBeVisible();
-    await waitFor(() => expect(boardCalls(fetchImpl, "challenge-0001")).toBe(2));
-    expect(completeRunCalls(fetchImpl)).toBe(0);
+    expect(screen.queryByRole("region", { name: /challenge detail/i })).toBeNull();
   });
 
   it("exits the results takeover to Challenges when Browse all challenges is clicked", async () => {
@@ -1113,6 +1150,21 @@ describe("VWiki Race app", () => {
     await user.click(screen.getByRole("button", { name: /browse all challenges/i }));
 
     expect(screen.getByRole("heading", { name: "Challenges" })).toBeVisible();
+    expect(screen.getByRole("navigation", { name: /vwiki race views/i })).toBeVisible();
+    expect(screen.queryByText(/you reached it/i)).toBeNull();
+  });
+
+  it("exits the results takeover to Home when the low-emphasis Home link is clicked (PKG-05)", async () => {
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(await screen.findByRole("link", { name: /fruit/i }));
+    expect(await screen.findByText(/you reached it/i)).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: /^home$/i }));
+
     expect(screen.getByRole("navigation", { name: /vwiki race views/i })).toBeVisible();
     expect(screen.queryByText(/you reached it/i)).toBeNull();
   });
@@ -3062,6 +3114,40 @@ describe("Race flow: full-screen takeover", () => {
     expect(await screen.findByRole("dialog", { name: /save your stats/i })).toBeVisible();
   });
 
+  it("shows the claim CTA and Share result for a guest's DNF too, not just a completed race (PKG-05)", async () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      "vwiki-race:vgames-session",
+      JSON.stringify({
+        accountId: "acc-guest",
+        displayName: "Guest-42",
+        token: "jwt-guest",
+        status: "ghost",
+      }),
+    );
+    const fetchImpl = createFetchMock({ clickStaysActive: true });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
+
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(screen.getByRole("button", { name: /^guest$/i }));
+    await user.click(await screen.findByRole("button", { name: /continue as guest/i }));
+    await screen.findByRole("heading", { name: "Apple" });
+    await user.click(await screen.findByRole("link", { name: /apple tree/i }));
+    await screen.findByRole("heading", { name: "Apple tree" });
+
+    await user.click(screen.getByRole("button", { name: /^end run$/i }));
+    const dialog = await screen.findByRole("dialog", { name: /end this run/i });
+    await user.click(within(dialog).getByRole("button", { name: /confirm end run/i }));
+
+    expect(await screen.findByText(/that one got away/i)).toBeVisible();
+    const claimCta = await screen.findByRole("region", { name: /keep your spot/i });
+    expect(within(claimCta).getByText(/guest-42/i)).toBeVisible();
+    const shareButton = screen.getByRole("button", { name: /share result/i });
+    expect(claimCta.compareDocumentPosition(shareButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("does not show the claim CTA for an already-claimed session", async () => {
     const user = userEvent.setup();
     render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={claimedStorage()} />);
@@ -3276,7 +3362,26 @@ describe("Race flow: full-screen takeover", () => {
     // Invariant 1 ("Time AND clicks, always") - the DNF headline must carry
     // elapsed time too, not just click count.
     expect(screen.getByText(/dnf · 0:08 · 1 clk/i)).toBeVisible();
-    expect(screen.getByRole("button", { name: /try again/i })).toBeVisible();
+    // PKG-05: "DNF" is never spelled out anywhere else in the app - the
+    // kicker expands it for a first-time viewer.
+    expect(screen.getByText("DNF — Did not finish")).toBeVisible();
+
+    // PKG-05: hierarchy - "Try again" (a clock-commit, same as Start) gets
+    // the coral `.start-race-button` class; "View leaderboard" gets the
+    // existing `.secondary-button` treatment. Neither is a bare
+    // default-cyan button anymore.
+    const tryAgain = screen.getByRole("button", { name: /try again/i });
+    expect(tryAgain).toBeVisible();
+    expect(tryAgain).toHaveClass("start-race-button");
+    const viewLeaderboard = screen.getByRole("button", { name: /view leaderboard/i });
+    expect(viewLeaderboard).toHaveClass("secondary-button");
+    expect(viewLeaderboard).not.toHaveClass("start-race-button");
+
+    // PKG-05: a DNF is no longer a dead end - Share is un-gated from
+    // `status === "completed"` and renders for a DNF too, directly under
+    // the header.
+    expect(screen.getByRole("button", { name: /share result/i })).toBeVisible();
+
     expect(screen.getByRole("button", { name: /browse all challenges/i })).toBeVisible();
     expect(screen.queryByRole("navigation", { name: /vwiki race views/i })).toBeNull();
 
@@ -3480,6 +3585,56 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
 
       await waitFor(() => expect(writeText).toHaveBeenCalledWith(
         `VWiki Race — Challenge #1 — #3 · 0:42 · 6 clk — ${window.location.origin}/?challenge=challenge-0001`,
+      ));
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "clipboard");
+      }
+    }
+  });
+
+  it("composes DNF share text with an explicit DNF marker - not indistinguishable from a win (PKG-05, owner-proxy ruling)", async () => {
+    // Un-gating ShareResultButton for DNF alone would produce a bare
+    // "time · clicks" line with no rank - reading exactly like a real (if
+    // unranked) win, not a failed 1-click abandon. composeShareText must
+    // carry an explicit "DNF" marker for this outcome.
+    let now = 1_000;
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    try {
+      const fetchImpl = createFetchMock({ clickStaysActive: true });
+      render(
+        <App apiOrigin={apiOrigin} fetchImpl={fetchImpl} now={() => now} storage={claimedStorage()} />,
+      );
+
+      await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+      await user.click(await screen.findByRole("button", { name: /start race/i }));
+      await screen.findByRole("heading", { name: "Apple" });
+      await user.click(await screen.findByRole("link", { name: /apple tree/i }));
+      await screen.findByRole("heading", { name: "Apple tree" });
+
+      const metrics = screen.getByLabelText(/current run/i);
+      const runMetric = within(metrics).getByText("Run").nextElementSibling;
+      now = 9_000;
+      await waitFor(() => expect(runMetric).toHaveTextContent("0:08 · 1 clk"));
+
+      await user.click(screen.getByRole("button", { name: /^end run$/i }));
+      const dialog = await screen.findByRole("dialog", { name: /end this run/i });
+      await user.click(within(dialog).getByRole("button", { name: /confirm end run/i }));
+      expect(await screen.findByText(/that one got away/i)).toBeVisible();
+
+      await user.click(screen.getByRole("button", { name: /share result/i }));
+
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(
+        `VWiki Race — Challenge #1 — DNF · 0:08 · 1 clk — beat that — ${window.location.origin}/?challenge=challenge-0001`,
       ));
     } finally {
       if (clipboardDescriptor) {
@@ -3838,6 +3993,11 @@ describe("Increment 5: Play-another suggestion + create-random (Browse full card
       "button",
       { name: /🏁 mars → water · 4 players/i },
     );
+    // PKG-05: demoted to the existing `.secondary-button` treatment (mockup-
+    // race-flow-v3 panel 3's smaller bordered card) rather than the default
+    // solid-cyan weight - PlayAnotherCard is shared with Results, so this
+    // fix lands on Home's card too (a deliberate twofer, not a side effect).
+    expect(suggestionButton).toHaveClass("secondary-button");
     await user.click(suggestionButton);
 
     const detail = await screen.findByRole("region", { name: /challenge detail/i });
@@ -3857,7 +4017,12 @@ describe("Increment 5: Play-another suggestion + create-random (Browse full card
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
     const card = await screen.findByRole("region", { name: /play another challenge/i });
-    await user.click(await within(card).findByRole("button", { name: /create a random new one/i }));
+    const randomButton = await within(card).findByRole("button", { name: /create a random new one/i });
+    // PKG-05: the "empty" slot's fallback CTA gets the same demotion as the
+    // "ready" suggestion button above - one consistent look for whichever
+    // alternative fills this slot.
+    expect(randomButton).toHaveClass("secondary-button");
+    await user.click(randomButton);
 
     const detail = await screen.findByRole("region", { name: /challenge detail/i });
     expect(within(detail).getByText(/ice/i)).toBeVisible();

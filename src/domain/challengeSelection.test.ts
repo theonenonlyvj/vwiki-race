@@ -5,6 +5,7 @@ import {
   centralDateDaysBefore,
   centralDateKey,
   dailyBadgeLabel,
+  isDailyToday,
   previousCentralDate,
   selectDefaultChallenge,
   selectHomeHeroChallenge,
@@ -196,6 +197,31 @@ describe("centralDateDaysBefore", () => {
 
   it("carries across a year boundary", () => {
     expect(centralDateDaysBefore("2026-01-03", 6)).toBe("2025-12-28");
+  });
+});
+
+describe("isDailyToday (PKG-05: shared by RaceResults' header copy and App.tsx's View-leaderboard routing)", () => {
+  it("is true for a challenge whose dailyFeature date matches today", () => {
+    const daily = challenge("challenge-0009", {
+      origin: "daily",
+      dailyDate: "2026-07-19",
+      dailyFeature: { dailyDate: "2026-07-19", flavor: "recognizable", selectionSource: "admin" },
+    });
+    expect(isDailyToday(daily, "2026-07-19")).toBe(true);
+  });
+
+  it("is false for a genuine daily from a different date (an older daily)", () => {
+    const yesterdaysDaily = challenge("challenge-0009", {
+      origin: "daily",
+      dailyDate: "2026-07-18",
+      dailyFeature: { dailyDate: "2026-07-18", flavor: "recognizable", selectionSource: "admin" },
+    });
+    expect(isDailyToday(yesterdaysDaily, "2026-07-19")).toBe(false);
+  });
+
+  it("is false for a challenge that is not a daily at all (no dailyFeature/origin)", () => {
+    const custom = challenge("challenge-custom");
+    expect(isDailyToday(custom, "2026-07-19")).toBe(false);
   });
 });
 

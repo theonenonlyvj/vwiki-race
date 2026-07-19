@@ -100,6 +100,21 @@ export function dailyDateForChallenge(challenge: Challenge): string | null {
 }
 
 /**
+ * Whether `challenge` is genuinely today's actual daily - not merely "the
+ * challenge currently on screen" or a fallback Boards/Home happen to be
+ * showing. The one condition that distinguishes "today"/"Today's board"
+ * copy (RaceResults' header/board-snippet title) from "on this board"/
+ * "Leaderboard" for anything else (an older daily, a custom challenge), and
+ * (PKG-05, council 2026-07-19) whether Results' "View leaderboard" exit
+ * should land on global Boards or on that challenge's own Challenge Detail
+ * leaderboard. One function so RaceResults.tsx and App.tsx's exit routing
+ * can't independently drift on the same calculation.
+ */
+export function isDailyToday(challenge: Challenge, todayCentral: string): boolean {
+  return dailyDateForChallenge(challenge) === todayCentral;
+}
+
+/**
  * The calendar day immediately before a Central date key (Home's "yesterday's
  * results" recap card - UX redesign spec, Home §Pre-play). Pure calendar-date
  * arithmetic on the "YYYY-MM-DD" string itself, not a real-timezone

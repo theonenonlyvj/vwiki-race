@@ -1201,11 +1201,14 @@ h1 {
   font-weight: 700;
 }
 
-/* The one true clock-commit CTA (PreRacePreview's "Start race ▶" only -
-   PKG-04 owner-proxy ruling). Coral is reserved for this and `.end-run-
-   button`; every button that merely opens the preview - Home's hero,
-   Boards' CTA, Challenge Detail's "Race this" - uses `.race-preview-button`
-   below instead. */
+/* The clock-commit CTA class (PKG-04 owner-proxy ruling: coral reserved for
+   race actions that commit the clock, plus `.end-run-button`). Originally
+   PreRacePreview's "Start race ▶" only; PKG-05 (council 2026-07-19) extends
+   it to Results' "Play Again"/"Try again" - restarting from Results
+   re-commits the clock exactly like Start does, so it earns the identical
+   treatment, not a lesser one. Every button that merely opens the preview
+   (non-committal - Home's hero, Boards' CTA, Challenge Detail's "Race
+   this") still uses `.race-preview-button` below instead. */
 .start-race-button {
   border-color: #ffb4a6;
   background: var(--coral);
@@ -1551,13 +1554,19 @@ h1 {
   clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
 }
 
+/* PKG-05 (council 2026-07-19): `.result-panel` used to override its
+   border-color/background with the identical coral-wash formula
+   `.error-banner` uses (rgba(255,125,102,...) - the app's *error/warning*
+   register) as a full-panel treatment - so a race WIN read visually like a
+   warning banner. Reverted to the standard --ink-raised/--line card the base
+   rule above already gives every other panel, keeping coral only as a
+   left-border accent - the same treatment `.daily-hero` (Home's analogous
+   card) already uses. */
 .result-panel {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px 18px;
   align-items: center;
-  border-color: rgba(255, 125, 102, 0.54);
-  background: rgba(255, 125, 102, 0.12);
   border-left: 5px solid var(--coral);
   padding: 18px 20px;
 }
@@ -1610,7 +1619,9 @@ h1 {
 /* Results sub-sections (spec beat 3): path recap, board snippet,
    play-another card, guest claim CTA, and the composed share line. Each is
    a direct child of the two-column `.result-panel` grid, so each spans
-   both columns. */
+   both columns. PKG-05: divider color follows the panel's own de-coral-ed
+   surface (var(--line), same as every other panel's border) rather than the
+   leftover coral wash these used to sit inside. */
 .result-panel .path-recap,
 .result-panel .board-snippet,
 .result-panel .play-another-card,
@@ -1619,7 +1630,16 @@ h1 {
   grid-column: 1 / -1;
   margin-top: 14px;
   padding-top: 14px;
-  border-top: 1px solid rgba(255, 125, 102, 0.35);
+  border-top: 1px solid var(--line);
+}
+
+/* PKG-05: low-emphasis, nice-to-have Home exit (Judge A amendment 2 - not
+   load-bearing, just a cheaper way back). No divider - deliberately quieter
+   than the sectioned blocks above it. */
+.result-home-exit {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  justify-self: start;
 }
 
 .path-recap summary {
