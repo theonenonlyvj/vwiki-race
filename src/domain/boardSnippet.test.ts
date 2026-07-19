@@ -62,7 +62,7 @@ describe("boardSnippetRowsForResult", () => {
     const rows = boardSnippetRowsForResult(
       { placements: [placement("acc-you", 1), placement("acc-other", 2)], dnfs: [] },
       "acc-you",
-      { rank: 1, displayName: "Vijay", elapsedMs: 1_000, clickCount: 1 },
+      { status: "completed", rank: 1, displayName: "Vijay", elapsedMs: 1_000, clickCount: 1 },
     );
     // Only one "acc-you" row - the board's own placement for that account
     // never survives alongside the pinned just-finished row (that would be
@@ -78,7 +78,7 @@ describe("boardSnippetRowsForResult", () => {
     const rows = boardSnippetRowsForResult(
       { placements: [placement("acc-a", 1), placement("acc-b", 3)], dnfs: [] },
       "acc-you",
-      { rank: 2, displayName: "Vijay", elapsedMs: 2_000, clickCount: 2 },
+      { status: "completed", rank: 2, displayName: "Vijay", elapsedMs: 2_000, clickCount: 2 },
     );
     expect(rows.map((row) => row.rankLabel)).toEqual(["#1", "#2", "#3"]);
     expect(rows[1]).toMatchObject({ isYou: true, displayName: "Vijay" });
@@ -92,7 +92,7 @@ describe("boardSnippetRowsForResult", () => {
     const rows = boardSnippetRowsForResult(
       { placements: [placement("acc-you", 1), placement("acc-other", 2)], dnfs: [] },
       "acc-you",
-      { rank: 3, displayName: "Vijay", elapsedMs: 30_000, clickCount: 6 },
+      { status: "completed", rank: 3, displayName: "Vijay", elapsedMs: 30_000, clickCount: 6 },
     );
     expect(rows.map((row) => [row.rankLabel, row.displayName])).toEqual([
       ["#2", "acc-other"],
@@ -104,10 +104,29 @@ describe("boardSnippetRowsForResult", () => {
     const rows = boardSnippetRowsForResult(
       { placements: [placement("acc-a", 1)], dnfs: [dnf("acc-b")] },
       "acc-you",
-      { rank: null, displayName: "Vijay", elapsedMs: 8_000, clickCount: 1 },
+      { status: "dnf", rank: null, displayName: "Vijay", elapsedMs: 8_000, clickCount: 1 },
     );
     expect(rows.map((row) => row.rankLabel)).toEqual(["#1", "DNF", "DNF"]);
     expect(rows[2]).toMatchObject({ isYou: true, displayName: "Vijay" });
+  });
+
+  it("never labels a completed-but-unranked just-finished run as DNF (Wave 1 fix)", () => {
+    // A completed run can land with rank: null when it's excluded from the
+    // board's ranked CTE (containment flag, ranked_eligible=0, or a stale
+    // leaderboardContext) - the run still reached the target, so it must
+    // never render as "DNF" (spec invariant 2: completion is never demoted).
+    const rows = boardSnippetRowsForResult(
+      { placements: [placement("acc-a", 1)], dnfs: [dnf("acc-b")] },
+      "acc-you",
+      { status: "completed", rank: null, displayName: "Vijay", elapsedMs: 38_000, clickCount: 5 },
+    );
+    const yourRow = rows.find((row) => row.isYou);
+    expect(yourRow?.rankLabel).not.toBe("DNF");
+    expect(yourRow).toMatchObject({ rankLabel: "—", rank: null, displayName: "Vijay" });
+    // Sorts after every ranked placement.
+    expect(rows.map((row) => row.rankLabel).indexOf("—")).toBeGreaterThan(
+      rows.map((row) => row.rankLabel).indexOf("#1"),
+    );
   });
 
   it("returns only the deduped board's rows when there is no just-finished run to pin (e.g. no identified account)", () => {

@@ -70,11 +70,16 @@ export function boardSnippetRowsFromBoard(
 
 /**
  * The literal run that just ended (Race flow beat 3), described in
- * `BoardSnippetRow` terms - `rank: null` reads as "DNF" (matching
- * `boardSnippetRowsFromBoard`'s own DNF rows), not "unranked", since Results
- * only ever calls this for a run that just genuinely finished or abandoned.
+ * `BoardSnippetRow` terms. `rank: null` is ambiguous on its own - it means
+ * "DNF" for an abandoned run, but for a COMPLETED run it means "finished,
+ * but excluded from this board's ranked CTE" (board_excluded, containment
+ * flagging, or a stale/omitted leaderboardContext) - the run still reached
+ * the target, so `status` disambiguates the two so a completed run is never
+ * mislabeled "DNF" (Wave 1 fix, spec invariant 2: a completion is never
+ * demoted to DNF display).
  */
 export interface JustFinishedRow {
+  status: "completed" | "dnf";
   rank: number | null;
   displayName: string;
   elapsedMs: number;
@@ -108,7 +113,13 @@ export function boardSnippetRowsForResult(
 
   const yourRow: BoardSnippetRow = {
     key: `you-${identityAccountId}`,
-    rankLabel: justFinished.rank !== null ? `#${justFinished.rank}` : "DNF",
+    // "DNF" is reserved for genuinely abandoned runs. A completed run with
+    // no rank (excluded from the board's ranked CTE - containment-flagged,
+    // ranked_eligible=0, or an older response with no leaderboardContext at
+    // all) still reached the target, so it reads "—", never "DNF".
+    rankLabel: justFinished.rank !== null
+      ? `#${justFinished.rank}`
+      : justFinished.status === "completed" ? "—" : "DNF",
     rank: justFinished.rank,
     displayName: justFinished.displayName,
     elapsedMs: justFinished.elapsedMs,

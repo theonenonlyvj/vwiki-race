@@ -145,12 +145,14 @@ export default function RaceResults({
   // canonical placement elsewhere on the same board).
   const justFinishedRow = outcome.status === "completed"
     ? {
+        status: "completed" as const,
         rank: outcome.leaderboardContext?.rank ?? null,
         displayName: identityDisplayName,
         elapsedMs: outcome.elapsedMs,
         clickCount: outcome.session.clicks,
       }
     : {
+        status: "dnf" as const,
         rank: null,
         displayName: identityDisplayName,
         elapsedMs: outcome.elapsedMs,
