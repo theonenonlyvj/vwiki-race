@@ -18,13 +18,13 @@ import { describe, expect, it } from "vitest";
 describe("workerd fetch binding", () => {
   it("no factory receives the bare global fetch as fetchImpl", () => {
     for (const file of ["worker.ts", "dailyCandidateEvaluator.ts", "editorialTargetPools.ts", "wikipediaChallengeValidator.ts", "vgamesIdentityClient.ts"]) {
-      const source = readFileSync(join(__dirname, file), "utf8");
+      const source = readFileSync(join(__dirname, file), "utf-8");
       expect(source, `${file} passes the bare global fetch as fetchImpl`).not.toMatch(/fetchImpl:\s*fetch\s*[,}]/);
     }
   });
 
   it("createWikimediaBudget never calls fetchImpl as a method of its options", () => {
-    const source = readFileSync(join(__dirname, "dailyCandidateEvaluator.ts"), "utf8");
+    const source = readFileSync(join(__dirname, "dailyCandidateEvaluator.ts"), "utf-8");
     expect(source).not.toMatch(/options\.fetchImpl\(/);
   });
 });
