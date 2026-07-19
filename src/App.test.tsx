@@ -52,6 +52,97 @@ describe("VWiki Race app", () => {
     window.history.pushState({}, "", "/");
   });
 
+  it("FB-6: shows a dismissible notice when identity storage writes are blocked (private browsing)", async () => {
+    // Reads still work (a pre-existing ghost session is visible - seeded
+    // straight into the backing map, not through the throwing setItem
+    // below) but every write throws, simulating a browser that blocks
+    // storage writes (private browsing, a blocked-storage policy, a full
+    // quota) while access itself still succeeds - distinct from the
+    // property-access-throws case above.
+    const values = new Map<string, string>([
+      [
+        "vwiki-race:vgames-session",
+        JSON.stringify({
+          accountId: "acc-guest",
+          displayName: "Guest-42",
+          token: "jwt-guest",
+          status: "ghost",
+        }),
+      ],
+    ]);
+    const storage: Storage = {
+      get length() {
+        return values.size;
+      },
+      clear: () => values.clear(),
+      getItem: (key) => values.get(key) ?? null,
+      key: (index) => [...values.keys()][index] ?? null,
+      removeItem: (key) => values.delete(key),
+      setItem: () => {
+        throw new DOMException("Storage blocked", "SecurityError");
+      },
+    };
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={storage} />);
+
+    expect(screen.queryByText(/blocking storage/i)).toBeNull();
+
+    // Claim CTA (not "start race"): stays on the app shell throughout,
+    // rather than transitioning into the race takeover, which unmounts it.
+    await user.click(await screen.findByRole("button", { name: "You" }));
+    const claimCta = screen.getByRole("region", { name: /claim your stats/i });
+    await user.click(within(claimCta).getByRole("button", { name: /^create account$/i }));
+
+    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const usernameField = within(dialog).getByLabelText(/vgames username/i);
+    await user.clear(usernameField);
+    await user.type(usernameField, "vijay");
+    await user.type(within(dialog).getByLabelText(/^password$/i), "secret-pass");
+    await user.type(within(dialog).getByLabelText(/confirm password/i), "secret-pass");
+    await user.click(createAccountSubmitButton());
+
+    expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull();
+    const notice = await screen.findByText(/blocking storage/i);
+    expect(notice).toBeVisible();
+    // ONE notice, not one per failed write - getDeviceCredential's own
+    // write already failed above, and the session-persist write failed
+    // too, but the notice never duplicates.
+    expect(screen.getAllByText(/blocking storage/i)).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: /^dismiss$/i }));
+    expect(screen.queryByText(/blocking storage/i)).toBeNull();
+  });
+
+  it("never shows the storage-blocked notice when storage works normally", async () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      "vwiki-race:vgames-session",
+      JSON.stringify({
+        accountId: "acc-guest",
+        displayName: "Guest-42",
+        token: "jwt-guest",
+        status: "ghost",
+      }),
+    );
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={storage} />);
+
+    await user.click(await screen.findByRole("button", { name: "You" }));
+    const claimCta = screen.getByRole("region", { name: /claim your stats/i });
+    await user.click(within(claimCta).getByRole("button", { name: /^create account$/i }));
+
+    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const usernameField = within(dialog).getByLabelText(/vgames username/i);
+    await user.clear(usernameField);
+    await user.type(usernameField, "vijay");
+    await user.type(within(dialog).getByLabelText(/^password$/i), "secret-pass");
+    await user.type(within(dialog).getByLabelText(/confirm password/i), "secret-pass");
+    await user.click(createAccountSubmitButton());
+
+    expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull();
+    expect(screen.queryByText(/blocking storage/i)).toBeNull();
+  });
+
   it("shows the challenge catalog without requiring identity at page entry", async () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={memoryStorage()} />);
 

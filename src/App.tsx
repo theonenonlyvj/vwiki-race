@@ -104,6 +104,40 @@ function readBrowserStorage(): StorageLike {
 }
 
 /**
+ * FB-6 (approved defaults batch, 2026-07-19): wraps a storage backend so a
+ * write failure - private browsing, a blocked-storage policy, a full quota
+ * - can be observed exactly once without changing behavior otherwise. The
+ * write still throws through to the caller (createVGamesIdentityRepository
+ * already has its own catch that swallows it and falls back to in-memory
+ * for the tab); this just lets App also notice, so it can surface "your
+ * progress won't stick" instead of failing silently.
+ */
+function withStorageBlockedDetection(
+  storage: StorageLike,
+  onBlocked: () => void,
+): StorageLike {
+  return {
+    getItem: (key) => storage.getItem(key),
+    setItem: (key, value) => {
+      try {
+        storage.setItem(key, value);
+      } catch (caught) {
+        onBlocked();
+        throw caught;
+      }
+    },
+    removeItem: (key) => {
+      try {
+        storage.removeItem(key);
+      } catch (caught) {
+        onBlocked();
+        throw caught;
+      }
+    },
+  };
+}
+
+/**
  * Reads a cached identity session synchronously at mount (see the
  * identitySession/displayNameDraft/usernameDraft lazy useState initializers
  * below), rather than through an effect that only sets state a render
@@ -180,6 +214,13 @@ export default function App({
   const [endConfirmationOpen, setEndConfirmationOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runNotice, setRunNotice] = useState<string | null>(null);
+  // FB-6: set once, the first time an identity/session storage write
+  // throws (private browsing, a blocked-storage policy, a full quota) -
+  // see withStorageBlockedDetection below. Dismissal is in-memory only
+  // (storage is by definition unavailable to remember it) and lasts for
+  // this page load.
+  const [storageBlocked, setStorageBlocked] = useState(false);
+  const [storageNoticeDismissed, setStorageNoticeDismissed] = useState(false);
   const [dnfResult, setDnfResult] = useState<DnfResultSnapshot | null>(null);
   const [catalogLoadFailed, setCatalogLoadFailed] = useState(false);
   // Bumped after every run-ending event (completed or abandoned) to force a
@@ -257,7 +298,10 @@ export default function App({
     [apiOrigin, fetchImpl, injectedIdentityClient],
   );
   const identityStorage = useMemo(
-    () => storage ?? readBrowserStorage(),
+    () => withStorageBlockedDetection(
+      storage ?? readBrowserStorage(),
+      () => setStorageBlocked(true),
+    ),
     [storage],
   );
   const identityRepository = useMemo(
@@ -1438,6 +1482,7 @@ export default function App({
           onCreateChallenge={createChallenge}
           onCreateRandomChallenge={() => void createRandomChallenge()}
           onDisclosePath={(runId) => void loadRunPath(runId)}
+          onDismissStorageNotice={() => setStorageNoticeDismissed(true)}
           onExitAdmin={exitAdmin}
           onGoToBoardsFor={goToBoardsFor}
           onOpenChallengeDetail={(challengeId) => void openChallengeDetail(challengeId)}
@@ -1451,6 +1496,7 @@ export default function App({
           selectedChallenge={selectedChallenge}
           selectionLocked={challengeIsLocked}
           sessionDnfChallengeIds={sessionDnfChallengeIds}
+          storageBlockedNotice={storageBlocked && !storageNoticeDismissed}
           todayCentral={currentCentralDate}
         />
       )}

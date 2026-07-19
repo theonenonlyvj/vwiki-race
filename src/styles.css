@@ -837,6 +837,22 @@ h1 {
   font-family: var(--viota-ui-font);
 }
 
+/* FB-6 (approved defaults batch, 2026-07-19): the one dismissible line for
+   a private-browsing/blocked-storage session - same .run-notice chrome,
+   just laid out as a row so its "Dismiss" button sits clear of the copy. */
+.storage-blocked-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.storage-blocked-notice button {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 6px 12px;
+}
+
 .loading-text {
   border: 1px solid var(--line);
   background: var(--ink-soft);

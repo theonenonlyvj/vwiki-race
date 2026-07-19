@@ -72,6 +72,7 @@ export default function AppShell({
   onCreateChallenge,
   onCreateRandomChallenge,
   onDisclosePath,
+  onDismissStorageNotice,
   onExitAdmin,
   onGoToBoardsFor,
   onOpenChallengeDetail,
@@ -85,6 +86,7 @@ export default function AppShell({
   selectedChallenge,
   selectionLocked,
   sessionDnfChallengeIds,
+  storageBlockedNotice,
   todayCentral,
 }: {
   accountStats: AccountStats | null;
@@ -108,6 +110,9 @@ export default function AppShell({
   onCreateChallenge: (input: CreateChallengeInput) => Promise<void>;
   onCreateRandomChallenge: () => void;
   onDisclosePath: (runId: string) => void;
+  // FB-6: dismisses the private-browsing/blocked-storage notice below, for
+  // this page load only.
+  onDismissStorageNotice: () => void;
   onExitAdmin: () => void;
   onGoToBoardsFor: () => void;
   onOpenChallengeDetail: (challengeId: string) => void;
@@ -123,6 +128,11 @@ export default function AppShell({
   selectedChallenge: Challenge | null;
   selectionLocked: boolean;
   sessionDnfChallengeIds: ReadonlySet<string>;
+  // FB-6 (approved defaults batch, 2026-07-19): true once an identity/
+  // session storage write has failed (private browsing, a blocked-storage
+  // policy, a full quota) and the notice below hasn't been dismissed yet -
+  // App.tsx owns the underlying detection (withStorageBlockedDetection).
+  storageBlockedNotice: boolean;
   todayCentral: string;
 }) {
   // PKG-01: the ONE "today's playable challenge" derivation, shared by
@@ -230,6 +240,17 @@ export default function AppShell({
 
       {bannerError ? <p className="error-banner" role="alert">{bannerError}</p> : null}
       {bannerNotice ? <p className="run-notice" role="status">{bannerNotice}</p> : null}
+      {storageBlockedNotice ? (
+        <p className="run-notice storage-blocked-notice" role="status">
+          <span>
+            Your browser is blocking storage — progress won&apos;t stick on
+            this device.
+          </span>
+          <button onClick={onDismissStorageNotice} type="button">
+            Dismiss
+          </button>
+        </p>
+      ) : null}
       {showAdminAccessNotice ? (
         <p aria-label="Authorization notice" className="run-notice" role="status">
           This page is not available.
