@@ -412,8 +412,11 @@ export default function Boards({
 
           {showRaceCta ? (
             <div className="player-gate">
+              {/* PKG-04: opens the preview only (non-committal), same class
+                  as Home's hero and Detail's "Race this" - see Home.tsx's
+                  doc comment on the identical treatment. */}
               <button
-                className="start-race-button"
+                className="race-preview-button"
                 disabled={raceBusy}
                 onClick={() => onRaceChallenge(activeChallenge.id)}
                 type="button"

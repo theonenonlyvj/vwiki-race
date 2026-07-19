@@ -170,8 +170,12 @@ export default function AppShell({
   return (
     <>
       <header className="shell-topbar">
+        {/* PKG-04: dropped the mini "VWiki" kicker that used to stack above
+            this h1 - every mockup shows a single wordmark, and repeating
+            the brand name here (unlike the identity dialog's "VWiki" kicker
+            over a *different* heading, "Save your stats") just duplicated
+            it. */}
         <div className="brand-lockup" aria-label="VWiki Race">
-          <span className="viota-mark">VWiki</span>
           <h1>VWiki Race</h1>
         </div>
 

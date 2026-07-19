@@ -224,8 +224,14 @@ export default function Home({
 
         {dailyState !== "finished" ? (
           <div className="player-gate">
+            {/* PKG-04 (owner-proxy ruling): this only opens the pre-race
+                preview (App.tsx's openRacePreviewFor) - non-committal, same
+                as Boards' CTA and Detail's "Race this" - so it shares their
+                teal `.race-preview-button` class. Coral is reserved for
+                PreRacePreview's actual "Start race" and RaceMode's
+                "End Run". */}
             <button
-              className="start-race-button"
+              className="race-preview-button"
               disabled={raceBusy}
               onClick={() => onRaceChallenge(heroChallenge.id)}
               type="button"

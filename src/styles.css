@@ -11,7 +11,14 @@
   --cyan: #18e3cf;
   --coral: #ff765f;
   --text: #eef7f8;
-  --muted: #a8c2c6;
+  /* PKG-04 token cleanup: this token was defined but unused, at a hex value
+     (#a8c2c6) nothing in the file actually painted with - the app's real
+     "muted grey" (small-caps labels, secondary copy, the `.muted` class
+     itself) has always been the different #9fb8bd, applied as a raw hex in
+     ~12 places. Retargeted to that value rather than adding a second,
+     competing grey token. */
+  --muted: #9fb8bd;
+  --text-bright: #dffbfb;
   color: var(--text);
   background: var(--ink);
   font-family:
@@ -171,7 +178,7 @@ ol {
   width: min(520px, 100%);
   border: 1px solid rgba(130, 246, 239, 0.32);
   background: #081318;
-  color: #eef7f8;
+  color: var(--text);
   padding: 18px;
   box-shadow: 0 26px 80px rgba(0, 0, 0, 0.42);
   clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
@@ -254,14 +261,19 @@ ol {
 
 .auth-mode-switch button {
   background: rgba(255, 255, 255, 0.06);
-  color: #dffbfb;
+  color: var(--text-bright);
   min-width: 0;
 }
 
+/* PKG-04: coral is reserved for clock-commit/destructive race actions only
+   (Start race / End Run) - the auth-mode tab switch is neither, so its
+   active state reads as a teal outline/tint (mockup-onboarding-v2's
+   "Create New" tab), matching `.board-segment-control button.active`
+   below rather than the CTA-coral this used to borrow. */
 .auth-mode-switch button[aria-pressed="true"] {
-  background: #ff7d66;
-  border-color: #ffb4a6;
-  color: #170908;
+  background: rgba(13, 235, 215, 0.12);
+  border-color: var(--cyan);
+  color: var(--cyan);
 }
 
 .identity-form {
@@ -283,7 +295,7 @@ ol {
 }
 
 .identity-current-name span {
-  color: #9fb8bd;
+  color: var(--muted);
   font-size: 0.72rem;
   font-weight: 850;
   text-transform: uppercase;
@@ -295,7 +307,7 @@ ol {
 
 .secondary-button {
   background: var(--ink-soft);
-  color: #dffbfb;
+  color: var(--text-bright);
 }
 
 .path-strip,
@@ -364,14 +376,18 @@ h1 {
   align-items: center;
 }
 
+/* PKG-04 (Judge A amendment): a status label, not a control - mockups
+   (home-stateful-v2, onboarding-v2) render "DAILY · WEIRD · #7" as a
+   neutral/muted pill, not coral (which now means "commits the clock") or
+   teal (which reads as interactive/link here). */
 .daily-badge,
 .challenge-route .daily-badge,
 .challenge-list .daily-badge {
   display: inline-flex;
   width: max-content;
-  border: 1px solid #ffb4a6;
-  background: var(--coral);
-  color: #170908;
+  border: 1px solid var(--line-strong);
+  background: var(--ink-soft);
+  color: var(--muted);
   font-size: 0.64rem;
   font-style: normal;
   font-weight: 900;
@@ -385,7 +401,7 @@ h1 {
 .run-metrics dt,
 .article-heading span,
 .empty-state span {
-  color: #9fb8bd;
+  color: var(--muted);
   font-size: 0.72rem;
   font-weight: 850;
   letter-spacing: 0;
@@ -478,7 +494,7 @@ h1 {
 .name-hint {
   margin: 0;
   max-width: 240px;
-  color: #9fb8bd;
+  color: var(--muted);
   font-size: 0.72rem;
   font-weight: 600;
   line-height: 1.35;
@@ -522,7 +538,7 @@ h1 {
 
 .path-history span {
   flex: 0 0 auto;
-  color: #dffbfb;
+  color: var(--text-bright);
   max-width: 190px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -554,7 +570,7 @@ h1 {
   grid-template-columns: auto minmax(0, 1fr);
   gap: 8px;
   align-items: center;
-  color: #eef7f8;
+  color: var(--text);
   cursor: pointer;
   list-style: none;
 }
@@ -600,7 +616,7 @@ h1 {
   width: min(420px, calc(100vw - 28px));
   border: 1px solid var(--line-strong);
   background: #0b1a1f;
-  color: #dffbfb;
+  color: var(--text-bright);
   padding: 12px;
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.38);
   font-family: Georgia, "Times New Roman", serif;
@@ -642,27 +658,28 @@ h1 {
   min-height: 48px;
   background: transparent;
   border-color: transparent;
-  color: #9fb8bd;
+  color: var(--muted);
   font-size: 0.78rem;
   font-weight: 850;
   text-transform: none;
-  clip-path: none;
 }
 
+/* A real hover affordance (the base button's cyan glow + lift, from the
+   generic `button:not(:disabled):hover` rule at the top of this file) -
+   this override used to zero both out, leaving inactive nav items with no
+   feedback at all. Only the text-brighten stays nav-specific. */
 .mode-nav button:not(:disabled):hover {
-  box-shadow: none;
-  transform: none;
-  color: #eef7f8;
+  color: var(--text);
 }
 
+/* PKG-04 (Judge A amendment): no mockup that actually shows the mode-nav's
+   active state (home-stateful-v2, boards-trends, onboarding-v2,
+   browse-detail) renders it as a filled pill of any color - every one shows
+   plain bold/white text with no chrome. Coral (now reserved for
+   Start/End Run) is dropped with no color substitute standing in for it. */
 .mode-nav button.active {
-  background: var(--coral);
-  border-color: #ffb4a6;
-  color: #170908;
-}
-
-.mode-nav button.active:not(:disabled):hover {
-  color: #170908;
+  color: var(--text);
+  font-weight: 900;
 }
 
 .error-banner,
@@ -680,7 +697,7 @@ h1 {
 .run-notice {
   border: 1px solid rgba(13, 235, 215, 0.5);
   background: rgba(13, 235, 215, 0.08);
-  color: #dffbfb;
+  color: var(--text-bright);
   margin-top: 10px;
   padding: 10px 12px;
   font-family: var(--viota-ui-font);
@@ -689,7 +706,7 @@ h1 {
 .loading-text {
   border: 1px solid var(--line);
   background: var(--ink-soft);
-  color: #dffbfb;
+  color: var(--text-bright);
 }
 
 .content-shell {
@@ -723,8 +740,8 @@ h1 {
 
 .site-footer a:hover,
 .site-footer a:focus-visible {
-  color: #dffbfb;
-  border-bottom-color: #dffbfb;
+  color: var(--text-bright);
+  border-bottom-color: var(--text-bright);
 }
 
 /* Home v2 (Increment 2 Task 2 - the stateful daily hub): a single vertical
@@ -838,16 +855,19 @@ h1 {
 .board-segment-control button {
   min-height: 44px;
   background: var(--ink-soft);
-  color: #9fb8bd;
+  color: var(--muted);
   font-weight: 850;
   white-space: nowrap;
   scroll-snap-align: start;
 }
 
+/* PKG-04: coral reserved for Start/End Run - the segment control's active
+   state is a teal outline/tint (mockup-boards-trends), same treatment as
+   the auth-mode-switch tabs above. */
 .board-segment-control button.active {
-  background: var(--coral);
-  border-color: #ffb4a6;
-  color: #170908;
+  background: rgba(13, 235, 215, 0.12);
+  border-color: var(--cyan);
+  color: var(--cyan);
 }
 
 .board-segment-header {
@@ -965,7 +985,7 @@ h1 {
 .back-link:not(:disabled):hover {
   box-shadow: none;
   transform: none;
-  color: #dffbfb;
+  color: var(--text-bright);
 }
 
 .admin-bypass {
@@ -1107,6 +1127,11 @@ h1 {
   font-weight: 700;
 }
 
+/* The one true clock-commit CTA (PreRacePreview's "Start race ▶" only -
+   PKG-04 owner-proxy ruling). Coral is reserved for this and `.end-run-
+   button`; every button that merely opens the preview - Home's hero,
+   Boards' CTA, Challenge Detail's "Race this" - uses `.race-preview-button`
+   below instead. */
 .start-race-button {
   border-color: #ffb4a6;
   background: var(--coral);
@@ -1119,6 +1144,17 @@ h1 {
 
 .start-race-button:not(:disabled):hover {
   box-shadow: 0 0 0 3px rgba(255, 118, 95, 0.35);
+}
+
+/* Same prominent sizing as `.start-race-button` (still the app's biggest
+   CTA on the screens that carry it), but no color override - it inherits
+   the base `button` rule's teal fill/clip-path, matching mockup-home-
+   stateful-v2's "▶ Race" and mockup-browse-detail's "▶ Race this". */
+.race-preview-button {
+  min-height: 48px;
+  margin-top: 18px;
+  font-size: 1.05rem;
+  font-weight: 900;
 }
 
 .link-button {
@@ -1136,7 +1172,7 @@ h1 {
 .link-button:not(:disabled):hover {
   box-shadow: none;
   transform: none;
-  color: #dffbfb;
+  color: var(--text-bright);
 }
 
 .pre-race-see-other {
@@ -1151,7 +1187,7 @@ h1 {
   margin: 40px auto 0;
   border: 1px solid var(--line);
   background: var(--ink-raised);
-  color: #eef7f8;
+  color: var(--text);
   padding: 20px;
   clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
   font-family: var(--viota-ui-font);
@@ -1222,7 +1258,7 @@ h1 {
 }
 
 .result-actions .challenge-share span {
-  color: #dffbfb;
+  color: var(--text-bright);
 }
 
 .article-panel {
@@ -1436,7 +1472,7 @@ h1 {
 .stats-panel {
   border: 1px solid var(--line);
   background: var(--ink-raised);
-  color: #eef7f8;
+  color: var(--text);
   padding: 16px;
   clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
 }
@@ -1518,7 +1554,7 @@ h1 {
   flex-wrap: wrap;
   gap: 6px;
   align-items: baseline;
-  color: #eef7f8;
+  color: var(--text);
   font-weight: 750;
   list-style: none;
 }
@@ -1542,7 +1578,7 @@ h1 {
 .claim-cta h3 {
   font-family: var(--viota-ui-font);
   font-size: 0.95rem;
-  color: #eef7f8;
+  color: var(--text);
   margin: 0 0 8px;
 }
 
@@ -1593,7 +1629,7 @@ h1 {
 }
 
 .share-result span {
-  color: #dffbfb;
+  color: var(--text-bright);
   font-size: 0.78rem;
   font-weight: 750;
 }
@@ -1628,6 +1664,16 @@ h1 {
   line-height: 1.2;
 }
 
+/* PKG-04: Challenge Detail's "Your history" sub-heading, now that it sits
+   inside `.leaderboard-panel` chrome (matches `.board-snippet h3`'s
+   treatment elsewhere - a panel sub-section title, not the panel's own
+   h2). */
+.leaderboard-panel h3 {
+  margin: 0 0 8px;
+  font-family: var(--viota-ui-font);
+  font-size: 0.95rem;
+}
+
 .result-panel p,
 .empty-state p {
   margin-top: 8px;
@@ -1635,7 +1681,7 @@ h1 {
 }
 
 .muted {
-  color: #9fb8bd;
+  color: var(--muted);
 }
 
 .challenge-list,
@@ -1692,7 +1738,7 @@ h1 {
   width: 100%;
   gap: 2px;
   background: var(--ink-soft);
-  color: #eef7f8;
+  color: var(--text);
   text-align: left;
 }
 
@@ -1712,12 +1758,40 @@ h1 {
   font-size: inherit;
 }
 
+/* PKG-04: `.challenge-list span` above is a blanket (0,1,1) rule meant for
+   the card's kicker/DNF-style labels - it was outweighing the more specific
+   resets below (`.browse-card-title-row`'s `color: inherit` at (0,1,0),
+   and `.state-chip`'s own semantic colors, also (0,1,0)), coral-washing
+   every card's title, meta line, AND state chip. Re-scoped under
+   `.challenge-list` here to win on specificity instead. */
+.challenge-list .browse-card-title-row {
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.challenge-list .state-chip {
+  color: var(--text-bright);
+}
+
+.challenge-list .state-chip-completed {
+  color: var(--cyan);
+}
+
+.challenge-list .state-chip-dnf {
+  color: var(--muted);
+}
+
+.challenge-list .state-chip-new {
+  color: var(--text-bright);
+}
+
 .challenge-list strong {
   overflow-wrap: anywhere;
 }
 
 .challenge-list em {
-  color: #9fb8bd;
+  color: var(--muted);
   font-size: 0.76rem;
   font-style: normal;
   font-weight: 750;
@@ -1730,14 +1804,14 @@ h1 {
    the chip (flex-shrink: 0) never gets squeezed off. The meta line is a
    separate row below, allowed to single-line-ellipsis under width pressure
    instead. */
+/* Structural layout only - color/font-size/font-weight for both moved to
+   the `.challenge-list`-scoped resets above so they win the specificity
+   fight with `.challenge-list span`. */
 .browse-card-title-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
-  color: inherit;
-  font-size: inherit;
-  font-weight: inherit;
 }
 
 .browse-card-title-row strong {
@@ -1745,10 +1819,11 @@ h1 {
   min-width: 0;
 }
 
-.browse-card-meta {
+.challenge-list .browse-card-meta {
   display: block;
   overflow: hidden;
   min-width: 0;
+  color: var(--muted);
   font-size: 0.76rem;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -1759,7 +1834,7 @@ h1 {
   flex: 0 0 auto;
   border: 1px solid var(--line-strong);
   background: var(--ink);
-  color: #dffbfb;
+  color: var(--text-bright);
   font-size: 0.66rem;
   font-weight: 900;
   letter-spacing: 0.02em;
@@ -1783,7 +1858,7 @@ h1 {
 
 .state-chip-new {
   border-color: rgba(13, 235, 215, 0.35);
-  color: #dffbfb;
+  color: var(--text-bright);
 }
 
 /*
@@ -1876,16 +1951,25 @@ h1 {
 }
 
 .leaderboard details {
-  color: #dffbfb;
+  color: var(--text-bright);
 }
 
+/* PKG-04: a disclosure link ("View winning path"), not a race action or a
+   DNF-severity signal - reads as teal-underlined, the same link convention
+   as `.link-button`, rather than the leftover coral. */
 .leaderboard summary {
   display: flex;
   min-height: 44px;
   align-items: center;
-  color: #ffad9f;
+  color: var(--cyan);
   cursor: pointer;
   font-weight: 850;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.leaderboard summary:hover {
+  color: var(--text-bright);
 }
 
 .path-preview {
@@ -1936,7 +2020,7 @@ h1 {
 }
 
 .stat-grid dt {
-  color: #9fb8bd;
+  color: var(--muted);
   font-size: 0.72rem;
   font-weight: 850;
   text-transform: uppercase;
@@ -1950,7 +2034,7 @@ h1 {
 }
 
 .stats-panel h3 {
-  color: #ffad9f;
+  color: var(--muted);
   font-size: 0.84rem;
   margin: 0 0 8px;
   text-transform: uppercase;
@@ -1962,7 +2046,7 @@ h1 {
 
 .compact-list li {
   border-bottom: 1px solid rgba(130, 246, 239, 0.1);
-  color: #eef7f8;
+  color: var(--text);
   overflow-wrap: anywhere;
   padding-bottom: 6px;
 }
@@ -2064,7 +2148,7 @@ h1 {
 }
 
 .daily-admin-empty {
-  color: #9fb8bd;
+  color: var(--muted);
   font-size: 0.9rem;
 }
 
@@ -2072,7 +2156,7 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   gap: 5px 10px;
-  color: #9fb8bd;
+  color: var(--muted);
   font-size: 0.7rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -2109,7 +2193,7 @@ h1 {
 
 .daily-row-title span,
 .daily-classifier-note {
-  color: #9fb8bd;
+  color: var(--muted);
   font-size: 0.78rem;
   font-weight: 750;
 }
@@ -2127,7 +2211,7 @@ h1 {
 }
 
 .daily-score-grid dt {
-  color: #9fb8bd;
+  color: var(--muted);
   font-size: 0.62rem;
   font-weight: 850;
   text-transform: uppercase;
@@ -2150,7 +2234,7 @@ h1 {
   min-width: 0;
   min-height: 34px;
   background: var(--ink-soft);
-  color: #dffbfb;
+  color: var(--text-bright);
   font-size: 0.72rem;
   padding: 6px 5px;
 }

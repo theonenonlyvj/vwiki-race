@@ -57,12 +57,25 @@ export default function ChallengeDetail({
       </div>
 
       <div className="player-gate">
-        <button type="button" disabled={raceDisabled} onClick={onRaceThis}>
+        {/* PKG-04 (owner-proxy ruling): opening the preview is non-committal
+            (invariant 3 - no run exists until Start), same action Home's
+            hero and Boards' CTA trigger (App.tsx's openRacePreviewFor) - so
+            it shares their teal `.race-preview-button` class, never coral. */}
+        <button
+          className="race-preview-button"
+          type="button"
+          disabled={raceDisabled}
+          onClick={onRaceThis}
+        >
           Race this
         </button>
       </div>
 
-      <section aria-label="Challenge leaderboard">
+      {/* PKG-04: was the only mode screen with no card chrome - now wrapped
+          in the same `.leaderboard-panel` group Boards/Browse/You use
+          (styles.css:1431-1442 area), as two panels matching mockup-browse-
+          detail's leaderboard box + your-history box. */}
+      <section className="leaderboard-panel" aria-label="Challenge leaderboard">
         <h2>Leaderboard</h2>
         <LeaderboardList
           leaderboard={leaderboard}
@@ -71,7 +84,7 @@ export default function ChallengeDetail({
         />
       </section>
 
-      <section aria-label="Your history">
+      <section className="leaderboard-panel" aria-label="Your history">
         <h3>Your history</h3>
         {yourRows.length ? (
           <ol className="compact-list">

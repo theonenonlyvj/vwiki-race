@@ -2540,7 +2540,13 @@ describe("VWiki Race app", () => {
 
       // Home is the default landing mode.
       expect(within(nav).getByRole("button", { name: "Home" })).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByRole("button", { name: /▶ race/i })).toBeVisible();
+      const heroRace = screen.getByRole("button", { name: /▶ race/i });
+      expect(heroRace).toBeVisible();
+      // PKG-04 (owner-proxy ruling): opening the preview is non-committal -
+      // the hero shares Boards'/Detail's teal `.race-preview-button` class,
+      // never the coral `.start-race-button` clock-commit class.
+      expect(heroRace).toHaveClass("race-preview-button");
+      expect(heroRace).not.toHaveClass("start-race-button");
 
       await user.click(within(nav).getByRole("button", { name: "Boards" }));
       expect(within(nav).getByRole("button", { name: "Boards" })).toHaveAttribute("aria-pressed", "true");
@@ -2576,10 +2582,21 @@ describe("VWiki Race app", () => {
       render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={claimedStorage()} />);
 
       const detail = await screen.findByRole("region", { name: /challenge detail/i });
-      await user.click(within(detail).getByRole("button", { name: /race this/i }));
+      const raceThis = within(detail).getByRole("button", { name: /race this/i });
+      // PKG-04 (owner-proxy ruling): Detail's "Race this" only opens the
+      // preview - it's non-committal, same as Home's hero and Boards' CTA,
+      // so it carries their shared teal `.race-preview-button` class, never
+      // the coral `.start-race-button` clock-commit class (guards against
+      // silently reintroducing the two-color-CTA bug this package fixed).
+      expect(raceThis).toHaveClass("race-preview-button");
+      expect(raceThis).not.toHaveClass("start-race-button");
+      await user.click(raceThis);
 
-      expect(await screen.findByRole("region", { name: /pre-race preview/i })).toBeVisible();
+      const startButton = await screen.findByRole("button", { name: /start race/i });
+      expect(startButton).toBeVisible();
       expect(screen.queryByRole("region", { name: /challenge detail/i })).toBeNull();
+      // The clock-committing action downstream is the one true coral CTA.
+      expect(startButton).toHaveClass("start-race-button");
     });
 
     it("shows the account's stats in You", async () => {
@@ -3843,7 +3860,12 @@ describe("Boards v1: Today/Yesterday daily views (Increment 3)", () => {
 
     await user.click(await screen.findByRole("button", { name: "Boards" }));
     const board = await screen.findByRole("region", { name: "Boards" });
-    await user.click(await within(board).findByRole("button", { name: /race today's daily/i }));
+    const raceCta = await within(board).findByRole("button", { name: /race today's daily/i });
+    // PKG-04 (owner-proxy ruling): non-committal preview CTA - teal
+    // `.race-preview-button`, not the coral `.start-race-button`.
+    expect(raceCta).toHaveClass("race-preview-button");
+    expect(raceCta).not.toHaveClass("start-race-button");
+    await user.click(raceCta);
     expect(await screen.findByRole("button", { name: /start race/i })).toBeVisible();
   });
 
