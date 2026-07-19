@@ -1,5 +1,4 @@
-import { useMemo, useRef, useState } from "react";
-import AdminDailies from "../components/AdminDailies";
+import { lazy, Suspense, useMemo, useRef, useState } from "react";
 import TeachingGate, { TeachingGatePopup } from "../components/TeachingGate";
 import { selectHomeHeroChallenge } from "../domain/challengeSelection";
 import type { PlayAnotherSuggestionState } from "../domain/playAnother";
@@ -18,6 +17,11 @@ import You from "./You";
 
 export type ModeKey = "home" | "boards" | "challenges" | "you";
 export type ChallengesView = "browse" | "detail";
+
+// QF-02: code-split behind the existing isAdminDailiesRoute() gate - this
+// is dead weight in the bundle for every non-admin visit (the ~5 real
+// players), never on the hot path for anyone else.
+const AdminDailies = lazy(() => import("../components/AdminDailies"));
 
 // PKG-14 (direct owner feedback, 2026-07-19: "Boards - rename to stats"):
 // user-visible label only - the mode key stays "boards" (internal
@@ -157,12 +161,14 @@ export default function AppShell({
         <button type="button" className="back-link" onClick={onExitAdmin}>
           ← Back to VWiki Race
         </button>
-        <AdminDailies
-          apiClient={apiClient}
-          challenges={challenges}
-          previewGateway={previewWikipediaGateway}
-          token={identitySession.token}
-        />
+        <Suspense fallback={null}>
+          <AdminDailies
+            apiClient={apiClient}
+            challenges={challenges}
+            previewGateway={previewWikipediaGateway}
+            token={identitySession.token}
+          />
+        </Suspense>
       </div>
     );
   }

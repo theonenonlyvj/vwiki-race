@@ -196,6 +196,32 @@ describe("Boards: Today shares Home's honest hero selection (PKG-01)", () => {
     expect(yesterdayHeader).toContain("Coffee");
   });
 
+  it("QF-02: bouncing Today -> Yesterday -> Today issues no repeat network call for the closed Yesterday board", async () => {
+    const apiClient = mockApiClient();
+    const user = userEvent.setup();
+    renderBoards({
+      apiClient,
+      challenges: [randomUserChallenge, yesterdaysDaily, todaysDaily],
+      heroSelection: { challenge: todaysDaily, kind: "today-daily" },
+    });
+
+    await waitFor(() => expect(apiClient.getChallengeBoard).toHaveBeenCalledTimes(1));
+    expect(apiClient.getChallengeBoard).toHaveBeenCalledWith(todaysDaily.id);
+
+    await user.click(screen.getByRole("tab", { name: "Yesterday" }));
+    await waitFor(() => expect(apiClient.getChallengeBoard).toHaveBeenCalledTimes(2));
+    expect(apiClient.getChallengeBoard).toHaveBeenLastCalledWith(yesterdaysDaily.id);
+
+    await user.click(screen.getByRole("tab", { name: "Today" }));
+    await waitFor(() => expect(apiClient.getChallengeBoard).toHaveBeenCalledTimes(3));
+
+    // Bounce back to the closed Yesterday board a second time - cached,
+    // no fourth network call.
+    await user.click(screen.getByRole("tab", { name: "Yesterday" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(apiClient.getChallengeBoard).toHaveBeenCalledTimes(3);
+  });
+
   it("PKG-07: Today's badge carries the server-computed 'Daily #N' alongside the flavor, once the challenge carries a dailyNumber", async () => {
     const numberedDaily: Challenge = {
       ...todaysDaily,

@@ -7,6 +7,14 @@
       name="description"
       content="VWiki Race is a Wikipedia navigation game with tracked challenges and leaderboards."
     />
+    <!-- QF-02: free network wins. Every race hop fetches an article from
+         en.wikipedia.org; the API worker backs every board/challenge read.
+         Font-preload is deliberately NOT here - @fontsource output filenames
+         are content-hashed per build (no static href stays valid across a
+         deploy) and this pass has no manifest-reading build step to resolve
+         one; see QF-02 council notes. -->
+    <link rel="preconnect" href="https://en.wikipedia.org" crossorigin />
+    <link rel="preconnect" href="https://vwikirace-api.theonenonlyvj.workers.dev" crossorigin />
     <title>VWiki Race</title>
   </head>
   <body>

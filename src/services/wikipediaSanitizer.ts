@@ -355,6 +355,13 @@ function normalizeSectionLabel(value: string): string {
 function sanitizeTree(root: HTMLElement): void {
   removeComments(root);
   const elements = [...root.querySelectorAll("*")];
+  // QF-02 (owner-proxy ruling): the first <img> encountered in this
+  // document-order walk is the article's lead image - confirmed (council
+  // screenshots) to render at the very top of the viewport with zero
+  // scrolling on every article the player lands on, i.e. the LCP element of
+  // the core race loop. It keeps eager loading; every subsequent <img> gets
+  // loading="lazy" (below-the-fold images the player may never scroll to).
+  let sawLeadImage = false;
   for (const element of elements) {
     if (!element.isConnected) {
       continue;
@@ -370,7 +377,12 @@ function sanitizeTree(root: HTMLElement): void {
       continue;
     }
 
-    sanitizeAttributes(element, tagName);
+    if (tagName === "img") {
+      sanitizeAttributes(element, tagName, !sawLeadImage);
+      sawLeadImage = true;
+    } else {
+      sanitizeAttributes(element, tagName);
+    }
   }
 }
 
@@ -381,7 +393,7 @@ function removeUnsafeSubtrees(root: HTMLElement): void {
   }
 }
 
-function sanitizeAttributes(element: Element, tagName: string): void {
+function sanitizeAttributes(element: Element, tagName: string, isLeadImage = false): void {
   const tagAttributes = TAG_ATTRIBUTES[tagName];
   for (const attribute of [...element.attributes]) {
     const name = attribute.name.toLowerCase();
@@ -393,8 +405,12 @@ function sanitizeAttributes(element: Element, tagName: string): void {
   if (tagName === "img") {
     sanitizeDimension(element, "width");
     sanitizeDimension(element, "height");
-    sanitizeTokenAttribute(element, "loading", new Set(["eager", "lazy"]));
-    sanitizeTokenAttribute(element, "decoding", new Set(["async", "auto", "sync"]));
+    // QF-02: unconditionally set (not merely whitelist a source-supplied
+    // value) - MediaWiki HTML essentially never carries these today, so the
+    // prior whitelist-only behavior was a no-op for real article traffic.
+    // The lead image (see sanitizeTree) is the sole exception kept eager.
+    element.setAttribute("loading", isLeadImage ? "eager" : "lazy");
+    element.setAttribute("decoding", "async");
   }
   if (tagName === "td" || tagName === "th") {
     sanitizeSpan(element, "colspan");
@@ -500,17 +516,6 @@ function sanitizeSpan(element: Element, attribute: "colspan" | "rowspan"): void 
   }
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1000) {
-    element.removeAttribute(attribute);
-  }
-}
-
-function sanitizeTokenAttribute(
-  element: Element,
-  attribute: string,
-  allowed: ReadonlySet<string>,
-): void {
-  const value = element.getAttribute(attribute)?.toLowerCase();
-  if (value && !allowed.has(value)) {
     element.removeAttribute(attribute);
   }
 }

@@ -232,6 +232,18 @@ export default function Boards({
   // bug.
   const todayShowsYesterdayFraming = segment === "today" && todayHeroKind === "yesterday-daily";
 
+  // QF-02: session-scoped cache for the one segment that's actually and
+  // permanently closed data - "yesterday" can't change once the day has
+  // passed. Deliberately narrower than the package's literal text (which
+  // also named "finished trend windows"): 7d/30d/lifetime keep absorbing
+  // the CURRENT session's own just-finished daily until midnight, so
+  // caching those risks a player finishing today's race, flipping to
+  // Boards, and not seeing their own fresh run in the rolling windows -
+  // council flagged this independently (Judge A amendment 2, Judge B
+  // amendment 3) and the binding ruling didn't override it. "Today" is
+  // never cached (still-open data).
+  const yesterdayBoardCache = useRef(new Map<string, ChallengeBoardResponse>());
+
   useEffect(() => {
     let cancelled = false;
     if (isTrendSegment(segment)) return;
@@ -239,9 +251,20 @@ export default function Boards({
       setBoard(EMPTY_BOARD);
       return;
     }
+    if (segment === "yesterday") {
+      const cached = yesterdayBoardCache.current.get(activeChallenge.id);
+      if (cached) {
+        setBoard(cached);
+        return;
+      }
+    }
     void apiClient.getChallengeBoard(activeChallenge.id)
       .then((response) => {
-        if (!cancelled) setBoard(response);
+        if (cancelled) return;
+        setBoard(response);
+        if (segment === "yesterday") {
+          yesterdayBoardCache.current.set(activeChallenge.id, response);
+        }
       })
       .catch(() => {
         if (!cancelled) setBoard(EMPTY_BOARD);
