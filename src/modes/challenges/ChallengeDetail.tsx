@@ -82,32 +82,39 @@ export default function ChallengeDetail({
         ← Challenges
       </button>
 
-      <div className="challenge-route" aria-label="Current challenge">
-        <div className="challenge-meta">
-          <span>{challenge.label ?? challenge.id}</span>
-          {dailyBadge ? <span className="daily-badge">{dailyBadge}</span> : null}
+      {/* PKG-09: title block + Race CTA co-wrapped in one `.route-header`
+          grid parent (mirroring Home's `.daily-hero` + `.daily-hero-copy`
+          structure) - before this, the two were bare siblings, so the CTA
+          had nothing to dock beside and just floated in dead space below
+          the title at desktop widths. */}
+      <div className="route-header">
+        <div className="challenge-route" aria-label="Current challenge">
+          <div className="challenge-meta">
+            <span>{challenge.label ?? challenge.id}</span>
+            {dailyBadge ? <span className="daily-badge">{dailyBadge}</span> : null}
+          </div>
+          <strong>
+            {challenge.start.title} {"->"} {challenge.target.title}
+          </strong>
+          {challenge.createdBy ? (
+            <em>Created by {challenge.createdBy.displayName}</em>
+          ) : null}
         </div>
-        <strong>
-          {challenge.start.title} {"->"} {challenge.target.title}
-        </strong>
-        {challenge.createdBy ? (
-          <em>Created by {challenge.createdBy.displayName}</em>
-        ) : null}
-      </div>
 
-      <div className="player-gate">
-        {/* PKG-04 (owner-proxy ruling): opening the preview is non-committal
-            (invariant 3 - no run exists until Start), same action Home's
-            hero and Boards' CTA trigger (App.tsx's openRacePreviewFor) - so
-            it shares their teal `.race-preview-button` class, never coral. */}
-        <button
-          className="race-preview-button"
-          type="button"
-          disabled={raceDisabled}
-          onClick={onRaceThis}
-        >
-          Race this
-        </button>
+        <div className="player-gate">
+          {/* PKG-04 (owner-proxy ruling): opening the preview is non-committal
+              (invariant 3 - no run exists until Start), same action Home's
+              hero and Boards' CTA trigger (App.tsx's openRacePreviewFor) - so
+              it shares their teal `.race-preview-button` class, never coral. */}
+          <button
+            className="race-preview-button"
+            type="button"
+            disabled={raceDisabled}
+            onClick={onRaceThis}
+          >
+            Race this
+          </button>
+        </div>
       </div>
 
       {/* PKG-04: was the only mode screen with no card chrome - now wrapped

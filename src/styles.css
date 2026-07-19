@@ -106,6 +106,19 @@ ol {
 
 .app-shell {
   min-height: 100vh;
+  /* PKG-09: `.app-shell` already had min-height:100vh but was a plain block
+     `<main>`, so `.site-footer` (its last child - see AppShell.tsx) never
+     got pushed to the viewport bottom on short pages, stranding it a few
+     hundred px down over a black void. A flex column plus
+     `.site-footer`'s own `margin-top: auto` (below) anchors it without
+     touching anything else's layout - every other child here (topbar,
+     banners, `.content-shell`) keeps its natural block height, it's only
+     the footer that gets pushed down to fill the remainder. `.race-takeover`
+     (RaceFlow's sibling render inside this same `<main>`) is
+     `position: fixed`, which escapes flex-item sizing entirely, so this is
+     a no-op for the race takeover. */
+  display: flex;
+  flex-direction: column;
   /* Clears the fixed .mode-nav bar (mobile placement) below the content -
      a no-op while the race takeover or the admin bypass is on screen,
      since neither renders that nav; at >=880px the desktop block drops
@@ -771,6 +784,9 @@ h1 {
 .site-footer {
   width: min(1320px, 100%);
   margin-inline: auto;
+  /* PKG-09: pushes the footer to the bottom of `.app-shell`'s flex column
+     on short pages instead of it trailing right under `.content-shell`. */
+  margin-top: auto;
   padding: 14px 12px 26px;
   border-top: 1px solid var(--line);
   text-align: center;
@@ -833,9 +849,26 @@ h1 {
   min-width: 0;
 }
 
+/*
+ * PKG-09: shared route-header docking, extracted from what used to be a
+ * `.daily-hero`-only rule. Wraps a title/copy block (Home's
+ * `.daily-hero-copy`, Challenge Detail's `.challenge-route`) and its sibling
+ * `.player-gate` Race CTA in one grid parent - mobile-first stack here, the
+ * desktop block at the end of this file docks them copy-left/CTA-right.
+ * Home's `.daily-hero` carries this class alongside its own border/padding
+ * treatment; Challenge Detail's new wrapper (see ChallengeDetail.tsx) uses
+ * it standalone. Boards' Today/Yesterday CTA (PKG-10, owner-proxy ruling)
+ * was deliberately moved below the leaderboard/DNF block instead of docked
+ * beside its title, so it does not use this class.
+ */
+.route-header {
+  display: grid;
+  gap: 4px;
+}
+
 @media (max-width: 879.98px) {
-  .daily-hero .player-gate,
-  .daily-hero .player-gate button {
+  .route-header .player-gate,
+  .route-header .player-gate button {
     width: 100%;
   }
 }
@@ -2182,9 +2215,19 @@ h1 {
   gap: 14px;
 }
 
+/* PKG-09: You.tsx renders 7 fixed `dt`/`dd` tiles (Streak, Attempts,
+   Completed, DNFs, Best speed, Best clicks, Completed clicks) into this
+   grid. repeat(4) left a broken half row (4+3, one empty cell) at desktop
+   width; auto-fit is deliberately avoided (per council review, its column
+   count is a function of container width, not item count - unlike
+   repeat(N), it isn't guaranteed to close every row for a fixed set of
+   tiles). repeat(3) leaves one tile alone in the final row instead - the
+   `:last-child` rule below spans it the full row width so that last tile
+   reads as a deliberate wide summary, not a stray leftover. Same fix
+   closes the ≤980px repeat(2) override below (7 is odd there too). */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -2192,6 +2235,10 @@ h1 {
   border: 1px solid rgba(130, 246, 239, 0.14);
   background: rgba(0, 0, 0, 0.18);
   padding: 10px;
+}
+
+.stat-grid div:last-child {
+  grid-column: 1 / -1;
 }
 
 .stat-grid dt {
@@ -2804,7 +2851,10 @@ h1 {
  *   left, the four items right. No fixed bottom bar, so the shell's bottom
  *   clearance goes back to normal padding.
  * - FIX 5: the hero becomes copy-left / Race-button-right, vertically
- *   centered - no giant empty middle.
+ *   centered - no giant empty middle. PKG-09 generalized this into the
+ *   shared `.route-header` rule (was `.daily-hero`-only) so Challenge
+ *   Detail's identical title+CTA shape docks the same way instead of
+ *   floating its Race CTA in dead space below the title.
  */
 @media (min-width: 880px) {
   .shell-topbar {
@@ -2858,14 +2908,22 @@ h1 {
     column-gap: 16px;
   }
 
-  .daily-hero {
+  .route-header {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     column-gap: 18px;
   }
 
-  .daily-hero .player-gate {
+  .route-header .player-gate {
     align-items: center;
+  }
+
+  /* PKG-09: at 820px the recentered content column, a full-width search box
+     reads oversized against its own short "co" / one-word queries - cap it
+     to a sane reading width instead of stretching edge-to-edge. Mobile
+     keeps the full-width touch target untouched. */
+  .browse-search-svh-safe input {
+    max-width: 420px;
   }
 
   /* PKG-08: at this width the preview card is vertically centered in a much

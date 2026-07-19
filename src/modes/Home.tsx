@@ -218,12 +218,15 @@ export default function Home({
   return (
     <section className="home-layout">
       <div
-        className="daily-hero challenge-route"
+        className="daily-hero challenge-route route-header"
         aria-label={heroIsYesterday ? "Yesterday's daily" : "Today's daily"}
       >
         {/* FIX 5: badge + title + status copy grouped left/top; the Race
             button is a sibling so CSS can dock it right on desktop and
-            stretch it full-width on mobile - no giant empty middle. */}
+            stretch it full-width on mobile - no giant empty middle. PKG-09:
+            the docking grid itself now lives on the shared `.route-header`
+            class (styles.css) so Challenge Detail's identical shape can
+            reuse it. */}
         <div className="daily-hero-copy">
           <div className="challenge-meta">
             {flavorBadge ? <span className="daily-badge">{flavorBadge}</span> : null}
