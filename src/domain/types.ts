@@ -29,6 +29,14 @@ export interface AbandonRunTransition {
   runId: string;
   runStatus: "abandoned" | "completed";
   completedAt?: string;
+  // PKG-03 (council 2026-07-19): populated for a genuine "abandoned" outcome
+  // too, not just "already_completed" - the server's own just-persisted
+  // `runs.elapsed_ms` (computed from `abandoned_at - started_at` at the
+  // moment the abandon was PROCESSED), never the client's pre-call timer
+  // snapshot. Closes the header/board-row time mismatch at the source
+  // (useRaceController's `endRun` + App.tsx's `confirmEndRun` prefer this
+  // over the client snapshot when present) instead of patching it after a
+  // second, separate leaderboard refetch.
   elapsedMs?: number;
   outcome?: "abandoned" | "already_completed" | "legacy_recovery_abandoned";
 }

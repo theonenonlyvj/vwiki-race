@@ -438,6 +438,47 @@ describe("useRaceController", () => {
     expect(result.current.elapsedMs).toBe(1_500);
   });
 
+  // PKG-03 (council 2026-07-19): closes the header/board-row time mismatch
+  // at the source - `endRun`'s "abandoned" outcome now surfaces the same
+  // server-persisted elapsedMs the abandon response carries (when present),
+  // not just the "already_completed" branch above, so App.tsx's DNF
+  // snapshot can prefer it over the client's own pre-call timer reading.
+  it("surfaces the server's elapsedMs on a genuine abandon outcome", async () => {
+    const abandonRun = vi.fn(async () => ({
+      runId: "run-1",
+      runStatus: "abandoned" as const,
+      elapsedMs: 8_500,
+      outcome: "abandoned" as const,
+    }));
+    const api = apiClient({ abandonRun });
+    const gateway = wikiGateway({ Apple: apple });
+    const { result } = renderHook(() => useRaceController({ apiClient: api, gateway }));
+    await act(async () => { await result.current.start(challenge, "token"); });
+
+    let outcome!: Awaited<ReturnType<typeof result.current.endRun>>;
+    await act(async () => { outcome = await result.current.endRun("token"); });
+
+    expect(outcome).toEqual({ status: "abandoned", elapsedMs: 8_500 });
+    expect(result.current.phase).toBe("idle");
+  });
+
+  it("falls back gracefully when an abandon response omits elapsedMs (older/legacy responses)", async () => {
+    const abandonRun = vi.fn(async () => ({
+      runId: "run-1",
+      runStatus: "abandoned" as const,
+      outcome: "abandoned" as const,
+    }));
+    const api = apiClient({ abandonRun });
+    const gateway = wikiGateway({ Apple: apple });
+    const { result } = renderHook(() => useRaceController({ apiClient: api, gateway }));
+    await act(async () => { await result.current.start(challenge, "token"); });
+
+    let outcome!: Awaited<ReturnType<typeof result.current.endRun>>;
+    await act(async () => { outcome = await result.current.endRun("token"); });
+
+    expect(outcome).toEqual({ status: "abandoned", elapsedMs: undefined });
+  });
+
   it("resets a completed run to a clean pre-start state", async () => {
     const api = apiClient();
     const gateway = wikiGateway({ Apple: apple, Fruit: fruit });

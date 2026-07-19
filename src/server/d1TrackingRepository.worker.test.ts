@@ -567,6 +567,33 @@ describe("atomic D1 protocol-2 runs", () => {
     await expect(count("operation_idempotency")).resolves.toBe(5);
   });
 
+  // PKG-03 (council 2026-07-19): the abandon response used to omit
+  // elapsedMs for a genuine "abandoned" outcome (only "already_completed"
+  // carried it) - App.tsx's DNF snapshot fell back to the client's own
+  // pre-call timer reading instead, which structurally disagreed with the
+  // server's own abandoned_at-based elapsed_ms (the header showed "0:04"
+  // while the eventual board row, reading the same runs.elapsed_ms this
+  // test asserts on, showed "0:05"). The response now echoes the same
+  // value it just persisted.
+  it("echoes the server-persisted elapsedMs on a genuine abandon, not just an already-completed one", async () => {
+    const clock = { now: "2026-07-14T01:00:00.000Z" };
+    const { repository } = fixture(clock);
+    const created = await repository.startRunV2(account, start);
+    await recordTwoNonTerminalClicks(repository, clock);
+
+    clock.now = "2026-07-14T01:00:08.500Z";
+    const outcome = await repository.abandonRunV2(account, {
+      runId: created.id,
+      idempotencyKey: "abandon-with-elapsed",
+    });
+
+    expect(outcome).toMatchObject({ runStatus: "abandoned", elapsedMs: 8_500 });
+    await expect(runSnapshot(created.id)).resolves.toMatchObject({
+      status: "abandoned",
+      elapsed_ms: 8_500,
+    });
+  });
+
   it("serializes concurrent same-key start and click retries to one write set", async () => {
     const clock = { now: "2026-07-14T01:00:00.000Z" };
     const { repository } = fixture(clock);

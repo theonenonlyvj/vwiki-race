@@ -34,7 +34,13 @@ export type RecoveryOutcome =
   | { status: "stale" };
 
 export type EndRunOutcome =
-  | { status: "abandoned" | "completed" }
+  // PKG-03: the "abandoned" case carries the server's own just-persisted
+  // elapsedMs (when the response included one - older/legacy responses
+  // may not) so callers can use the same source of truth the eventual
+  // leaderboard/board row will read from, instead of a pre-call client
+  // timer snapshot - see App.tsx's confirmEndRun.
+  | { status: "abandoned"; elapsedMs?: number }
+  | { status: "completed" }
   | { status: "unauthorized" }
   | { status: "failed" }
   | { status: "ignored" }
@@ -479,7 +485,7 @@ export function useRaceController(options: RaceControllerOptions) {
         return { status: "completed" };
       }
       commitState(initialState);
-      return { status: "abandoned" };
+      return { status: "abandoned", elapsedMs: response.elapsedMs };
     } catch (caught) {
       if (!isCurrent(operation, requestGeneration, mounted)) return { status: "stale" };
       if (isUnauthorized(caught)) {

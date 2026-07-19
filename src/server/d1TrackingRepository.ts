@@ -1900,6 +1900,7 @@ export function createD1TrackingRepository(options: {
                    )
                    ELSE json_object(
                      'runId', r.id, 'runStatus', 'abandoned',
+                     'elapsedMs', r.elapsed_ms,
                      'outcome', CASE WHEN r.protocol_version = 1
                        THEN 'legacy_recovery_abandoned' ELSE 'abandoned' END
                    )

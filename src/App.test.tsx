@@ -1055,13 +1055,14 @@ describe("VWiki Race app", () => {
     // resolves it as kind "default" - Boards' Today segment now shows its
     // own honest empty state for that kind rather than re-fetching this
     // challenge's board a second time under a "TODAY" label (the pre-PKG-01
-    // fallback this test used to exercise). Home's own hero board read on
-    // initial mount is still the only /board call.
+    // fallback this test used to exercise). Two /board calls total: Home's
+    // own hero board read on initial mount, plus Results' own deduped-board
+    // self-fetch for its snippet (PKG-03) - Boards contributes none here.
     await user.click(screen.getByRole("button", { name: /view leaderboard/i }));
     expect(screen.getByRole("heading", { name: "Boards" })).toBeVisible();
     expect(screen.getByRole("navigation", { name: /vwiki race views/i })).toBeVisible();
     expect(await screen.findByText(/no daily challenge right now/i)).toBeVisible();
-    await waitFor(() => expect(boardCalls(fetchImpl, "challenge-0001")).toBe(1));
+    await waitFor(() => expect(boardCalls(fetchImpl, "challenge-0001")).toBe(2));
     expect(completeRunCalls(fetchImpl)).toBe(0);
   });
 
@@ -1082,17 +1083,27 @@ describe("VWiki Race app", () => {
   });
 
   it("locks solution-bearing views throughout an active run", async () => {
-    // accountId distinct from claimedStorage's "acc-1" so Home's own
-    // pre-race leaderboard read doesn't mistake this Detail fixture row for
-    // "I've already finished today's daily" and hide the Race button.
-    const fetchImpl = createFetchMock({ leaderboardRows: [leaderboardRow({ accountId: "acc-other-device" })] });
+    // PKG-03: path disclosure moved from the main board (now the deduped,
+    // runId-less `/board` endpoint) to Challenge Detail's own "Your
+    // history" strip, which only ever shows YOUR OWN attempts - so this
+    // needs a completed row for claimedStorage's "acc-1" to have anything
+    // to disclose. Keyed to challenge #2 (not #1, the one this test races)
+    // so Home's own pre-race leaderboard read for challenge #1 doesn't
+    // mistake it for "I've already finished today's daily" and hide the
+    // Race button.
+    const fetchImpl = createFetchMock({
+      challenges: twoChallenges(),
+      leaderboardRowsByChallenge: {
+        "challenge-0002": [leaderboardRow({ challengeId: "challenge-0002", accountId: "acc-1" })],
+      },
+    });
     const user = userEvent.setup();
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
     // Path disclosure lives on Challenge Detail now, not Boards (Increment 3
     // rebuild removed per-run path disclosure from Boards entirely).
     await user.click(await screen.findByRole("button", { name: "Challenges" }));
-    await user.click(await screen.findByRole("button", { name: /challenge #1/i }));
+    await user.click(await screen.findByRole("button", { name: /challenge #2/i }));
     expect(await screen.findByText(/view winning path/i)).toBeVisible();
     await user.click(screen.getByRole("button", { name: /^home$/i }));
     await user.click(screen.getByRole("button", { name: /▶ race/i }));
@@ -1461,36 +1472,59 @@ describe("VWiki Race app", () => {
     expect(runPathCalls(fetchImpl, "run-ranked")).toBe(1);
   });
 
-  it("labels leaderboard provenance without hiding either result", async () => {
+  it("shows a tap-to-reveal Historical badge in Your history for pre-migration runs, never a Server tracked or Repeat run pill", async () => {
+    // PKG-03: the main board swapped to the deduped `/board` endpoint
+    // (no `runId`/`protocolVersion` to hang a provenance pill on at all),
+    // so "Server tracked"/"Historical" provenance moved to "Your history" -
+    // the one place a real per-run `protocolVersion` still exists. Both
+    // fixture rows share the default accountId ("acc-1", claimedStorage's
+    // identity) - two of YOUR OWN attempts, one pre-migration.
     const storage = claimedStorage();
     const fetchImpl = createFetchMock({
       leaderboardRows: [
-        leaderboardRow({ protocolVersion: 1, displayName: "franelpana" }),
-        leaderboardRow({
-          rank: 2,
-          runId: "run-verified",
-          protocolVersion: 2,
-          displayName: "theonenonlyvj",
-        }),
+        leaderboardRow({ runId: "run-old", protocolVersion: 1, elapsedMs: 20_000, clickCount: 3 }),
+        leaderboardRow({ rank: 2, runId: "run-new", protocolVersion: 2, elapsedMs: 25_000, clickCount: 4 }),
       ],
+      // The server's real deduped board would only ever carry the account's
+      // best attempt (one row, not two) - modeled explicitly here since the
+      // mock's generic `/board` fallback (derived straight from
+      // `leaderboardRows`) doesn't dedupe by account on its own.
+      boardByChallenge: {
+        "challenge-0001": {
+          placements: [{ accountId: "acc-1", displayName: "Vijay", placement: 1, elapsedMs: 20_000, clickCount: 3 }],
+          dnfs: [],
+        },
+      },
     });
     const user = userEvent.setup();
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
 
-    // Provenance badges are Detail-only content now, same as path
-    // disclosure above.
     await user.click(await screen.findByRole("button", { name: "Challenges" }));
     await user.click(await screen.findByRole("button", { name: /challenge #1/i }));
 
-    expect(await screen.findByText("franelpana")).toBeVisible();
-    expect(screen.getByText("Historical")).toBeVisible();
-    expect(screen.getByText("Server tracked")).toBeVisible();
-    // Invariant 1 ("Time AND clicks, always... `0:38 · 5 clk`") - both rows
-    // use the default 1500ms/1-click fixture.
-    expect(screen.getAllByText("0:01 · 1 clk")).toHaveLength(2);
+    // One deduped row on the main board - not the pre-PKG-03 duplicate-rank
+    // bug (the same account at two ranks at once) - and it's highlighted
+    // "(you)" (change 4), same `.is-you` treatment Boards/Home already use.
+    const board = screen.getByRole("region", { name: "Leaderboard placements" });
+    const boardRows = await within(board).findAllByRole("listitem");
+    expect(boardRows).toHaveLength(1);
+    expect(within(boardRows[0]).getByText(/\(you\)/i)).toBeVisible();
+    expect(boardRows[0]).toHaveClass("is-you");
+
+    const history = screen.getByRole("region", { name: /your history/i });
+    const historicalBadge = within(history).getByText("Historical");
+    expect(historicalBadge).toBeVisible();
+    // Tap-to-reveal (a `<details>`), not a hover-only `title` attribute -
+    // mobile has no hover.
+    await user.click(historicalBadge);
+    expect(
+      within(history).getByText(/recorded before the server-tracked race protocol/i),
+    ).toBeVisible();
+    expect(screen.queryByText(/server tracked/i)).toBeNull();
+    expect(screen.queryByText(/repeat run/i)).toBeNull();
   });
 
-  it("shows repeat attempts and keeps a meaningful DNF below completed runs", async () => {
+  it("shows every repeat attempt (including a DNF) in Your history, with the main board deduped to your best", async () => {
     const fetchImpl = createFetchMock({
       leaderboardRows: [
         leaderboardRow({ isRepeatRun: true }),
@@ -1505,22 +1539,89 @@ describe("VWiki Race app", () => {
           abandonedAt: "2026-07-14T01:02:15.000Z",
         }),
       ],
+      boardByChallenge: {
+        "challenge-0001": {
+          // Invariant 2 ("a completion supersedes DNF"): the account's DNF
+          // attempt never also shows up as a separate deduped DNF row once
+          // they have a completed one - PKG-03's main board is one row per
+          // account, period, not "one row per account per outcome".
+          placements: [{ accountId: "acc-1", displayName: "Vijay", placement: 1, elapsedMs: 1_500, clickCount: 1 }],
+          dnfs: [],
+        },
+      },
     });
     const user = userEvent.setup();
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
-    // Repeat-run badges/full DNF provenance are Detail-only content now -
-    // Boards' DNF section this increment is a plain muted name/clicks/time
-    // row with no path disclosure or provenance badges (see the Boards
-    // describe block below for that coverage).
+    // "Repeat run"/"Server tracked" provenance pills are gone entirely
+    // (PKG-03 change 3) - repeats now live as separate "Your history" rows,
+    // not extra board entries with a badge calling them out.
     await user.click(await screen.findByRole("button", { name: "Challenges" }));
     await user.click(await screen.findByRole("button", { name: /challenge #1/i }));
 
-    expect(await screen.findByText("#1")).toBeVisible();
-    expect(screen.getByText("DNF")).toBeVisible();
-    expect(screen.getAllByText("Repeat run")).toHaveLength(2);
-    expect(screen.getByText("View winning path")).toBeVisible();
-    expect(screen.getByText("View path")).toBeVisible();
+    const board = screen.getByRole("region", { name: "Leaderboard placements" });
+    expect(await within(board).findAllByRole("listitem")).toHaveLength(1);
+    expect(within(board).getByText("#1")).toBeVisible();
+    expect(screen.getByRole("region", { name: "DNF" })).toHaveTextContent(/no dnfs/i);
+
+    const history = screen.getByRole("region", { name: /your history/i });
+    expect(within(history).getByText("#1")).toBeVisible();
+    expect(within(history).getByText("DNF")).toBeVisible();
+    expect(within(history).getByText("View winning path")).toBeVisible();
+    expect(within(history).getByText("View path")).toBeVisible();
+    expect(screen.queryByText(/repeat run/i)).toBeNull();
+    expect(screen.queryByText(/server tracked/i)).toBeNull();
+    // Invariant 5: once you've finished the challenge, the anti-spoiler
+    // copy stands down (paths - at least your own - are no longer hidden).
+    expect(screen.queryByText(/paths hidden until you've played/i)).toBeNull();
+  });
+
+  it("hides all path disclosure and shows the anti-spoiler copy for a never-played challenge", async () => {
+    const fetchImpl = createFetchMock({
+      boardByChallenge: {
+        "challenge-0001": {
+          placements: [{ accountId: "acc-other", displayName: "Ari", placement: 1, elapsedMs: 20_000, clickCount: 3 }],
+          dnfs: [],
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: "Challenges" }));
+    await user.click(await screen.findByRole("button", { name: /challenge #1/i }));
+
+    expect(await screen.findByText("Ari")).toBeVisible();
+    expect(screen.getByText(/paths hidden until you've played/i)).toBeVisible();
+    expect(screen.queryByText(/view winning path/i)).toBeNull();
+    expect(screen.queryByText(/view path/i)).toBeNull();
+    expect(screen.getByText(/you haven't tried this one yet/i)).toBeVisible();
+  });
+
+  it("keeps paths hidden after a DNF-only history - invariant 5's 'played' means finished, not merely started/DNF'd", async () => {
+    const fetchImpl = createFetchMock({
+      leaderboardRows: [
+        leaderboardRow({
+          status: "abandoned",
+          clickCount: 2,
+          elapsedMs: 5_000,
+          completedAt: undefined,
+          abandonedAt: "2026-07-14T01:02:00.000Z",
+        }),
+      ],
+      boardByChallenge: { "challenge-0001": { placements: [], dnfs: [{ accountId: "acc-1", displayName: "Vijay", clickCount: 2, elapsedMs: 5_000 }] } },
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: "Challenges" }));
+    await user.click(await screen.findByRole("button", { name: /challenge #1/i }));
+
+    const history = await screen.findByRole("region", { name: /your history/i });
+    expect(within(history).getByText("DNF")).toBeVisible();
+    expect(screen.getByText(/paths hidden until you've played/i)).toBeVisible();
+    expect(screen.queryByText(/view path/i)).toBeNull();
+    expect(screen.queryByText(/view winning path/i)).toBeNull();
   });
 
   it("loads account stats only from the authenticated account-stats projection", async () => {
@@ -1737,6 +1838,17 @@ describe("VWiki Race app", () => {
       if (String(input) === apiUrl("/api/v2/challenges/challenge-0002/leaderboard")) {
         return Promise.resolve(jsonResponse({ leaderboard: [leaderboardRow({ challengeId: "challenge-0002", displayName: "Mars Runner", runId: "run-mars" })] }));
       }
+      // Challenge Detail's main board now self-fetches the deduped `/board`
+      // endpoint too (PKG-03) - mirror the same "Mars Runner" row there so
+      // this test's Detail visit has something to find, same as the
+      // pre-PKG-03 `/leaderboard` branch above.
+      if (String(input) === apiUrl("/api/v2/challenges/challenge-0002/board")) {
+        return Promise.resolve(jsonResponse({
+          challengeId: "challenge-0002",
+          placements: [{ accountId: "acc-mars", displayName: "Mars Runner", placement: 1, elapsedMs: 1500, clickCount: 1 }],
+          dnfs: [],
+        }));
+      }
       return baseFetch(input, init);
     }) as typeof baseFetch;
     const user = userEvent.setup();
@@ -1805,6 +1917,15 @@ describe("VWiki Race app", () => {
             displayName: "Mars Runner",
             runId: "run-mars",
           })],
+        }));
+      }
+      // Challenge Detail's main board now self-fetches the deduped `/board`
+      // endpoint too (PKG-03) - mirror the same "Mars Runner" row there.
+      if (requestUrl === apiUrl("/api/v2/challenges/challenge-0002/board")) {
+        return Promise.resolve(jsonResponse({
+          challengeId: "challenge-0002",
+          placements: [{ accountId: "acc-1", displayName: "Mars Runner", placement: 1, elapsedMs: 1500, clickCount: 1 }],
+          dnfs: [],
         }));
       }
       if (requestUrl === apiUrl("/api/v2/challenges/challenge-0001/leaderboard")) {
@@ -1877,9 +1998,22 @@ describe("VWiki Race app", () => {
           leaderboard: [leaderboardRow({ displayName: "Apple Runner", runId: "run-apple" })],
         }));
       }
+      // Challenge Detail's main board now self-fetches the deduped `/board`
+      // endpoint too (PKG-03) - mirror the same "Apple Runner" row there.
+      if (requestUrl === apiUrl("/api/v2/challenges/challenge-0001/board")) {
+        return Promise.resolve(jsonResponse({
+          challengeId: "challenge-0001",
+          placements: [{ accountId: "acc-1", displayName: "Apple Runner", placement: 1, elapsedMs: 1500, clickCount: 1 }],
+          dnfs: [],
+        }));
+      }
       if (requestUrl === apiUrl("/api/v2/challenges/challenge-0002/leaderboard")) {
         return challengeTwoLeaderboard.promise;
       }
+      // The challenge-0002 board fetch races the same way the leaderboard
+      // one does above, but this test only cares that it never briefly
+      // shows challenge-0001's board while switching - an empty board (the
+      // generic mock fallback, no explicit override) exercises that fine.
       return baseFetch(input, init);
     }) as typeof baseFetch;
     const user = userEvent.setup();
@@ -2574,8 +2708,14 @@ describe("VWiki Race app", () => {
 
       const detail = await screen.findByRole("region", { name: /challenge detail/i });
       expect(within(detail).getByRole("button", { name: /race this/i })).toBeVisible();
-      expect(within(detail).getByText("Ari")).toBeVisible();
-      expect(within(detail).getByText("0:01 · 1 clk")).toBeVisible();
+      // The fixture row's accountId defaults to claimedStorage's own "acc-1"
+      // - it shows up on BOTH the main deduped board (by display name, "Ari")
+      // and "Your history" (a plain "#1 · 0:01 · 1 clk" line, no name) -
+      // scope to the main board so the shared "0:01 · 1 clk" text isn't
+      // ambiguous between the two sections.
+      const board = within(detail).getByRole("region", { name: "Leaderboard placements" });
+      expect(await within(board).findByText("Ari")).toBeVisible();
+      expect(within(board).getByText("0:01 · 1 clk")).toBeVisible();
     });
 
     it("enters the pre-race preview from Detail's Race this button", async () => {
@@ -2978,19 +3118,24 @@ describe("Race flow: full-screen takeover", () => {
 
   it("shows a top-3 board snippet with the player's own row highlighted", async () => {
     const fetchImpl = createFetchMock({
-      // Three other accounts' rows, plus the row this test's own run will
-      // occupy once completed (runId "run-1", matching completedClickResponse
-      // below - Results highlights by runId, not accountId). Distinct
-      // accountIds on all four (none "acc-1", claimedStorage's identity)
-      // keep Home's OWN pre-race leaderboard read from misreading this
-      // static fixture as "I've already finished today's daily" before the
-      // race in this test even starts.
-      leaderboardRows: [
-        leaderboardRow({ rank: 1, runId: "run-a", accountId: "acc-ari", displayName: "Ari" }),
-        leaderboardRow({ rank: 2, runId: "run-b", accountId: "acc-bo", displayName: "Bo" }),
-        leaderboardRow({ rank: 3, runId: "run-c", accountId: "acc-cy", displayName: "Cy" }),
-        leaderboardRow({ rank: 4, runId: "run-1", accountId: "acc-other-device", displayName: "Vijay" }),
-      ],
+      // PKG-03: Results' snippet now reads the deduped `/board` endpoint for
+      // everyone ELSE, and pins the viewer's own row to the run that
+      // literally just finished (via `leaderboardContext.rank`, the same
+      // server-confirmed rank the header above reads) - not a lookup
+      // against a static fixture row keyed by runId. Three other accounts
+      // here, none "acc-1" (claimedStorage's identity), plus an explicit
+      // rank 4 for the just-completed run so it lands outside the top 3.
+      leaderboardContext: { isPersonalBest: false, rank: 4 },
+      boardByChallenge: {
+        "challenge-0001": {
+          placements: [
+            { accountId: "acc-ari", displayName: "Ari", placement: 1, elapsedMs: 10_000, clickCount: 2 },
+            { accountId: "acc-bo", displayName: "Bo", placement: 2, elapsedMs: 12_000, clickCount: 3 },
+            { accountId: "acc-cy", displayName: "Cy", placement: 3, elapsedMs: 14_000, clickCount: 4 },
+          ],
+          dnfs: [],
+        },
+      },
     });
     const user = userEvent.setup();
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
@@ -3003,10 +3148,15 @@ describe("Race flow: full-screen takeover", () => {
     // reads "Leaderboard", not "Today's board" (see the daily-aware variant
     // below).
     const board = await screen.findByRole("region", { name: /^leaderboard$/i });
-    const rows = within(board).getAllByRole("listitem");
+    const rows = await within(board).findAllByRole("listitem");
     expect(rows).toHaveLength(4);
     expect(within(rows[3]).getByText(/vijay/i)).toBeVisible();
     expect(rows[3]).toHaveClass("is-you");
+    // Change 5's "one source of truth": the header above and this exact
+    // row both read the same `outcome`/`leaderboardContext` data, so they
+    // can't disagree - same time·clicks string in both places.
+    expect(screen.getByText(/#4 on this board · 0:01 · 1 clk/)).toBeVisible();
+    expect(within(rows[3]).getByText("0:01 · 1 clk")).toBeVisible();
   });
 
   it("labels the result line and board 'today'/'Today's board' when the raced challenge is today's actual daily", async () => {
@@ -3098,6 +3248,42 @@ describe("Race flow: full-screen takeover", () => {
     await user.click(screen.getByRole("button", { name: /browse all challenges/i }));
     expect(screen.getByRole("heading", { name: "Challenges" })).toBeVisible();
     expect(screen.getByRole("navigation", { name: /vwiki race views/i })).toBeVisible();
+  });
+
+  it("shows the server-confirmed elapsed time on a DNF, not the client's pre-call timer reading", async () => {
+    // PKG-03 (council 2026-07-19): the header and the eventual board row
+    // for the same just-ended run used to read two independent sources -
+    // the client's own timer at the moment "End Run" was clicked (0:08
+    // here) vs. the server's own abandoned_at-based elapsed_ms (0:09,
+    // simulating the extra time the abandon request actually took in
+    // flight) - a real, structural mismatch, not a rounding edge case. The
+    // header must show the server's number, one source of truth with
+    // whatever the board row will read.
+    let now = 1_000;
+    const fetchImpl = createFetchMock({ clickStaysActive: true, abandonElapsedMs: 9_200 });
+    const user = userEvent.setup();
+    render(
+      <App apiOrigin={apiOrigin} fetchImpl={fetchImpl} now={() => now} storage={claimedStorage()} />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await screen.findByRole("heading", { name: "Apple" });
+    await user.click(await screen.findByRole("link", { name: /apple tree/i }));
+    await screen.findByRole("heading", { name: "Apple tree" });
+
+    const metrics = screen.getByLabelText(/current run/i);
+    const timer = within(metrics).getByText("Timer").nextElementSibling;
+    now = 9_000;
+    await waitFor(() => expect(timer).toHaveTextContent("8.0s"));
+
+    await user.click(screen.getByRole("button", { name: /^end run$/i }));
+    const dialog = await screen.findByRole("dialog", { name: /end this run/i });
+    await user.click(within(dialog).getByRole("button", { name: /confirm end run/i }));
+
+    expect(await screen.findByText(/that one got away/i)).toBeVisible();
+    expect(screen.getByText(/dnf · 0:09 · 1 clk/i)).toBeVisible();
+    expect(screen.queryByText(/dnf · 0:08 · 1 clk/i)).toBeNull();
   });
 
 });
@@ -4228,6 +4414,10 @@ function createFetchMock(options?: {
   createUnauthorizedOnce?: boolean;
   abandonFailsOnce?: boolean;
   abandonUnauthorizedOnce?: boolean;
+  // PKG-03: models the server's own persisted elapsedMs on a genuine
+  // abandon response, distinct from (and here deliberately different than)
+  // whatever the client's own timer read at End-Run-click time.
+  abandonElapsedMs?: number;
   activeRun?: ReturnType<typeof activeRunFixture> | null;
   delayedActiveRun?: Promise<Response>;
   targetPreviewFailure?: boolean;
@@ -4607,7 +4797,17 @@ function createFetchMock(options?: {
         abandonFailuresRemaining -= 1;
         return jsonError("network_error", "Offline while ending run.", 503);
       }
-      return jsonResponse({ runId: "run-1", runStatus: "abandoned", outcome: "abandoned" });
+      return jsonResponse({
+        runId: "run-1",
+        runStatus: "abandoned",
+        outcome: "abandoned",
+        // PKG-03: the real server always echoes its own persisted
+        // elapsedMs on an abandon now (see d1TrackingRepository.ts's
+        // abandonRunV2) - `undefined` by default here just omits the key
+        // entirely (JSON.stringify drops it), matching a response that
+        // never carried one.
+        ...(options?.abandonElapsedMs !== undefined ? { elapsedMs: options.abandonElapsedMs } : {}),
+      });
     }
 
     if (url === "/api/v2/runs/run-old/recovery-path") {

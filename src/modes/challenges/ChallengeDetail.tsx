@@ -1,17 +1,34 @@
+import { useEffect, useState } from "react";
 import LeaderboardList from "../../components/LeaderboardList";
 import { dailyBadgeLabel } from "../../domain/challengeSelection";
 import { formatTimeAndClicks } from "../../domain/formatting";
 import type { Challenge, RankedLeaderboardRow, ServerPathStep } from "../../domain/types";
+import type { ChallengeBoardResponse } from "../../server/contracts";
+import type { VWikiRaceApiClient } from "../../services/vwikiRaceApiClient";
 import { ChallengeShareButton } from "../../race/shared";
+
+function emptyBoard(challengeId: string): ChallengeBoardResponse {
+  return { challengeId, placements: [], dnfs: [] };
+}
 
 /**
  * Challenge Detail (new this task - today's browser has no detail view).
  * Reached via a challenge share link (?challenge=<id>) or a browser
  * back/forward step that lands on one - see App.tsx's catalog-load routing
- * and popstate handler. Built entirely on data the shell already fetches
- * (the same `leaderboard`/`runPaths` Boards uses) - no new endpoint.
+ * and popstate handler.
+ *
+ * PKG-03 (council 2026-07-19): the main "Leaderboard" panel now self-fetches
+ * the deduped `GET /challenges/{id}/board` endpoint - the same one
+ * Home/Boards already call - keyed on `challenge.id`, mirroring Boards.tsx's
+ * own board-fetch effect exactly (reset-then-refetch-then-cancel-guard) so
+ * switching between two Detail challenges (a back/forward step, or a fresh
+ * share link) can't leak a stale board across the switch. The raw
+ * per-attempt `leaderboard` prop the app shell already fetches is kept for
+ * "Your history" only, which legitimately needs every attempt (repeat runs
+ * included) rather than the account's single best.
  */
 export default function ChallengeDetail({
+  apiClient,
   challenge,
   identityAccountId,
   leaderboard,
@@ -22,6 +39,7 @@ export default function ChallengeDetail({
   runPaths,
   todayCentral,
 }: {
+  apiClient: VWikiRaceApiClient;
   challenge: Challenge;
   identityAccountId: string | null;
   leaderboard: RankedLeaderboardRow[];
@@ -32,9 +50,30 @@ export default function ChallengeDetail({
   runPaths: Record<string, ServerPathStep[]>;
   todayCentral: string;
 }) {
+  const [board, setBoard] = useState<ChallengeBoardResponse>(() => emptyBoard(challenge.id));
+
+  useEffect(() => {
+    let cancelled = false;
+    setBoard(emptyBoard(challenge.id));
+    void apiClient.getChallengeBoard(challenge.id)
+      .then((response) => {
+        if (!cancelled) setBoard(response);
+      })
+      .catch(() => {
+        if (!cancelled) setBoard(emptyBoard(challenge.id));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, challenge.id]);
+
   const yourRows = identityAccountId
     ? leaderboard.filter((row) => row.accountId === identityAccountId)
     : [];
+  // Invariant 5 ("paths stay hidden until you've played... 'played' means
+  // finished, not merely started/DNF'd"): a DNF-only history still keeps
+  // the anti-spoiler copy up - only a completed row unlocks disclosure.
+  const pathsUnlocked = yourRows.some((row) => row.status === "completed");
   const dailyBadge = dailyBadgeLabel(challenge, todayCentral);
 
   return (
@@ -78,22 +117,57 @@ export default function ChallengeDetail({
       <section className="leaderboard-panel" aria-label="Challenge leaderboard">
         <h2>Leaderboard</h2>
         <LeaderboardList
-          leaderboard={leaderboard}
-          onDisclosePath={onDisclosePath}
-          runPaths={runPaths}
+          dnfs={board.dnfs}
+          identityAccountId={identityAccountId}
+          placements={board.placements}
         />
+        {!pathsUnlocked ? (
+          <p className="muted board-footnote">Paths hidden until you&apos;ve played.</p>
+        ) : null}
       </section>
 
       <section className="leaderboard-panel" aria-label="Your history">
         <h3>Your history</h3>
         {yourRows.length ? (
-          <ol className="compact-list">
+          <ol className="leaderboard">
             {yourRows.map((row) => (
-              <li key={row.runId}>
-                <span>
-                  {row.status === "abandoned" ? "DNF" : `#${row.rank}`} ·{" "}
-                  {formatTimeAndClicks(row.elapsedMs, row.clickCount)}
+              <li className={row.status === "abandoned" ? "dnf" : undefined} key={row.runId}>
+                <span className="rank">
+                  {row.status === "abandoned" ? "DNF" : `#${row.rank}`}
                 </span>
+                <span className="leaderboard-player">
+                  <span>{formatTimeAndClicks(row.elapsedMs, row.clickCount)}</span>
+                  {row.protocolVersion === 1 ? (
+                    // PKG-03: a tap-to-reveal explanation (mobile has no
+                    // hover) replaces the old hover-only `title` attribute -
+                    // "Server tracked" is gone entirely (it was the default,
+                    // not information; only the pre-migration exception is
+                    // still worth flagging).
+                    <details className="provenance-disclosure">
+                      <summary className="provenance-badge historical">Historical</summary>
+                      <p className="muted">Recorded before the server-tracked race protocol.</p>
+                    </details>
+                  ) : null}
+                </span>
+                {pathsUnlocked ? (
+                  <details
+                    className="path-disclosure"
+                    onToggle={(event) => {
+                      if (event.currentTarget.open) onDisclosePath(row.runId);
+                    }}
+                  >
+                    <summary>
+                      {row.status === "abandoned" ? "View path" : "View winning path"}
+                    </summary>
+                    {runPaths[row.runId] ? (
+                      <ol className="winning-path">
+                        {runPaths[row.runId].map((step) => (
+                          <li key={step.stepNumber}>{step.sourceTitle} {"->"} {step.destinationTitle}</li>
+                        ))}
+                      </ol>
+                    ) : <p>Loading path...</p>}
+                  </details>
+                ) : null}
               </li>
             ))}
           </ol>

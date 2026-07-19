@@ -1,15 +1,11 @@
 import type { MouseEvent, ReactNode } from "react";
 import type { GameSession } from "../domain/gameSession";
-import type {
-  Article,
-  Challenge,
-  LeaderboardContext,
-  RankedLeaderboardRow,
-} from "../domain/types";
+import type { Article, Challenge, LeaderboardContext } from "../domain/types";
 import type { RacePhase } from "../hooks/useRaceController";
 import type { TargetPreviewState } from "../hooks/useTargetPreview";
 import type { PlayAnotherSuggestionState } from "../domain/playAnother";
 import type { VGamesIdentityStatus } from "../services/vgamesIdentity";
+import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 import type { ActiveRunRecord } from "../server/trackingRepository";
 import PreRacePreview from "./PreRacePreview";
 import RaceMode from "./RaceMode";
@@ -40,6 +36,7 @@ export interface DnfResultSnapshot {
  * recover -> App.tsx drops raceEngaged and the shell takes over.
  */
 export default function RaceFlow({
+  apiClient,
   phase,
   raceChallenge,
   recoveryRun,
@@ -53,11 +50,11 @@ export default function RaceFlow({
   pendingNavigationTitle,
   pendingRetry,
   leaderboardContext,
-  leaderboard,
   runId,
   dnfResult,
   todayCentral,
   identityStatus,
+  identityAccountId,
   identityDisplayName,
   preRaceCompletions,
   playAnotherSuggestion,
@@ -82,6 +79,9 @@ export default function RaceFlow({
   handleArticleClick,
   handleArticlePrewarm,
 }: {
+  // PKG-03: Results self-fetches its own deduped board (see RaceResults.tsx)
+  // instead of reading the app shell's raw per-attempt leaderboard.
+  apiClient: VWikiRaceApiClient;
   phase: RacePhase;
   // The race hook's own current challenge - null throughout
   // recoverActiveRun's initial "preparing" tick (see checkingActiveRun
@@ -99,11 +99,11 @@ export default function RaceFlow({
   pendingNavigationTitle: string | null;
   pendingRetry: { title: string; anchorText: string } | null;
   leaderboardContext: LeaderboardContext | null;
-  leaderboard: RankedLeaderboardRow[];
   runId: string | null;
   dnfResult: DnfResultSnapshot | null;
   todayCentral: string;
   identityStatus: VGamesIdentityStatus | null;
+  identityAccountId: string | null;
   identityDisplayName: string;
   // See RaceResults' preRaceCompletions doc comment (M2 fix): a snapshot,
   // not live accountStats.
@@ -174,9 +174,10 @@ export default function RaceFlow({
   } else if (phase === "completed" && session) {
     body = (
       <RaceResults
+        apiClient={apiClient}
         article={article}
         outcome={{ status: "completed", session, elapsedMs, leaderboardContext, runId }}
-        leaderboard={leaderboard}
+        identityAccountId={identityAccountId}
         todayCentral={todayCentral}
         identityStatus={identityStatus}
         identityDisplayName={identityDisplayName}
@@ -198,6 +199,7 @@ export default function RaceFlow({
   } else if (dnfResult) {
     body = (
       <RaceResults
+        apiClient={apiClient}
         article={null}
         outcome={{
           status: "dnf",
@@ -206,7 +208,7 @@ export default function RaceFlow({
           elapsedMs: dnfResult.elapsedMs,
           runId: dnfResult.runId,
         }}
-        leaderboard={leaderboard}
+        identityAccountId={identityAccountId}
         todayCentral={todayCentral}
         identityStatus={identityStatus}
         identityDisplayName={identityDisplayName}

@@ -1,68 +1,84 @@
 import { formatTimeAndClicks } from "../domain/formatting";
-import type { RankedLeaderboardRow, ServerPathStep } from "../domain/types";
+import type { ChallengeBoardDnfRow, ChallengeBoardPlacement } from "../domain/types";
 
 /**
- * Invariant 1 ("Time AND clicks, always... `0:38 · 5 clk`") row rendering,
- * shared by Boards (the ported LeaderboardPanel) and Challenge Detail's own
- * board - both need the identical rank/DNF, provenance-badge, and path-
- * disclosure treatment. Previously this JSX lived only in App.tsx's
- * LeaderboardPanel with a separate elapsed/click-count pair of spans; this
- * extraction also folds those two spans into the single formatTimeAndClicks
- * string per the redesign's invariant 1.
+ * Challenge Detail's own leaderboard (Invariant 1: "Time AND clicks,
+ * always... `0:38 · 5 clk`"). PKG-03 (council 2026-07-19): now reads the
+ * SAME deduped `GET /challenges/{id}/board` shape Boards and Home already
+ * render (`ChallengeBoardPlacement`/`ChallengeBoardDnfRow` - one row per
+ * canonical account, invariant-2-correct server-side) instead of the raw
+ * per-attempt leaderboard - a repeat attempt used to show the same display
+ * name at two ranks at once ("#1 theonenonlyvj / #2 theonenonlyvj"), the
+ * duplicate-rank bug this package fixes. Repeat attempts still live in
+ * Challenge Detail's own "Your history" strip (see ChallengeDetail.tsx),
+ * which keeps every attempt on purpose.
+ *
+ * The old per-row "SERVER TRACKED"/"Repeat run" provenance pills and the
+ * unconditional "View winning path" link are both gone: the deduped board
+ * shape carries no `runId`/`protocolVersion` to hang either on (there is
+ * nothing to disclose a path FOR, and "server tracked" was the undifferentiated
+ * default, not information) - and neither ever appeared in the ratified
+ * design mockup (`mockup-browse-detail`: plain "1  FranTheGreat  1:02 · 8
+ * clk" rows). Your own runs' provenance/path disclosure moved to "Your
+ * history" instead, where a real per-run `runId`/`protocolVersion` still
+ * exists. This mirrors Boards' own inline board markup (`.board-snippet`/
+ * `.board-dnf-section`) exactly, so the two screens can't visually drift.
  */
 export default function LeaderboardList({
-  leaderboard,
-  onDisclosePath,
-  runPaths,
+  dnfs,
+  identityAccountId,
+  placements,
 }: {
-  leaderboard: RankedLeaderboardRow[];
-  onDisclosePath: (runId: string) => void;
-  runPaths: Record<string, ServerPathStep[]>;
+  dnfs: ChallengeBoardDnfRow[];
+  identityAccountId: string | null;
+  placements: ChallengeBoardPlacement[];
 }) {
-  if (!leaderboard.length) {
-    return <p className="muted">No completed runs yet.</p>;
-  }
-
   return (
-    <ol className="leaderboard">
-      {leaderboard.map((row) => (
-        <li className={row.status === "abandoned" ? "dnf" : undefined} key={row.runId}>
-          <span className="rank">
-            {row.status === "abandoned" ? "DNF" : `#${row.rank}`}
-          </span>
-          <span className="leaderboard-player">
-            <span>{row.displayName}</span>
-            <span
-              className={`provenance-badge ${
-                row.protocolVersion === 1 ? "historical" : "verified"
-              }`}
-              title={row.protocolVersion === 1
-                ? "Recorded before server-tracked race protocol"
-                : "Identity, timing, and path continuity tracked by the server"}
-            >
-              {row.protocolVersion === 1 ? "Historical" : "Server tracked"}
-            </span>
-            {row.isRepeatRun ? (
-              <span className="provenance-badge repeat">Repeat run</span>
-            ) : null}
-          </span>
-          <span>{formatTimeAndClicks(row.elapsedMs, row.clickCount)}</span>
-          <details onToggle={(event) => {
-            if (event.currentTarget.open) onDisclosePath(row.runId);
-          }}>
-            <summary>
-              {row.status === "abandoned" ? "View path" : "View winning path"}
-            </summary>
-            {runPaths[row.runId] ? (
-              <ol className="winning-path">
-                {runPaths[row.runId].map((step) => (
-                  <li key={step.stepNumber}>{step.sourceTitle} {"->"} {step.destinationTitle}</li>
-                ))}
-              </ol>
-            ) : <p>Loading path...</p>}
-          </details>
-        </li>
-      ))}
-    </ol>
+    <>
+      <section className="board-snippet" aria-label="Leaderboard placements">
+        {placements.length ? (
+          <ol>
+            {placements.map((row) => {
+              const isYou = identityAccountId !== null && row.accountId === identityAccountId;
+              return (
+                <li className={isYou ? "is-you" : undefined} key={row.accountId}>
+                  <span className="rank">#{row.placement}</span>
+                  <span>
+                    {row.displayName ?? "Unknown"}
+                    {isYou ? <span className="muted"> (you)</span> : null}
+                  </span>
+                  <span>{formatTimeAndClicks(row.elapsedMs, row.clickCount)}</span>
+                </li>
+              );
+            })}
+          </ol>
+        ) : (
+          <p className="muted">No completed runs yet.</p>
+        )}
+      </section>
+
+      <section className="board-snippet board-dnf-section muted" aria-label="DNF">
+        <h3>DNF</h3>
+        {dnfs.length ? (
+          <ol>
+            {dnfs.map((row) => {
+              const isYou = identityAccountId !== null && row.accountId === identityAccountId;
+              return (
+                <li className={isYou ? "is-you" : undefined} key={row.accountId}>
+                  <span className="rank">{"—"}</span>
+                  <span>
+                    {row.displayName ?? "Unknown"}
+                    {isYou ? <span className="muted"> (you)</span> : null}
+                  </span>
+                  <span>{formatTimeAndClicks(row.elapsedMs, row.clickCount)}</span>
+                </li>
+              );
+            })}
+          </ol>
+        ) : (
+          <p>No DNFs.</p>
+        )}
+      </section>
+    </>
   );
 }

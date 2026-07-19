@@ -251,6 +251,7 @@ export default function AppShell({
         {visibleMode === "challenges" ? (
           challengesView === "detail" && selectedChallenge ? (
             <ChallengeDetail
+              apiClient={apiClient}
               challenge={selectedChallenge}
               identityAccountId={identitySession?.accountId ?? null}
               leaderboard={leaderboard}

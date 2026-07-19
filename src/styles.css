@@ -1909,11 +1909,17 @@ h1 {
   justify-items: start;
 }
 
+/* PKG-03 (council 2026-07-19): `.leaderboard` is Challenge Detail's "Your
+   history" strip now, not the main board (that moved to `.board-snippet`,
+   matching Boards/Home exactly - see LeaderboardList.tsx). A flex-wrap row
+   (rather than a fixed grid-template-columns) tolerates the variable child
+   count here (a rank/time line, plus an optional Historical badge and/or
+   path-disclosure link, depending on the row) without misaligned columns. */
 .leaderboard li {
-  display: grid;
-  grid-template-columns: 54px minmax(110px, 1fr) 80px 86px minmax(72px, auto);
-  gap: 10px;
-  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
   border: 1px solid rgba(130, 246, 239, 0.14);
   background: var(--ink);
   padding: 10px;
@@ -1945,6 +1951,10 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+/* PKG-03: "Server tracked"/"Repeat run" pills are gone entirely (the
+   default isn't information, and repeats now live as separate "Your
+   history" rows rather than extra board entries) - only the pre-migration
+   "Historical" exception is still worth flagging. */
 .provenance-badge {
   padding: 1px 5px;
   font-size: 0.64rem;
@@ -1958,24 +1968,16 @@ h1 {
   color: #ffad9f;
 }
 
-.provenance-badge.verified {
-  border: 1px solid rgba(13, 235, 215, 0.65);
-  color: #82f6ef;
-}
-
-.provenance-badge.repeat {
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: #d9e7e9;
-}
-
 .leaderboard details {
   color: var(--text-bright);
 }
 
 /* PKG-04: a disclosure link ("View winning path"), not a race action or a
    DNF-severity signal - reads as teal-underlined, the same link convention
-   as `.link-button`, rather than the leftover coral. */
-.leaderboard summary {
+   as `.link-button`, rather than the leftover coral. Scoped to
+   `.path-disclosure` (not every `<details>` in "Your history") so it
+   doesn't also restyle the "Historical" tap-reveal badge below. */
+.leaderboard .path-disclosure summary {
   display: flex;
   min-height: 44px;
   align-items: center;
@@ -1986,8 +1988,28 @@ h1 {
   text-underline-offset: 3px;
 }
 
-.leaderboard summary:hover {
+.leaderboard .path-disclosure summary:hover {
   color: var(--text-bright);
+}
+
+/* PKG-03: the "Historical" badge becomes tap-to-reveal (a `title` attribute
+   has no mobile equivalent - hover-only provenance was unreadable on
+   touch), matching the tap-reveal convention `.path-recap` already
+   established. */
+.provenance-disclosure summary {
+  display: inline-flex;
+  width: fit-content;
+  list-style: none;
+  cursor: pointer;
+}
+
+.provenance-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.provenance-disclosure p {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
 }
 
 .path-preview {
@@ -2359,17 +2381,8 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .leaderboard li {
-    grid-template-columns: 42px minmax(0, 1fr) auto;
-  }
-
   .create-challenge-form {
     grid-template-columns: 1fr;
-  }
-
-  .leaderboard li > span:nth-child(4),
-  .leaderboard details {
-    grid-column: 2 / -1;
   }
 
   .result-actions {

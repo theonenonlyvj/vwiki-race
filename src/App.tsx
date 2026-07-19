@@ -1197,8 +1197,21 @@ export default function App({
     );
     if (outcome.status === "abandoned") {
       setEndConfirmationOpen(false);
-      if (dnfSnapshot && dnfSnapshot.clicks > 0) {
-        setDnfResult(dnfSnapshot);
+      // PKG-03 (council 2026-07-19): the header/board-row time mismatch
+      // ("0:04" vs "0:05") traced to dnfSnapshot using the client's
+      // pre-call timer reading while the eventual board row reads the
+      // server's own abandoned_at-based elapsedMs. The abandon response
+      // now echoes that same server value (see AbandonRunTransition's doc
+      // comment) - prefer it here, in the SAME already-in-flight call,
+      // rather than a later, separate leaderboard refetch (which would
+      // also risk a visible number flip after the Results screen mounts).
+      // Falls back to the client snapshot only if an older/legacy
+      // response omitted it.
+      const resolvedDnfSnapshot = dnfSnapshot && outcome.elapsedMs !== undefined
+        ? { ...dnfSnapshot, elapsedMs: outcome.elapsedMs }
+        : dnfSnapshot;
+      if (resolvedDnfSnapshot && resolvedDnfSnapshot.clicks > 0) {
+        setDnfResult(resolvedDnfSnapshot);
         setRunNotice(null);
       } else {
         setDnfResult(null);
@@ -1277,6 +1290,7 @@ export default function App({
     >
       {raceEngaged ? (
         <RaceFlow
+          apiClient={apiClient}
           phase={race.phase}
           raceChallenge={race.challenge}
           recoveryRun={race.recoveryRun}
@@ -1290,11 +1304,11 @@ export default function App({
           pendingNavigationTitle={pendingNavigationTitle}
           pendingRetry={race.pendingRetry}
           leaderboardContext={race.leaderboardContext}
-          leaderboard={leaderboard}
           runId={race.run?.id ?? null}
           dnfResult={dnfResult}
           todayCentral={currentCentralDate}
           identityStatus={identitySession?.status ?? null}
+          identityAccountId={identitySession?.accountId ?? null}
           identityDisplayName={identitySession?.displayName ?? ""}
           preRaceCompletions={preRaceCompletionsRef.current}
           playAnotherSuggestion={playAnotherSuggestion}

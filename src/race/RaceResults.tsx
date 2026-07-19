@@ -1,21 +1,22 @@
-import { useCallback, useRef, type FocusEvent, type MouseEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FocusEvent, type MouseEvent, type PointerEvent } from "react";
 import BoardSnippet from "../components/BoardSnippet";
-import { boardSnippetRowsFromLeaderboard } from "../domain/boardSnippet";
+import { boardSnippetRowsForResult } from "../domain/boardSnippet";
 import PlayAnotherCard from "../components/PlayAnotherCard";
 import { dailyDateForChallenge } from "../domain/challengeSelection";
 import { compressPathForStrip } from "../domain/pathCompression";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { GameSession } from "../domain/gameSession";
 import type { PlayAnotherSuggestionState } from "../domain/playAnother";
-import type {
-  Article,
-  Challenge,
-  LeaderboardContext,
-  RankedLeaderboardRow,
-} from "../domain/types";
+import type { Article, Challenge, LeaderboardContext } from "../domain/types";
+import type { ChallengeBoardResponse } from "../server/contracts";
+import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 import type { VGamesIdentityStatus } from "../services/vgamesIdentity";
 import { WikipediaArticlePanel } from "./RaceMode";
 import { ShareResultButton } from "./shared";
+
+function emptyBoard(challengeId: string): ChallengeBoardResponse {
+  return { challengeId, placements: [], dnfs: [] };
+}
 
 /**
  * Beat 3 of the race flow: Results. Two outcomes share this screen -
@@ -41,9 +42,10 @@ export type RaceResultOutcome =
     };
 
 export default function RaceResults({
+  apiClient,
   article,
   outcome,
-  leaderboard,
+  identityAccountId,
   todayCentral,
   identityStatus,
   identityDisplayName,
@@ -61,9 +63,15 @@ export default function RaceResults({
   handleArticleClick,
   handleArticlePrewarm,
 }: {
+  // PKG-03 (council 2026-07-19): Results self-fetches its own board
+  // snippet data (mirrors Boards.tsx/ChallengeDetail.tsx's own board-fetch
+  // effect) rather than reading the app shell's raw per-attempt
+  // `leaderboard` projection, which the deduped board endpoint replaces
+  // here - see the doc comment above `boardSnippetRowsForResult`.
+  apiClient: VWikiRaceApiClient;
   article: Article | null;
   outcome: RaceResultOutcome;
-  leaderboard: RankedLeaderboardRow[];
+  identityAccountId: string | null;
   // The current Central-time date (see App.tsx's currentCentralDate/
   // todayUtc) - the only thing that distinguishes "today's actual daily"
   // from any other challenge for the "today"/"Today's board" copy below.
@@ -112,6 +120,43 @@ export default function RaceResults({
   }, [stableArticlePrewarm]);
 
   const challenge = outcome.status === "completed" ? outcome.session.challenge : outcome.challenge;
+
+  const [board, setBoard] = useState<ChallengeBoardResponse>(() => emptyBoard(challenge.id));
+  useEffect(() => {
+    let cancelled = false;
+    setBoard(emptyBoard(challenge.id));
+    void apiClient.getChallengeBoard(challenge.id)
+      .then((response) => {
+        if (!cancelled) setBoard(response);
+      })
+      .catch(() => {
+        if (!cancelled) setBoard(emptyBoard(challenge.id));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, challenge.id]);
+
+  // The literal run that just ended, in `boardSnippetRowsForResult` terms -
+  // same source (`outcome`/`leaderboardContext`) the header above already
+  // reads, so the two can never disagree (PKG-03 change 5's "one source of
+  // truth"). See that function's doc comment for the known open question
+  // (a non-personal-best repeat's own true rank/time vs. the account's
+  // canonical placement elsewhere on the same board).
+  const justFinishedRow = outcome.status === "completed"
+    ? {
+        rank: outcome.leaderboardContext?.rank ?? null,
+        displayName: identityDisplayName,
+        elapsedMs: outcome.elapsedMs,
+        clickCount: outcome.session.clicks,
+      }
+    : {
+        rank: null,
+        displayName: identityDisplayName,
+        elapsedMs: outcome.elapsedMs,
+        clickCount: outcome.clicks,
+      };
+
   const isGuest = identityStatus === "ghost";
   // "Today"/"Today's board" is only accurate when the raced challenge is
   // actually today's daily - anything else (an older daily, a custom
@@ -157,7 +202,7 @@ export default function RaceResults({
 
         <BoardSnippet
           title={isDailyToday ? "Today's board" : "Leaderboard"}
-          rows={boardSnippetRowsFromLeaderboard(leaderboard, outcome.runId)}
+          rows={boardSnippetRowsForResult(board, identityAccountId, justFinishedRow)}
         />
 
         <PlayAnotherCard
