@@ -1311,6 +1311,92 @@ describe("VWiki Race app", () => {
     expect(await screen.findByText(/#4 on this board · 0:01 · 1 clk/)).toBeVisible();
   });
 
+  it("never fabricates '#1' from the loading-placeholder board while the board fetch is in flight or after it fails (REMAINDERS fix)", async () => {
+    // `dedupedRankForJustFinished` can't tell "the board hasn't loaded yet"
+    // apart from "zero placements are genuinely better than this run" - both
+    // look like an empty `placements` array - so running it against
+    // Results' initial `emptyBoard()` placeholder always yields #1 for any
+    // completed run with a server-provided rank. This holds the board fetch
+    // open (never resolving it), reusing the same "truly #4" fixture as the
+    // test above, and asserts the header/Share text read the server's raw
+    // rank instead of a fabricated #1 - then rejects the fetch outright and
+    // asserts the same holds permanently, not just during the load window.
+    let failBoard!: (reason: unknown) => void;
+    const boardPromise = new Promise<Response>((_resolve, reject) => {
+      failBoard = reject;
+    });
+    // Real fetch rejections are unhandled-rejection candidates once the
+    // promise itself is replaced by state; attach a no-op handler so the
+    // test doesn't also have to fight an unrelated unhandled-rejection
+    // warning.
+    boardPromise.catch(() => {});
+    const baseFetch = createFetchMock({
+      leaderboardContext: { isPersonalBest: false, rank: 4 },
+      boardByChallenge: {
+        "challenge-0001": {
+          placements: [
+            { accountId: "acc-ari", displayName: "Ari", placement: 1, elapsedMs: 500, clickCount: 1 },
+            { accountId: "acc-bo", displayName: "Bo", placement: 2, elapsedMs: 800, clickCount: 1 },
+            { accountId: "acc-cy", displayName: "Cy", placement: 3, elapsedMs: 1_100, clickCount: 1 },
+          ],
+          dnfs: [],
+        },
+      },
+    });
+    const fetchImpl = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === apiUrl("/api/v2/challenges/challenge-0001/board")) {
+        return boardPromise;
+      }
+      return baseFetch(input, init);
+    }) as typeof baseFetch;
+
+    const user = userEvent.setup();
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    try {
+      render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+      await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+      await user.click(await screen.findByRole("button", { name: /start race/i }));
+      await user.click(await screen.findByRole("link", { name: /fruit/i }));
+
+      // The board fetch is still pending - if the header were reading the
+      // placeholder-derived rank it would show #1 forever (this promise
+      // never resolves), so `findByText` timing out on #4 is exactly the
+      // pre-fix failure mode.
+      expect(await screen.findByText(/#4 on this board · 0:01 · 1 clk/)).toBeVisible();
+      expect(screen.queryByText(/#1 on this board/)).toBeNull();
+
+      await user.click(screen.getByRole("button", { name: /share result/i }));
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith(
+          `VWiki Race — Challenge #1 — #4 · 0:01 · 1 clk — ${window.location.origin}/?challenge=challenge-0001`,
+        );
+      });
+
+      // Now the fetch fails outright - `boardLoaded` must never latch true
+      // off a failure, so the header/share text keep reading the same raw
+      // #4 rather than a fabricated #1 that persists forever.
+      await act(async () => {
+        failBoard(new Error("network down"));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(screen.getByText(/#4 on this board · 0:01 · 1 clk/)).toBeVisible();
+      expect(screen.queryByText(/#1 on this board/)).toBeNull();
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, "clipboard", clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, "clipboard");
+      }
+    }
+  });
+
   it("falls back to a plain time+clicks line when the server returns no rank", async () => {
     // Invariant 1 must hold even in the edge case where leaderboardContext
     // has no rank (e.g. the row lookup failed server-side) - never fabricate

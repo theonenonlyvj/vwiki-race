@@ -158,12 +158,26 @@ export default function RaceResults({
   const challenge = outcome.status === "completed" ? outcome.session.challenge : outcome.challenge;
 
   const [board, setBoard] = useState<ChallengeBoardResponse>(() => emptyBoard(challenge.id));
+  // REMAINDERS fix (final wave review): `board` starts as an empty
+  // placeholder (zero placements) and is only ever trustworthy once the
+  // fetch below actually succeeds. `dedupedRankForJustFinished` can't tell
+  // "genuinely nobody's beaten this run yet" apart from "the board hasn't
+  // loaded" - both look like zero placements - so it happily returns #1 for
+  // either. `boardLoaded` disambiguates the two: true only after a
+  // successful fetch, left false forever on failure (never flips true in
+  // the `.catch` below), so every reader downstream can tell "board data is
+  // real" from "board data is still the empty placeholder".
+  const [boardLoaded, setBoardLoaded] = useState(false);
   useEffect(() => {
     let cancelled = false;
     setBoard(emptyBoard(challenge.id));
+    setBoardLoaded(false);
     void apiClient.getChallengeBoard(challenge.id)
       .then((response) => {
-        if (!cancelled) setBoard(response);
+        if (!cancelled) {
+          setBoard(response);
+          setBoardLoaded(true);
+        }
       })
       .catch(() => {
         if (!cancelled) setBoard(emptyBoard(challenge.id));
@@ -186,6 +200,14 @@ export default function RaceResults({
   // header (`CompletedResultHeader`, below) and `ShareResultButton` both read
   // this SAME already-resolved `justFinishedRow.rank`, so the header can
   // never show a different number than the board row for the identical run.
+  //
+  // REMAINDERS fix (final wave review): that dedupe is only trustworthy once
+  // `boardLoaded` is true - run it against the placeholder `emptyBoard()`
+  // (loading, or a failed fetch that never recovers) and every completed
+  // run with a server rank comes back "0 better placements + 1 = #1". Until
+  // the board genuinely loads, fall back to the server's raw per-attempt
+  // rank instead (same value the pre-PKG-03 code showed - approximately
+  // right, no network dependency, never a fabricated #1).
   const rawJustFinishedRow = outcome.status === "completed"
     ? {
         status: "completed" as const,
@@ -203,7 +225,9 @@ export default function RaceResults({
       };
   const justFinishedRow = {
     ...rawJustFinishedRow,
-    rank: dedupedRankForJustFinished(board.placements, rawJustFinishedRow),
+    rank: boardLoaded
+      ? dedupedRankForJustFinished(board.placements, rawJustFinishedRow)
+      : rawJustFinishedRow.rank,
   };
 
   const isGuest = identityStatus === "ghost";
@@ -286,9 +310,19 @@ export default function RaceResults({
           <PathRecap session={outcome.session} />
         ) : null}
 
+        {/* REMAINDERS fix: `boardSnippetRowsForResult` re-derives the pinned
+            "you" row's rank internally, from `board.placements` directly -
+            it ignores whatever numeric value `justFinishedRow.rank` already
+            carries (only checks null-ness), so feeding it a real
+            `justFinishedRow` while `board` is still the loading/failed
+            placeholder would recompute the exact same false "#1" the header
+            fix above just avoided, disagreeing with the header's now-correct
+            fallback number. Passing `null` until `boardLoaded` keeps the
+            pinned row absent (same as every other row, already empty from
+            the placeholder board) rather than wrong. */}
         <BoardSnippet
           title={isDailyToday ? "Today's board" : "Leaderboard"}
-          rows={boardSnippetRowsForResult(board, identityAccountId, justFinishedRow)}
+          rows={boardSnippetRowsForResult(board, identityAccountId, boardLoaded ? justFinishedRow : null)}
         />
 
         <PlayAnotherCard
