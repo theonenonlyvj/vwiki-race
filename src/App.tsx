@@ -1248,10 +1248,16 @@ export default function App({
   }
 
   async function loadRunPath(runId: string) {
+    // FB-4: disclosure is now authenticated server-side (the viewer-finished
+    // guard needs a real identity) - every caller of onDisclosePath already
+    // requires pathsUnlocked, which itself requires a completed run, which
+    // requires a session, so this should never actually fire in practice.
+    // Still, no session means nothing to disclose - fail closed, not open.
+    if (!identitySession) return;
     if (requestedPaths.current.has(runId)) return;
     requestedPaths.current.add(runId);
     try {
-      const path = await apiClient.getRunPath(runId);
+      const path = await apiClient.getRunPath(runId, identitySession.token);
       setRunPaths((current) => ({ ...current, [runId]: path }));
     } catch (caught) {
       requestedPaths.current.delete(runId);

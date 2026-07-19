@@ -91,7 +91,11 @@ export interface VWikiRaceApiClient extends VWikiRaceDailyAdminApiClient {
   listLeaderboard(challengeId: string): Promise<RankedLeaderboardRow[]>;
   getChallengeBoard(challengeId: string): Promise<ChallengeBoardResponse>;
   getBoardsTrends(window: BoardsTrendWindow): Promise<BoardsTrendsResponse>;
-  getRunPath(runId: string): Promise<ServerPathStep[]>;
+  // FB-4 (council 2026-07-19, owner decision 10): now authenticated - the
+  // server's own viewer-finished guard (getPublicRunPath's doc comment,
+  // trackingRepository.ts) needs a real bearer token, not just a runId, so
+  // client-side `pathsUnlocked` gating can't be the only access boundary.
+  getRunPath(runId: string, token: string): Promise<ServerPathStep[]>;
   getAccountStats(token: string): Promise<AccountStats>;
   /**
    * Browse's per-card aggregate (Increment 5, unauthenticated - `GET
@@ -207,10 +211,14 @@ export function createVWikiRaceApiClient(
     async getBoardsTrends(window) {
       return read(urlPath.boardsTrends(window), isBoardsTrendsResponse);
     },
-    async getRunPath(runId) {
+    async getRunPath(runId, token) {
       const cached = pathCache.get(runId);
       if (cached) return cached;
-      const path = (await read(urlPath.run(runId, "path"), isRunPathResponse)).path;
+      const path = (await authenticatedRead(
+        urlPath.run(runId, "path"),
+        token,
+        isRunPathResponse,
+      )).path;
       pathCache.set(runId, path);
       return path;
     },

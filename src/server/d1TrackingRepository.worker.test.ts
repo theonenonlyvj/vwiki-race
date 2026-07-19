@@ -3136,6 +3136,170 @@ describe("Task 4 D1 projections", () => {
       .rejects.toMatchObject({ code: "run_path_not_found", status: 404 });
   });
 
+  it("FB-4 (council 2026-07-19, owner decision 10): discloses a NON-OWN completed run's path once the viewer has their own eligible completed run on the SAME challenge", async () => {
+    await insertCompletedV2({
+      id: "winner-run",
+      accountId: "other-account",
+      elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO run_path_steps
+         (run_id, step_number, source_title, clicked_anchor_text, destination_title,
+          destination_page_id, elapsed_since_start_ms, created_at)
+       VALUES ('winner-run', 1, 'Moon', 'gravity', 'Gravity', 38579, 4000,
+               '2026-07-14T01:00:04.000Z')`,
+    ).run();
+    // The viewer (account) has their own eligible completed run on the same
+    // challenge-0001 - never "winner-run" itself.
+    await insertCompletedV2({
+      id: "viewer-own-run",
+      accountId: account.accountId,
+      elapsedMs: 6_000,
+      completedAt: "2026-07-14T01:00:06.000Z",
+    });
+
+    const { repository } = fixture();
+    await expect(repository.getPublicRunPath("winner-run", account)).resolves.toEqual([
+      expect.objectContaining({ destinationTitle: "Gravity", stepNumber: 1 }),
+    ]);
+  });
+
+  it("FB-4: blocks a NON-OWN completed run's path when the viewer has not finished that challenge - server-side, not client-trusted", async () => {
+    await insertCompletedV2({
+      id: "winner-run",
+      accountId: "other-account",
+      elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO run_path_steps
+         (run_id, step_number, source_title, clicked_anchor_text, destination_title,
+          destination_page_id, elapsed_since_start_ms, created_at)
+       VALUES ('winner-run', 1, 'Moon', 'gravity', 'Gravity', 38579, 4000,
+               '2026-07-14T01:00:04.000Z')`,
+    ).run();
+    const { repository } = fixture();
+
+    // No run at all for the viewer on this challenge.
+    await expect(repository.getPublicRunPath("winner-run", account)).rejects.toMatchObject({
+      code: "run_path_not_found", status: 404,
+    });
+
+    // A DNF alone doesn't unlock it either (invariant 2/5: only a
+    // completion counts as "played").
+    await insertLegacyRun({ id: "viewer-dnf", accountId: account.accountId });
+    await env.VWIKI_RACE_DB.prepare(
+      `UPDATE runs SET status='abandoned', protocol_version=2, click_count=2,
+         abandoned_at='2026-07-14T01:02:15.000Z', elapsed_ms=3000
+       WHERE id='viewer-dnf'`,
+    ).run();
+    await expect(repository.getPublicRunPath("winner-run", account)).rejects.toMatchObject({
+      code: "run_path_not_found", status: 404,
+    });
+  });
+
+  it("FB-4: resolves the viewer-finished guard through canonical account aliases, same as the rest of the board/stats queries", async () => {
+    await insertCompletedV2({
+      id: "winner-run",
+      accountId: "other-account",
+      elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO run_path_steps
+         (run_id, step_number, source_title, clicked_anchor_text, destination_title,
+          destination_page_id, elapsed_since_start_ms, created_at)
+       VALUES ('winner-run', 1, 'Moon', 'gravity', 'Gravity', 38579, 4000,
+               '2026-07-14T01:00:04.000Z')`,
+    ).run();
+    // The viewer's completed run is recorded under a pre-claim alias id,
+    // merged into the canonical account via `account_aliases`.
+    await insertCompletedV2({
+      id: "viewer-alias-run",
+      accountId: "account-before-claim",
+      elapsedMs: 6_000,
+      completedAt: "2026-07-14T01:00:06.000Z",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO account_aliases (alias_account_id, canonical_account_id, updated_at)
+       VALUES ('account-before-claim', ?, '2026-07-14T01:00:00.000Z')`,
+    ).bind(account.accountId).run();
+
+    const { repository } = fixture();
+    await expect(repository.getPublicRunPath("winner-run", account)).resolves.toEqual([
+      expect.objectContaining({ destinationTitle: "Gravity", stepNumber: 1 }),
+    ]);
+  });
+
+  it("FB-4: the authenticated v2 Worker route requires a viewer and enforces the same guard end to end", async () => {
+    await insertCompletedV2({
+      id: "winner-run",
+      accountId: "other-account",
+      elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO run_path_steps
+         (run_id, step_number, source_title, clicked_anchor_text, destination_title,
+          destination_page_id, elapsed_since_start_ms, created_at)
+       VALUES ('winner-run', 1, 'Moon', 'gravity', 'Gravity', 38579, 4000,
+               '2026-07-14T01:00:04.000Z')`,
+    ).run();
+    const { repository } = fixture();
+    const authorize = vi.fn(async (request: Request) => {
+      if (request.headers.get("Authorization") !== "Bearer viewer-token") {
+        throw new ApiError("unauthorized", "Sign in to view this path.", 401);
+      }
+      return account;
+    });
+    const accountReadLimit = vi.fn(async () => ({ success: true }));
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: createApiHandlers(repository),
+        identity: {},
+        runProtocol: repository,
+        authorize,
+      } as unknown as WorkerTracking),
+    });
+    const route = "https://worker.example/api/v2/runs/winner-run/path";
+    const workerEnv = {
+      VWIKI_RACE_DB: env.VWIKI_RACE_DB,
+      VGAMES_URL: "https://vgames.example",
+      CLICK_RATE_LIMITER: { limit: async () => ({ success: true }) },
+      ACCOUNT_READ_RATE_LIMITER: { limit: accountReadLimit },
+      CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    };
+
+    // No Authorization header at all - unlike the pre-migration legacy
+    // `/api/runs/{id}/path` route, this one refuses to answer anonymously.
+    const unauthorized = await worker.fetch(new Request(route), workerEnv);
+    expect(unauthorized.status).toBe(401);
+    expect(accountReadLimit).not.toHaveBeenCalled();
+
+    // Authorized, but the viewer hasn't finished challenge-0001 yet.
+    const blocked = await worker.fetch(new Request(route, {
+      headers: { Authorization: "Bearer viewer-token" },
+    }), workerEnv);
+    expect(blocked.status).toBe(404);
+    await expect(blocked.json()).resolves.toMatchObject({
+      error: { code: "run_path_not_found" },
+    });
+    expect(accountReadLimit).toHaveBeenCalledWith({ key: "path:account-canonical" });
+
+    // The viewer finishes challenge-0001 themselves, then the same route
+    // discloses the OTHER player's path.
+    await repository.startRunV2(account, start);
+    await repository.recordClickV2(account, targetClick);
+    const allowed = await worker.fetch(new Request(route, {
+      headers: { Authorization: "Bearer viewer-token" },
+    }), workerEnv);
+    expect(allowed.status).toBe(200);
+    await expect(allowed.json()).resolves.toEqual({
+      path: [expect.objectContaining({ destinationTitle: "Gravity", stepNumber: 1 })],
+    });
+  });
+
   it("returns an owned active protocol-2 zero-click recovery path through the authenticated rate-limited Worker route", async () => {
     const { repository } = fixture();
     const run = await repository.startRunV2(account, start);

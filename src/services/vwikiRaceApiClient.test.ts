@@ -87,7 +87,7 @@ describe("VWiki Race API client", () => {
       }, "jwt-claimed"),
     ).toMatchObject({ transition: { clickCount: 1 } });
     expect(await client.listLeaderboard("challenge-0001")).toEqual([]);
-    expect(await client.getRunPath("run-1")).toEqual([]);
+    expect(await client.getRunPath("run-1", "jwt-claimed")).toEqual([]);
 
     expect(fetchImpl).toHaveBeenCalledWith(
       `${apiOrigin}/api/v2/runs/start`,
@@ -554,12 +554,18 @@ describe("VWiki Race API client", () => {
     expect(fetchImpl.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({}));
   });
 
-  it("authenticates active-run paths while keeping completed disclosure public", async () => {
+  it("authenticates both active-run recovery paths and completed-run disclosure paths", async () => {
+    // FB-4 (council 2026-07-19, owner decision 10): completed-run
+    // disclosure stopped being public this package - the server's own
+    // viewer-finished guard (getPublicRunPath's doc comment,
+    // trackingRepository.ts) needs a real bearer token, since a
+    // board-visible placement's `runId` is now discoverable via a totally
+    // public, unauthenticated board fetch.
     const fetchImpl = vi.fn(async () => Response.json({ path: [] }));
     const client = createVWikiRaceApiClient(fetchImpl, { apiOrigin });
 
     await expect(client.getActiveRunPath("run-active", "jwt-owner")).resolves.toEqual([]);
-    await expect(client.getRunPath("run-completed")).resolves.toEqual([]);
+    await expect(client.getRunPath("run-completed", "jwt-viewer")).resolves.toEqual([]);
 
     expect(fetchImpl).toHaveBeenCalledWith(
       `${apiOrigin}/api/v2/runs/run-active/recovery-path`,
@@ -569,7 +575,9 @@ describe("VWiki Race API client", () => {
     );
     expect(fetchImpl).toHaveBeenCalledWith(
       `${apiOrigin}/api/v2/runs/run-completed/path`,
-      expect.objectContaining({ headers: undefined }),
+      expect.objectContaining({
+        headers: { Authorization: "Bearer jwt-viewer" },
+      }),
     );
   });
 
@@ -587,7 +595,7 @@ describe("VWiki Race API client", () => {
     ).rejects.toMatchObject({ code: "invalid_response", status: 502 });
     await expect(client.listLeaderboard("challenge-0001"))
       .rejects.toMatchObject({ code: "invalid_response", status: 502 });
-    await expect(client.getRunPath("run-1"))
+    await expect(client.getRunPath("run-1", "jwt-claimed"))
       .rejects.toMatchObject({ code: "invalid_response", status: 502 });
   });
 
@@ -766,8 +774,8 @@ describe("VWiki Race API client", () => {
     });
     const client = createVWikiRaceApiClient(fetchImpl, { apiOrigin });
 
-    await client.getRunPath("run-1");
-    await client.getRunPath("run-1");
+    await client.getRunPath("run-1", "jwt-claimed");
+    await client.getRunPath("run-1", "jwt-claimed");
     await client.getAccountStats("jwt-claimed");
     await client.getAccountStats("jwt-claimed");
     expect(fetchImpl).toHaveBeenCalledTimes(2);

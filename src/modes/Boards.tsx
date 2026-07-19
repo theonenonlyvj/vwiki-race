@@ -12,7 +12,7 @@ import {
 } from "../domain/challengeSelection";
 import { dailyFlavorBadgeText } from "../domain/dailyEditorial";
 import { formatTimeAndClicks } from "../domain/formatting";
-import type { AllPlayersRosterEntry, Challenge } from "../domain/types";
+import type { AllPlayersRosterEntry, Challenge, ServerPathStep } from "../domain/types";
 import type {
   BoardsTrendRankedEntry,
   BoardsTrendsResponse,
@@ -114,18 +114,34 @@ function isTrendSegment(segment: BoardsSegment): segment is TrendSegment {
  * of its own): a genuine daily catalog gap there is expected (spec: "can
  * happen; not a stub") and renders its own graceful empty state.
  *
- * Unlike the old `LeaderboardList`/Detail's board, Boards never discloses a
- * per-run path this increment (spec: "Paths hidden until you've played" -
- * and Boards rows must not expose path disclosure at all) - the board
- * endpoint's rows don't even carry a `runId` to disclose. The trend
- * drill-down (tapping your own ranked row) is the one exception the spec
- * allows ("placement + time · clicks", invariant 1) - implemented as the
- * simplest invariant-1-compliant option available without a new endpoint:
- * it looks up the viewer's last 3 daily challenges from the catalog already
- * in hand and re-fetches each one's existing `getChallengeBoard` (already
- * built in Increment 3), rather than adding a bespoke per-account detail
- * endpoint. At friend-scale (a handful of dailies a week) this is 3 small
- * reads, not a real cost - documented here as a deliberate scope choice.
+ * FB-4 (council 2026-07-19, owner decision 10, "path comparison": Yes) -
+ * Today/Yesterday's daily board now DOES disclose a per-run path, same rule
+ * as Challenge Detail's `LeaderboardList` (invariant 5: "paths stay hidden
+ * until YOU'VE played" - the viewer, not each row's own player). `pathsUnlocked`
+ * below is `Boolean(ownPlacement)` - the viewer's own placement row on
+ * THIS board, i.e. a completed run on the currently-shown daily; a DNF alone
+ * never unlocks it (invariant 2 - only a completion counts as "played").
+ * Deliberately duplicates `LeaderboardList`'s row markup/CSS classes
+ * (`.path-disclosure`/`.winning-path`) here rather than importing that
+ * component, matching this file's pre-existing precedent of keeping its own
+ * inline `.board-snippet`/`.board-dnf-section` markup in lockstep with
+ * Detail's by hand (see that component's own doc comment) rather than a
+ * shared abstraction. DNF rows never get the affordance - `ChallengeBoardDnfRow`
+ * carries no `runId` to disclose, so the absence is structural, not a
+ * separate check. The actual disclosure request now runs through the
+ * server's own viewer-finished guard (`getPublicRunPath`, extended this
+ * same package) - client-side `pathsUnlocked` is UX gating, not the real
+ * access boundary.
+ *
+ * The trend drill-down (tapping your own ranked row) is the one place the
+ * spec's "placement + time · clicks" (invariant 1) suffices on its own,
+ * without a path - implemented as the simplest invariant-1-compliant option
+ * available without a new endpoint: it looks up the viewer's last 3 daily
+ * challenges from the catalog already in hand and re-fetches each one's
+ * existing `getChallengeBoard` (already built in Increment 3), rather than
+ * adding a bespoke per-account detail endpoint. At friend-scale (a handful
+ * of dailies a week) this is 3 small reads, not a real cost - documented
+ * here as a deliberate scope choice.
  */
 export default function Boards({
   apiClient,
@@ -133,8 +149,10 @@ export default function Boards({
   heroSelection,
   identityAccountId,
   initialSegment = "today",
+  onDisclosePath,
   onRaceChallenge,
   raceBusy,
+  runPaths,
   todayCentral,
 }: {
   apiClient: VWikiRaceApiClient;
@@ -145,8 +163,13 @@ export default function Boards({
   heroSelection: HomeHeroSelection | null;
   identityAccountId: string | null;
   initialSegment?: BoardsSegment;
+  // FB-4: same `onDisclosePath`/`runPaths` App.tsx already wires up for
+  // Challenge Detail - one App.tsx-owned cache/dedup (`requestedPaths`,
+  // `runPaths`), not a Boards-local reimplementation.
+  onDisclosePath: (runId: string) => void;
   onRaceChallenge: (challengeId: string) => void;
   raceBusy: boolean;
+  runPaths: Record<string, ServerPathStep[]>;
   todayCentral: string;
 }) {
   const [segment, setSegment] = useState<BoardsSegment>(initialSegment);
@@ -374,6 +397,10 @@ export default function Boards({
   // Invariant 2: a DNF (below) never counts as "finished" - only a
   // completed placement row does, so the CTA stays up through a DNF retry.
   const showRaceCta = segment === "today" && Boolean(activeChallenge) && !ownPlacement;
+  // FB-4 (invariant 5): "played" means finished THIS board's challenge -
+  // same completed-placement-row test `showRaceCta` above already uses, so
+  // the two can't independently drift on what counts as "played".
+  const pathsUnlocked = Boolean(ownPlacement);
   // PKG-01: pre-drop, Today's badge mirrors Home's exact "Yesterday's
   // daily · <flavor>" prefix (never a bare flavor pill that reads as if
   // today's real daily) - see Home.tsx's identically-shaped `flavorBadge`.
@@ -654,6 +681,29 @@ export default function Boards({
                         {isYou ? <span className="muted"> (you)</span> : null}
                       </span>
                       <span>{formatTimeAndClicks(row.elapsedMs, row.clickCount)}</span>
+                      {/* FB-4: same disclosure affordance as Challenge
+                          Detail's LeaderboardList - a compact "View winning
+                          path" link on the row, not a new column. Any
+                          placement row (not just the viewer's own), once
+                          `pathsUnlocked`; DNF rows never get one (see the
+                          DNF section below - no `runId` to hang it off). */}
+                      {pathsUnlocked && row.runId ? (
+                        <details
+                          className="path-disclosure"
+                          onToggle={(event) => {
+                            if (event.currentTarget.open) onDisclosePath(row.runId!);
+                          }}
+                        >
+                          <summary>View winning path</summary>
+                          {runPaths[row.runId] ? (
+                            <ol className="winning-path">
+                              {runPaths[row.runId].map((step) => (
+                                <li key={step.stepNumber}>{step.sourceTitle} {"→"} {step.destinationTitle}</li>
+                              ))}
+                            </ol>
+                          ) : <p>Loading path...</p>}
+                        </details>
+                      ) : null}
                     </li>
                   );
                 })}
@@ -693,7 +743,9 @@ export default function Boards({
             )}
           </section>
 
-          <p className="muted board-footnote">Paths hidden until you&apos;ve played.</p>
+          {!pathsUnlocked ? (
+            <p className="muted board-footnote">Paths hidden until you&apos;ve played.</p>
+          ) : null}
 
           {/* PKG-10: below the leaderboard/DNF/footnote, matching
               mockup-boards-trends' "Daily view" bottom-of-screen CTA

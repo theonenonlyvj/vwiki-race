@@ -287,8 +287,10 @@ export default function AppShell({
             heroSelection={homeHero}
             identityAccountId={identitySession?.accountId ?? null}
             initialSegment={boardsInitialSegment}
+            onDisclosePath={onDisclosePath}
             onRaceChallenge={onRaceChallenge}
             raceBusy={authBusy}
+            runPaths={runPaths}
             todayCentral={todayCentral}
           />
         ) : null}

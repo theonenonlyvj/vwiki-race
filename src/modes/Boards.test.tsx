@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import Boards from "./Boards";
 import type { HomeHeroSelection } from "../domain/challengeSelection";
-import type { Challenge } from "../domain/types";
+import type { Challenge, ServerPathStep } from "../domain/types";
 import type { ChallengeBoardResponse } from "../server/contracts";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 
@@ -82,18 +82,21 @@ function mockApiClient(overrides: Partial<VWikiRaceApiClient> = {}): VWikiRaceAp
 
 function renderBoards(overrides: Partial<Parameters<typeof Boards>[0]> = {}) {
   const onRaceChallenge = vi.fn();
+  const onDisclosePath = vi.fn();
   const props = {
     apiClient: mockApiClient(),
     challenges: [randomUserChallenge, yesterdaysDaily],
     heroSelection: null as HomeHeroSelection | null,
     identityAccountId: null as string | null,
+    onDisclosePath,
     onRaceChallenge,
     raceBusy: false,
+    runPaths: {} as Record<string, ServerPathStep[]>,
     todayCentral,
     ...overrides,
   };
   render(<Boards {...props} />);
-  return { onRaceChallenge };
+  return { onDisclosePath, onRaceChallenge };
 }
 
 describe("Boards: Today shares Home's honest hero selection (PKG-01)", () => {
@@ -239,5 +242,67 @@ describe("Boards: Today shares Home's honest hero selection (PKG-01)", () => {
     });
     expect(within(header).getByText("Today")).toBeVisible();
     expect(within(header).getByText("Hard · Daily #7")).toBeVisible();
+  });
+});
+
+describe("Boards: FB-4 path comparison (council 2026-07-19, owner decision 10)", () => {
+  const boardWithRunIds: ChallengeBoardResponse = {
+    challengeId: yesterdaysDaily.id,
+    placements: [
+      { accountId: "acc-1", displayName: "Vijay", placement: 1, elapsedMs: 20_000, clickCount: 3, runId: "run-you" },
+      { accountId: "acc-2", displayName: "Ari", placement: 2, elapsedMs: 25_000, clickCount: 4, runId: "run-ari" },
+    ],
+    dnfs: [{ accountId: "acc-3", displayName: "Sam", elapsedMs: 5_000, clickCount: 1 }],
+  };
+
+  it("keeps every placement's path hidden (including a row that carries a runId) until the viewer has finished this board's challenge", async () => {
+    const apiClient = mockApiClient({
+      getChallengeBoard: vi.fn(async () => ({
+        ...boardWithRunIds,
+        // The viewer (acc-1) hasn't finished - only Ari's completed row and
+        // Sam's DNF are on the board.
+        placements: boardWithRunIds.placements.filter((row) => row.accountId !== "acc-1"),
+      })),
+    });
+    renderBoards({
+      apiClient,
+      identityAccountId: "acc-1",
+      heroSelection: { challenge: yesterdaysDaily, kind: "yesterday-daily" },
+    });
+
+    await screen.findByText("Ari");
+    expect(screen.getByText(/paths hidden until you've played/i)).toBeVisible();
+    expect(screen.queryByText(/view winning path/i)).toBeNull();
+  });
+
+  it("discloses any placement's winning path (not just your own), and never a DNF row's, once you've finished this board's challenge", async () => {
+    const apiClient = mockApiClient({
+      getChallengeBoard: vi.fn(async () => boardWithRunIds),
+    });
+    const user = userEvent.setup();
+    const { onDisclosePath } = renderBoards({
+      apiClient,
+      identityAccountId: "acc-1",
+      heroSelection: { challenge: yesterdaysDaily, kind: "yesterday-daily" },
+    });
+
+    expect(await screen.findByText("Ari")).toBeVisible();
+    // Invariant 5 stands down once the viewer's own placement row exists.
+    expect(screen.queryByText(/paths hidden until you've played/i)).toBeNull();
+
+    const ariRow = screen.getByText("Ari").closest("li");
+    expect(ariRow).not.toBeNull();
+    await user.click(within(ariRow as HTMLElement).getByText("View winning path"));
+    expect(onDisclosePath).toHaveBeenCalledWith("run-ari");
+
+    // Your own row is disclosable too, off the same board.
+    const yourRow = screen.getByText("Vijay").closest("li");
+    expect(within(yourRow as HTMLElement).getByText("View winning path")).toBeVisible();
+
+    // DNF rows never get the affordance - `ChallengeBoardDnfRow` carries no
+    // `runId` to disclose.
+    const dnfSection = screen.getByRole("region", { name: "DNF" });
+    expect(within(dnfSection).getByText("Sam")).toBeVisible();
+    expect(within(dnfSection).queryByText(/view winning path/i)).toBeNull();
   });
 });

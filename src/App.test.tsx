@@ -5425,7 +5425,7 @@ describe("Boards v1: Today/Yesterday daily views (Increment 3)", () => {
     expect(within(board).getByText(/\(you\)/i)).toBeVisible();
   });
 
-  it("shows a muted DNF section below finishers, with no path disclosure anywhere in Boards", async () => {
+  it("shows a muted DNF section below finishers, with no path disclosure in Boards for a viewer who only DNF'd (hasn't finished)", async () => {
     // PKG-01: see the "shows today's deduped board" test above for why this
     // is a real daily fixture now, not `twoChallenges()`.
     const fetchImpl = createFetchMock({
@@ -5457,11 +5457,52 @@ describe("Boards v1: Today/Yesterday daily views (Increment 3)", () => {
     expect(within(dnfSection).getByText("Vijay")).toBeVisible();
     expect(within(dnfSection).getByText("0:08 · 2 clk")).toBeVisible();
     expect(within(dnfSection).getByText(/\(you\)/i)).toBeVisible();
-    // Invariant 5 / task scope: Boards drops per-run path disclosure
-    // entirely this increment - that's Detail-only content now (see the
-    // "labels leaderboard provenance"/"View winning path" tests above).
+    // FB-4 / invariant 5: a DNF alone never counts as "played" - the viewer
+    // (Vijay) only has a DNF row here, no completed placement, so Boards'
+    // path disclosure (added this package - see the FB-4 test below) stays
+    // hidden the same as it always has for a never-played challenge.
     expect(within(board).queryByText(/view path/i)).toBeNull();
     expect(within(board).queryByText(/view winning path/i)).toBeNull();
+  });
+
+  it("FB-4: once the viewer has finished today's daily, Boards discloses ANY placement's winning path (not just your own)", async () => {
+    // Same PKG-03-remainder-fix shape as Challenge Detail's own "once
+    // you've played, OTHER players' winning paths become disclosable too"
+    // test above - this package (FB-4, owner decision 10) extends the same
+    // guarantee to the Stats boards' Today/Yesterday daily view.
+    const fetchImpl = createFetchMock({
+      challenges: [dailyChallenge("challenge-0001", { dailyDate: "2026-07-17" })],
+      boardByChallenge: {
+        "challenge-0001": {
+          placements: [
+            { accountId: "acc-ari", displayName: "Ari", placement: 1, elapsedMs: 20_000, clickCount: 3, runId: "run-ranked" },
+            { accountId: "acc-1", displayName: "Vijay", placement: 2, elapsedMs: 25_000, clickCount: 4, runId: "run-you" },
+          ],
+          dnfs: [],
+        },
+      },
+    });
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={fetchImpl}
+        storage={claimedStorage()}
+        todayUtc={() => "2026-07-17"}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Stats" }));
+    const board = screen.getByRole("region", { name: "Stats" });
+    expect(await within(board).findByText("Ari")).toBeVisible();
+    expect(within(board).queryByText(/paths hidden until you've played/i)).toBeNull();
+
+    const ariRow = screen.getByText("Ari").closest("li");
+    expect(ariRow).not.toBeNull();
+    expect(runPathCalls(fetchImpl, "run-ranked")).toBe(0);
+    await user.click(within(ariRow as HTMLElement).getByText("View winning path"));
+    expect((await within(ariRow as HTMLElement).findAllByText(/apple → fruit/i)).length).toBeGreaterThan(0);
+    expect(runPathCalls(fetchImpl, "run-ranked")).toBe(1);
   });
 
   it("shows a Race CTA on Today when the viewer hasn't finished, wired to the pre-race preview", async () => {
