@@ -3587,6 +3587,32 @@ describe("Boards v1: Today/Yesterday daily views (Increment 3)", () => {
     expect(within(board).getByRole("tab", { name: "Today" })).toHaveAttribute("aria-selected", "true");
   });
 
+  it("scrolls the newly active segment into view on selection (Bug B: keeps Lifetime tap-reachable once the control scrolls horizontally on narrow widths)", async () => {
+    const scrollIntoViewSpy = vi.fn();
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoViewSpy;
+    try {
+      const user = userEvent.setup();
+      render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={claimedStorage()} />);
+
+      await user.click(await screen.findByRole("button", { name: "Boards" }));
+      const board = screen.getByRole("region", { name: "Boards" });
+      scrollIntoViewSpy.mockClear(); // drop the mount-time call for the default "Today" segment
+
+      await user.click(within(board).getByRole("tab", { name: "Lifetime" }));
+
+      expect(scrollIntoViewSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ block: "nearest", inline: "nearest" }),
+      );
+      // Called on the Lifetime button itself, not some other tab.
+      expect(scrollIntoViewSpy.mock.instances[0]).toBe(
+        within(board).getByRole("tab", { name: "Lifetime" }),
+      );
+    } finally {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
   it("shows today's deduped board - rank, name, time·clicks - and highlights the viewer's own row", async () => {
     const fetchImpl = createFetchMock({
       challenges: [twoChallenges()[0]],

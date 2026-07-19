@@ -790,12 +790,28 @@ h1 {
 
 /* Boards v1 (Increment 3): the [Today][Yesterday] segmented control - reuses
    `.bottom-nav`'s pill-toggle look (44px targets, coral active state)
-   rather than inventing a second tabbar pattern. */
+   rather than inventing a second tabbar pattern.
+   Bug B fix: with all 5 segments (Today/Yesterday/7d/30d/Lifetime, real
+   words - no abbreviating "Lifetime") the row's content width exceeds a
+   ~390px phone's container, so it's made horizontally scrollable instead
+   of compressed - segments keep their intrinsic width/44px tap target
+   (grid-auto-flow: column already sizes tracks to content, so nothing
+   shrinks) and the container scrolls. Harmless at wider widths where all 5
+   already fit (nothing to scroll). Scrollbar chrome hidden since the pill
+   styling + edge fade (mobile media query below) are the affordance. */
 .board-segment-control {
   display: grid;
   grid-auto-flow: column;
   gap: 6px;
   margin-bottom: 14px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.board-segment-control::-webkit-scrollbar {
+  display: none;
 }
 
 .board-segment-control button {
@@ -803,6 +819,8 @@ h1 {
   background: var(--ink-soft);
   color: #9fb8bd;
   font-weight: 850;
+  white-space: nowrap;
+  scroll-snap-align: start;
 }
 
 .board-segment-control button.active {
@@ -869,11 +887,28 @@ h1 {
   font-size: 0.8rem;
 }
 
-.board-trend-unranked li {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
+/* Bug A fix: this section carries both `.board-snippet` (panel chrome) and
+   `.board-trend-unranked` - but `.board-snippet li` (below) is a 3-column
+   rank/name/score grid built for `BoardSnippet.tsx`'s ranked rows, and at
+   equal specificity it was winning the cascade over this 2-column rule
+   (name/count, no rank), squeezing the name into a ~2.4em rank-sized
+   column with `overflow: visible` and letting long names bleed into the
+   "N/M dailies" text. The compound selector raises specificity so this
+   rule always wins here regardless of source order, and `minmax(0, 1fr)`
+   lets the name column actually shrink so its ellipsis can engage instead
+   of overflowing onto the sibling. */
+.board-snippet.board-trend-unranked li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
   font-size: 0.85rem;
+}
+
+.board-snippet.board-trend-unranked li > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* F3: the ▲/▼/– trend arrow next to a ranked row's avg placement - stays
@@ -952,15 +987,26 @@ h1 {
     max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
 }
 
+/* Bug C fix: `.race-hud` used to be a wrapping flex row, so End Run sat
+   next to the status text until `.run-metrics` mounted (session ready) and
+   no longer fit on one line - at that instant the button jumped down onto
+   its own wrapped line, landing right on top of the breadcrumb's target
+   chip for a frame before settling. A grid with named areas pins End Run
+   to a fixed top-right cell from first paint: it never moves, whether or
+   not `.run-metrics` (or the status text) is present - only the metrics
+   row's height appears/disappears underneath it, which is an ordinary
+   height change, not a reposition. */
 .race-hud {
   position: sticky;
   top: 0;
   z-index: 5;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "status endrun"
+    "metrics metrics";
   gap: 10px 16px;
   align-items: center;
-  justify-content: space-between;
   border: 1px solid var(--line);
   background: rgba(6, 16, 20, 0.96);
   padding: 9px 14px;
@@ -970,12 +1016,16 @@ h1 {
 }
 
 .race-hud-status {
+  grid-area: status;
   min-width: 0;
-  flex: 1 1 auto;
 }
 
 .race-hud .run-metrics {
-  flex: 0 0 auto;
+  grid-area: metrics;
+}
+
+.race-hud .end-run-button {
+  grid-area: endrun;
 }
 
 .race-mode,
@@ -2217,6 +2267,15 @@ h1 {
 @media (max-width: 640px) {
   .daily-target-preview > button {
     min-height: 44px;
+  }
+
+  /* Bug B: at this width the 5 segments realistically overflow (see the
+     base-rule comment) - snap + a subtle right-edge fade hint that there's
+     more to scroll, without a scroll-position-aware script. */
+  .board-segment-control {
+    scroll-snap-type: x proximity;
+    mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
   }
 
   h1 {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { dailyDateForChallenge, previousCentralDate } from "../domain/challengeSelection";
 import { dailyFlavorLabel } from "../domain/dailyEditorial";
 import { formatTimeAndClicks } from "../domain/formatting";
@@ -100,6 +100,22 @@ export default function Boards({
   todayCentral: string;
 }) {
   const [segment, setSegment] = useState<BoardsSegment>(initialSegment);
+  // Bug B: the segment control scrolls horizontally on narrow widths (see
+  // styles.css) rather than compressing labels, which means a segment
+  // picked programmatically (initialSegment deep-link) or by tap can start
+  // out scrolled offscreen. Keep the active tab reachable/visible by
+  // scrolling it into view whenever the active segment changes.
+  const segmentButtonRefs = useRef<Partial<Record<BoardsSegment, HTMLButtonElement | null>>>({});
+  useEffect(() => {
+    // Optional-chained on the method itself, not just the element: jsdom
+    // (this repo's test environment) doesn't implement scrollIntoView at
+    // all, and some older/embedded browsers omit it too.
+    segmentButtonRefs.current[segment]?.scrollIntoView?.({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [segment]);
   const [board, setBoard] = useState<ChallengeBoardResponse>(EMPTY_BOARD);
   const [trends, setTrends] = useState<BoardsTrendsResponse | null>(null);
   // F6: a failed trends fetch is its own state, distinct from "still
@@ -275,6 +291,9 @@ export default function Boards({
             className={segment === key ? "active" : undefined}
             key={key}
             onClick={() => setSegment(key)}
+            ref={(el) => {
+              segmentButtonRefs.current[key] = el;
+            }}
             role="tab"
             type="button"
           >
