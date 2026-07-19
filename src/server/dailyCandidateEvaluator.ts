@@ -1,6 +1,7 @@
 import { isAllowedArticleHref, normalizeTitle, parseWikipediaArticleInput } from "../domain/rules";
 import type { DailyFlavor } from "../domain/dailyEditorial";
 import type { WikipediaGateway } from "../services/wikipediaGateway";
+import { WIKIMEDIA_API_USER_AGENT } from "../services/wikipediaGateway";
 import {
   compareScoredDailyCandidates,
   scoreDailyCandidate,
@@ -9,8 +10,11 @@ import {
 } from "./dailyCandidateScoring";
 import {
   createEditorialTargetPools,
+  EditorialTargetPoolError,
+  type EditorialSourceDiagnostic,
   type EditorialTarget,
 } from "./editorialTargetPools";
+import { staticFallbackTargets } from "./dailyStaticFallbackTargets";
 
 const DEFAULT_ENDPOINT = "https://en.wikipedia.org/w/api.php";
 const DEFAULT_PAGEVIEWS_ENDPOINT = "https://wikimedia.org/api/rest_v1";
@@ -19,8 +23,10 @@ const PHASE_TIMEOUT_MS = 25_000;
 const MAX_TARGETS = 10;
 const MAX_STARTS = 3;
 const PROXY_BATCH_SIZE = 50;
-const USER_AGENT =
-  "VWikiRaceDailyBot/0.0 (https://vwikirace.pages.dev; https://github.com/theonenonlyvj/vwiki-race)";
+// Single canonical UA (also used by editorialTargetPools.ts and the
+// gateway/validator) so Wikimedia robot-policy compliance only needs
+// verifying in one place.
+const USER_AGENT = WIKIMEDIA_API_USER_AGENT;
 
 export interface DailyChallengeCandidate {
   startTitle: string;
@@ -55,6 +61,8 @@ export class DailyChallengeCandidateError extends Error {
 }
 
 export type DailyChallengeDiagnosticEvent =
+  | "editorial_pool_source_failed"
+  | "editorial_pool_fallback_used"
   | "random_bad_status"
   | "random_invalid_payload"
   | "random_request_failed"
@@ -93,6 +101,9 @@ export function createDailyCandidateEvaluator(options: {
       if (!budget) throw new Error("Editorial pool requests require an evaluator budget.");
       return budget.fetch(input, init);
     },
+    onDiagnostic: (sources) => {
+      for (const source of sources) diagnostic("editorial_pool_source_failed", editorialSourceFields(source));
+    },
   });
 
   return {
@@ -121,8 +132,26 @@ export function createDailyCandidateEvaluator(options: {
 
       try {
         budget.assertActive();
+        // Resilience ladder rung 3: fresh fetch, then the pool's own 7-day
+        // stale cache (handled inside targetPools.list), then this
+        // worker-bundled curated fallback. Only a genuine
+        // EditorialTargetPoolError (both of the first two rungs exhausted)
+        // reaches here - aborts/timeouts propagate past this catch
+        // unchanged, still surfacing as daily_candidate_timeout below.
+        let editorialTargets: readonly EditorialTarget[];
+        try {
+          editorialTargets = await targetPools.list(request.flavor, phase.signal);
+        } catch (caught) {
+          if (!(caught instanceof EditorialTargetPoolError)) throw caught;
+          editorialTargets = staticFallbackTargets(request.flavor);
+          diagnostic("editorial_pool_fallback_used", {
+            dailyDate: request.dailyDate,
+            flavor: request.flavor,
+            fallbackCount: editorialTargets.length,
+          });
+        }
         const sampledTargets = stableSample(
-          (await targetPools.list(request.flavor, phase.signal)).filter(isUsableEditorialTarget),
+          editorialTargets.filter(isUsableEditorialTarget),
           MAX_TARGETS,
           `${request.dailyDate}:${request.flavor}:editorial-v1`,
         );
@@ -728,4 +757,20 @@ function diagnosticErrorDetail(caught: unknown): string {
       .slice(0, 128);
   }
   return "unavailable";
+}
+
+/**
+ * Flattens one editorial-pool source outcome into diagnostic-channel fields
+ * (which must be plain string/number/boolean). `0`/`""`/`-1` are sentinels
+ * for "no HTTP response" / "no fetch error" / "never parsed" respectively -
+ * distinguishable from real values (a real status is >= 100, a real entry
+ * count is >= 0).
+ */
+function editorialSourceFields(source: EditorialSourceDiagnostic): Record<string, string | number | boolean> {
+  return {
+    url: source.url,
+    status: source.status ?? 0,
+    errorCode: source.errorCode ?? "",
+    entryCount: source.entryCount ?? -1,
+  };
 }

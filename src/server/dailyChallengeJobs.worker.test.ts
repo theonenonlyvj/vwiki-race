@@ -184,7 +184,7 @@ describe("daily challenge D1 jobs", () => {
     expect(daily.label).toBe("Challenge #6");
   });
 
-  it("keeps late UTC dates in the durable backlog with bounded retry backoff", async () => {
+  it("keeps late UTC dates in the durable backlog with bounded, 60-minute-capped retry backoff", async () => {
     const clock = { now: "2026-07-16T00:00:00.000Z" };
     const repository = createD1TrackingRepository({
       db: env.VWIKI_RACE_DB,
@@ -198,15 +198,41 @@ describe("daily challenge D1 jobs", () => {
       "SELECT status, next_attempt_at FROM daily_challenge_jobs WHERE daily_date = '2026-07-14'",
     ).first()).resolves.toEqual({
       status: "pending",
-      next_attempt_at: "2026-07-16T01:00:00.000Z",
+      next_attempt_at: "2026-07-16T00:15:00.000Z",
     });
 
-    clock.now = "2026-07-16T01:00:00.000Z";
+    clock.now = "2026-07-16T00:15:00.000Z";
     const second = await repository.claimDueDailyChallengeJob();
     await repository.failDailyChallengeJob(second!, "daily_candidate_timeout");
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT next_attempt_at FROM daily_challenge_jobs WHERE daily_date = '2026-07-14'",
-    ).first()).resolves.toEqual({ next_attempt_at: "2026-07-16T03:00:00.000Z" });
+    ).first()).resolves.toEqual({ next_attempt_at: "2026-07-16T00:45:00.000Z" });
+
+    clock.now = "2026-07-16T00:45:00.000Z";
+    const third = await repository.claimDueDailyChallengeJob();
+    await repository.failDailyChallengeJob(third!, "daily_candidate_unavailable");
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT next_attempt_at FROM daily_challenge_jobs WHERE daily_date = '2026-07-14'",
+    ).first()).resolves.toEqual({ next_attempt_at: "2026-07-16T01:30:00.000Z" });
+
+    // 2026-07-18 incident: by the 4th consecutive failure, the old [1,2,4,6]
+    // hour ladder had already grown to 6 hours and jumped past the next
+    // day's 5:00 AM Central drop. Every subsequent attempt must now stay
+    // capped at 60 minutes so the hourly retry trigger always sees this job
+    // due again within the hour, no matter how many times it has failed.
+    clock.now = "2026-07-16T01:30:00.000Z";
+    const fourth = await repository.claimDueDailyChallengeJob();
+    await repository.failDailyChallengeJob(fourth!, "daily_candidate_unavailable");
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT next_attempt_at FROM daily_challenge_jobs WHERE daily_date = '2026-07-14'",
+    ).first()).resolves.toEqual({ next_attempt_at: "2026-07-16T02:30:00.000Z" });
+
+    clock.now = "2026-07-16T02:30:00.000Z";
+    const fifth = await repository.claimDueDailyChallengeJob();
+    await repository.failDailyChallengeJob(fifth!, "daily_candidate_unavailable");
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT next_attempt_at FROM daily_challenge_jobs WHERE daily_date = '2026-07-14'",
+    ).first()).resolves.toEqual({ next_attempt_at: "2026-07-16T03:30:00.000Z" });
   });
 
   it("creates the Central scheduled-date job and lets only the lease winner fetch Wikipedia", async () => {

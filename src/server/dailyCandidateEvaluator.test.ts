@@ -367,6 +367,50 @@ describe("daily candidate evaluator", () => {
     });
   });
 
+  it("falls back to the curated static target list when the editorial pool totally fails, and still produces a candidate (PKG-13, 2026-07-19 incident)", async () => {
+    const onDiagnostic = vi.fn();
+    let randomIndex = 0;
+    const starts = ["Start one", "Start two", "Start three"];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (isEditorialPoolUrl(url)) {
+        // Simulate the incident: every editorial source page fails to load.
+        return new Response("service unavailable", { status: 503 });
+      }
+      if (url.pathname.includes("/metrics/pageviews/")) return pageviewsResponse();
+      if (url.searchParams.get("generator") === "random") {
+        const start = starts[randomIndex] ?? "Start three";
+        randomIndex += 1;
+        return randomResponse({ pageid: 100 + randomIndex, title: start });
+      }
+      if (url.searchParams.get("prop") === "info|pageprops|extracts|pageimages|categories") {
+        const requestedTitles = url.searchParams.get("titles")?.split("|") ?? [];
+        return fallbackMetadataResponse(requestedTitles);
+      }
+      if (url.searchParams.get("prop") === "links") return linksResponse(null);
+      throw new Error(`Unexpected Wikimedia request: ${url}`);
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+      onDiagnostic,
+    });
+
+    const result = await evaluator.findCandidate({ dailyDate: "2026-07-17", flavor: "recognizable" });
+
+    expect(result.startTitle).toMatch(/^Start (one|two|three)$/);
+    expect(result.targetTitle).toBeTruthy();
+    expect(onDiagnostic).toHaveBeenCalledWith(
+      "editorial_pool_source_failed",
+      expect.objectContaining({ status: 503 }),
+    );
+    expect(onDiagnostic).toHaveBeenCalledWith(
+      "editorial_pool_fallback_used",
+      expect.objectContaining({ dailyDate: "2026-07-17", flavor: "recognizable" }),
+    );
+  });
+
   it("returns the chosen flavor score and emits exact bounded selection metrics", async () => {
     const onDiagnostic = vi.fn();
     const evaluator = createDailyCandidateEvaluator({
@@ -489,6 +533,28 @@ function metadataResponse(entries: readonly EditorialTarget[]): Response {
         pageid: entry.pageId,
         ns: 0,
         title: `${entry.title} canonical`,
+        length: 2_000,
+        extract: lead,
+        thumbnail: { source: "https://upload.wikimedia.org/example.jpg" },
+        categories: [{ title: "Category:Examples" }],
+      })),
+    },
+  }), { headers: { "Content-Type": "application/json" } });
+}
+
+/**
+ * Like metadataResponse, but for the static-fallback-target path: those
+ * targets carry no pageId, so matching happens by (unmodified) title -
+ * unlike metadataResponse's synthetic " canonical" suffix, which relies on
+ * the normal path's pageId-keyed match instead.
+ */
+function fallbackMetadataResponse(titles: readonly string[]): Response {
+  return new Response(JSON.stringify({
+    query: {
+      pages: titles.map((title, index) => ({
+        pageid: index + 1,
+        ns: 0,
+        title,
         length: 2_000,
         extract: lead,
         thumbnail: { source: "https://upload.wikimedia.org/example.jpg" },

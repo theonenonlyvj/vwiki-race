@@ -29,6 +29,26 @@ const unusualHtml = `
     <dt><a href="/wiki/Bad_ID" data-pageid="-5">Bad ID</a></dt>
   </dl></main>`;
 
+// The live Wikipedia:Unusual_articles page switched from <dl>/<dt> entries
+// to two-column <table class="wikitable"> rows around 2026-07 - the change
+// silently zeroed out parseUnusualEntries() and broke the whole daily
+// pipeline on 2026-07-18 (PKG-13). Mirrors unusualHtml's entries/edge cases
+// so both layouts are held to the same expectations.
+const unusualTableHtml = `
+  <main id="mw-content-text">
+    <table class="wikitable"><tbody>
+      <tr><th>Article</th><th>Description</th></tr>
+      <tr><td><b><a href="/wiki/Null_Island" data-page-id="123">Null Island</a></b></td>
+          <td>Explanatory copy <a href="/wiki/Ignore_me">Ignore me</a></td></tr>
+      <tr><td><b><a href="/wiki/Template:Odd">template</a> <a href="/wiki/Gravity_hill" data-mw='{"pageId":456}'>Gravity hill</a></b></td>
+          <td>desc</td></tr>
+      <tr><td><b><a href="/wiki/Null_Island">Duplicate</a></b></td><td>desc</td></tr>
+      <tr><td><b><a href="/wiki/History_of_foo#Edit">fragment</a></b></td><td>desc</td></tr>
+      <tr><td><b><a href="/w/index.php?title=Edit_me&action=edit">edit</a></b></td><td>desc</td></tr>
+      <tr><td><b><a href="/wiki/Bad_ID" data-pageid="-5">Bad ID</a></b></td><td>desc</td></tr>
+    </tbody></table>
+  </main>`;
+
 describe("editorial target-pool parsers", () => {
   it("extracts only unique mainspace Vital entry links and preserves valid supplied page IDs", () => {
     expect(parseVitalEntries(vitalHtml, 1)).toEqual([
@@ -38,6 +58,14 @@ describe("editorial target-pool parsers", () => {
 
   it("extracts the first valid mainspace link from each Unusual term", () => {
     expect(parseUnusualEntries(unusualHtml)).toEqual([
+      { title: "Null Island", pageId: 123, source: "unusual" },
+      { title: "Gravity hill", pageId: 456, source: "unusual" },
+      { title: "Bad ID", source: "unusual" },
+    ]);
+  });
+
+  it("extracts the first valid mainspace link from each Unusual wikitable row, ignoring header rows and description-cell links", () => {
+    expect(parseUnusualEntries(unusualTableHtml)).toEqual([
       { title: "Null Island", pageId: 123, source: "unusual" },
       { title: "Gravity hill", pageId: 456, source: "unusual" },
       { title: "Bad ID", source: "unusual" },
@@ -88,6 +116,30 @@ describe("editorial target pools", () => {
       fetchImpl: vi.fn(async () => new Response("<main>no entries</main>")),
     });
     await expect(fresh.list("weird")).rejects.toBeInstanceOf(EditorialTargetPoolError);
+  });
+
+  it("names every source's status/error/entry-count on a total pool failure (PKG-13 diagnostics)", async () => {
+    const onDiagnostic = vi.fn();
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (url.includes("Level/1")) return new Response(vitalFor(1));
+      if (url.includes("Level/2")) return new Response("service unavailable", { status: 503 });
+      if (url.includes("Level/3")) return new Response(vitalFor(3));
+      throw new TypeError("offline");
+    });
+    const pools = createEditorialTargetPools({ fetchImpl: fetchImpl as unknown as typeof fetch, onDiagnostic });
+
+    const caught = await pools.list("recognizable").catch((error: unknown) => error);
+
+    expect(caught).toBeInstanceOf(EditorialTargetPoolError);
+    const expectedSources = [
+      { url: expect.stringContaining("Level/1"), status: 200, errorCode: null, entryCount: 1 },
+      { url: expect.stringContaining("Level/2"), status: 503, errorCode: null, entryCount: null },
+      { url: expect.stringContaining("Level/3"), status: 200, errorCode: null, entryCount: 1 },
+      { url: expect.stringContaining("Unusual"), status: null, errorCode: "TypeError", entryCount: null },
+    ];
+    expect((caught as InstanceType<typeof EditorialTargetPoolError>).sources).toEqual(expectedSources);
+    expect(onDiagnostic).toHaveBeenCalledTimes(1);
+    expect(onDiagnostic).toHaveBeenCalledWith(expectedSources);
   });
 
   it("propagates caller aborts and does not return stale data for an aborted request", async () => {

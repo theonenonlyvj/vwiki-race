@@ -123,7 +123,7 @@ export function createD1TrackingRepository(options: {
       const normalized = normalizeDailyJob(job);
       const at = timestamp();
       const nextAttemptAt = new Date(
-        Date.parse(at) + dailyRetryHours(normalized.attemptCount) * 60 * 60 * 1000,
+        Date.parse(at) + dailyRetryMinutes(normalized.attemptCount) * 60 * 1000,
       ).toISOString();
       await db.prepare(
         `UPDATE daily_challenge_jobs
@@ -4956,8 +4956,19 @@ async function releaseRandomChallengeLock(
     .run();
 }
 
-function dailyRetryHours(attemptCount: number): number {
-  return [1, 2, 4, 6][Math.min(Math.max(attemptCount - 1, 0), 3)] ?? 6;
+/**
+ * PKG-13: the 2026-07-18 incident's backoff reached 6h and jumped past the
+ * next day's 5:00 AM Central drop, leaving the daily unattempted for hours.
+ * Graduated but hard-capped at 60 minutes so the hourly `17 * * * *` retry
+ * trigger always sees a due job again within the hour, regardless of how
+ * many times a daily has already failed (attempt_count keeps growing for
+ * observability - only the backoff window itself is capped).
+ */
+const MAX_DAILY_RETRY_MINUTES = 60;
+
+function dailyRetryMinutes(attemptCount: number): number {
+  const minutes = [15, 30, 45, 60][Math.min(Math.max(attemptCount - 1, 0), 3)] ?? MAX_DAILY_RETRY_MINUTES;
+  return Math.min(minutes, MAX_DAILY_RETRY_MINUTES);
 }
 
 function redactDailyFailureCode(value: string): string {
