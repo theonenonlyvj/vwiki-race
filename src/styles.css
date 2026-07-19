@@ -401,11 +401,29 @@ h1 {
 .run-metrics dt,
 .article-heading span,
 .empty-state span {
-  color: var(--muted);
   font-size: 0.72rem;
   font-weight: 850;
   letter-spacing: 0;
   text-transform: uppercase;
+}
+
+/* PKG-02: `.article-heading span` used to share `--muted` (#9fb8bd) with
+   the four dark-surface selectors above - fine on `--ink`, but
+   `.article-heading` itself sits on the light Wikipedia-style article card
+   (#fff, see below), where #9fb8bd measures ~2.1:1 and fails WCAG AA. Every
+   other selector in that group stays on --muted; this one gets its own
+   dark, light-card-appropriate color instead - reusing `.attribution`'s
+   already-in-file Wikipedia-gray (#54595d), which clears AA comfortably on
+   white. */
+.challenge-route span,
+.name-control span,
+.run-metrics dt,
+.empty-state span {
+  color: var(--muted);
+}
+
+.article-heading span {
+  color: #54595d;
 }
 
 .challenge-route strong {

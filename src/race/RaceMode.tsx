@@ -7,11 +7,11 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from "react";
+import { formatTimeAndClicks } from "../domain/formatting";
 import type { GameSession } from "../domain/gameSession";
 import { compressPathForStrip } from "../domain/pathCompression";
 import type { Article } from "../domain/types";
 import type { TargetPreviewState } from "../hooks/useTargetPreview";
-import { formatElapsed } from "./shared";
 
 /**
  * Beat 2 of the race flow: the active-race takeover. Slim HUD (timer +
@@ -91,18 +91,16 @@ export default function RaceMode({
           ) : null}
         </div>
         {session ? (
+          // PKG-02: was three chips (Clicks/Timer/Target), one per `dl`
+          // entry - collapsed to a single always-visible "0:14 · 3 clk"
+          // chip using the same time+clicks formatter every other
+          // run-summary in the app uses (invariant 1). Target dropped here
+          // since PathStrip's own "Target ▾" disclosure just below already
+          // shows it - this was a literal on-screen duplicate.
           <dl className="run-metrics" aria-label="Current run">
             <div>
-              <dt>Clicks</dt>
-              <dd>{session.clicks}</dd>
-            </div>
-            <div>
-              <dt>Timer</dt>
-              <dd>{formatElapsed(elapsedMs)}</dd>
-            </div>
-            <div>
-              <dt>Target</dt>
-              <dd>{session.challenge.target.title}</dd>
+              <dt>Run</dt>
+              <dd>{formatTimeAndClicks(elapsedMs, session.clicks)}</dd>
             </div>
           </dl>
         ) : null}

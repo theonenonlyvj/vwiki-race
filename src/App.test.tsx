@@ -970,7 +970,7 @@ describe("VWiki Race app", () => {
     expect(screen.getByRole("dialog", { name: /end this run/i })).toBeVisible();
   });
 
-  it("shows Timer in active run metrics and freezes it throughout syncing and completion", async () => {
+  it("shows the always-visible time+clicks HUD row and freezes it throughout syncing and completion", async () => {
     let now = 1_000;
     const fruitArticle = createDeferredResponse(fruitParseResponse);
     const fetchImpl = createFetchMock({ delayedFruitArticle: fruitArticle.promise });
@@ -987,20 +987,55 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
     const metrics = screen.getByLabelText(/current run/i);
-    const timer = within(metrics).getByText("Timer").nextElementSibling;
-    expect(timer).toHaveTextContent("0.0s");
+    // PKG-02: was three chips (Clicks/Timer/Target) - collapsed to one
+    // "Run" chip carrying the same invariant-1 `formatTimeAndClicks` string
+    // ("0:00 · 0 clk") everywhere else a run's time+clicks appear.
+    const runMetric = within(metrics).getByText("Run").nextElementSibling;
+    expect(runMetric).toHaveTextContent("0:00 · 0 clk");
 
     now = 2_500;
     await user.click(await screen.findByRole("link", { name: /fruit/i }));
     expect(await screen.findByText(/opening fruit/i)).toBeVisible();
-    await waitFor(() => expect(timer).toHaveTextContent("1.5s"));
+    await waitFor(() => expect(runMetric).toHaveTextContent("0:01 · 0 clk"));
     now = 9_000;
     await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(timer).toHaveTextContent("1.5s");
+    expect(runMetric).toHaveTextContent("0:01 · 0 clk");
 
     fruitArticle.resolve();
     expect(await screen.findByText(/you reached it/i)).toBeVisible();
-    expect(timer).toHaveTextContent("1.5s");
+    expect(runMetric).toHaveTextContent("0:01 · 0 clk");
+  });
+
+  it("keeps the HUD's time+clicks chip visible, non-empty, and updated with the real click count throughout an active run (PKG-02 regression guard)", async () => {
+    // Council 2026-07-19 PKG-02: live prod showed an empty grid row where
+    // this chip should be - `.run-metrics` never painted even though its
+    // sibling PathStrip (gated on the same `session` truthy check) did.
+    // Root cause traced to a stale deploy, not a code defect (see PKG-02
+    // brief), but nothing previously asserted this chip's actual on-screen
+    // text - so a real future regression here could land silently. This
+    // locks in: present immediately at Start, non-empty, and reflects both
+    // time and click count (invariant 1) throughout an active run.
+    const fetchImpl = createFetchMock({ clickStaysActive: true });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+
+    const metrics = screen.getByLabelText(/current run/i);
+    expect(metrics).toBeVisible();
+    const runValue = () => within(metrics).getByText("Run").nextElementSibling;
+    expect(runValue()).not.toBeEmptyDOMElement();
+    expect(runValue()).toHaveTextContent(/^\d+:\d{2} · 0 clk$/);
+
+    await user.click(await screen.findByRole("link", { name: /apple tree/i }));
+    await screen.findByRole("heading", { name: "Apple tree" });
+
+    // Still mounted, still non-empty, and the click count moved from 0 to
+    // 1 - proof the HUD isn't just present but wired to the real session.
+    expect(metrics).toBeVisible();
+    expect(runValue()).not.toBeEmptyDOMElement();
+    expect(runValue()).toHaveTextContent(/^\d+:\d{2} · 1 clk$/);
   });
 
   it("keeps playable article nodes connected while the timer updates", async () => {
@@ -3228,9 +3263,9 @@ describe("Race flow: full-screen takeover", () => {
     await screen.findByRole("heading", { name: "Apple tree" });
 
     const metrics = screen.getByLabelText(/current run/i);
-    const timer = within(metrics).getByText("Timer").nextElementSibling;
+    const runMetric = within(metrics).getByText("Run").nextElementSibling;
     now = 9_000;
-    await waitFor(() => expect(timer).toHaveTextContent("8.0s"));
+    await waitFor(() => expect(runMetric).toHaveTextContent("0:08 · 1 clk"));
 
     await user.click(screen.getByRole("button", { name: /^end run$/i }));
     const dialog = await screen.findByRole("dialog", { name: /end this run/i });
@@ -3273,9 +3308,9 @@ describe("Race flow: full-screen takeover", () => {
     await screen.findByRole("heading", { name: "Apple tree" });
 
     const metrics = screen.getByLabelText(/current run/i);
-    const timer = within(metrics).getByText("Timer").nextElementSibling;
+    const runMetric = within(metrics).getByText("Run").nextElementSibling;
     now = 9_000;
-    await waitFor(() => expect(timer).toHaveTextContent("8.0s"));
+    await waitFor(() => expect(runMetric).toHaveTextContent("0:08 · 1 clk"));
 
     await user.click(screen.getByRole("button", { name: /^end run$/i }));
     const dialog = await screen.findByRole("dialog", { name: /end this run/i });
