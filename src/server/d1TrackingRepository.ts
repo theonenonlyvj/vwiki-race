@@ -2731,50 +2731,24 @@ export function createD1TrackingRepository(options: {
     },
 
     async getPublicRunPath(runId, viewerAccountInput) {
-      // FB-4 (council 2026-07-19 owner decision 10, "path comparison"):
-      // `viewerAccountInput` is optional so the pre-migration legacy
-      // `/api/runs/{runId}/path` route (worker.ts's `handleLegacyApi`,
-      // still served for any surviving old cached client) keeps its
-      // long-standing fully-public behavior unchanged - no viewer, no
-      // guard, same query as before this fix. The current `/api/v2/...`
-      // route ALWAYS supplies a viewer now (see worker.ts) - board-visible
+      // FB-4 (council 2026-07-19 owner decision 10, "path comparison";
+      // review fix): `viewerAccountInput` is required - board-visible
       // `ChallengeBoardPlacement.runId` rows (PKG-03 remainder fix) turned
       // "know a runId" into "browse a totally public, unauthenticated
       // board and copy anyone's runId," so client-side `pathsUnlocked`
       // gating alone is no longer a real access boundary (invariant 5:
       // "paths stay hidden until you've played" - not "until the browser
-      // decides not to ask"). When a viewer IS supplied, this enforces
-      // server-side that the viewer has an eligible completed run on the
-      // SAME challenge as the target run (own run or not) before
-      // disclosing anything - a guard failure collapses into the exact
-      // same generic `run_path_not_found` 404 as a genuinely missing/
-      // ineligible run, so the error itself never reveals which case
-      // occurred (matches this endpoint's pre-existing anti-enumeration
-      // shape for board-excluded/private runs, below).
-      if (!viewerAccountInput) {
-        const { results } = await db.prepare(
-          `SELECT p.step_number, p.source_title, p.clicked_anchor_text,
-                  p.destination_title, p.destination_page_id,
-                  p.elapsed_since_start_ms, p.created_at
-           FROM run_path_steps p
-           JOIN runs r ON r.id = p.run_id
-           WHERE r.id = ? AND r.board_excluded = 0 AND (
-             (r.status = 'completed' AND r.elapsed_ms IS NOT NULL
-               AND r.completed_at IS NOT NULL AND (
-                 (r.protocol_version = 2 AND r.ranked_eligible = 1)
-                 OR r.protocol_version = 1
-               ))
-             OR (r.status = 'abandoned' AND r.click_count > 0
-               AND r.abandoned_at IS NOT NULL)
-           )
-           ORDER BY p.step_number`,
-        ).bind(runId).all<PathStepRow>();
-        if (!results.length) {
-          throw new ApiError("run_path_not_found", "That completed ranked run was not found.", 404);
-        }
-        return results.map(mapPathStepRow);
-      }
-
+      // decides not to ask"). This enforces server-side that the viewer
+      // has an eligible completed run on the SAME challenge as the target
+      // run (own run or not) before disclosing anything - a guard failure
+      // collapses into the exact same generic `run_path_not_found` 404 as
+      // a genuinely missing/ineligible run, so the error itself never
+      // reveals which case occurred (matches this endpoint's pre-existing
+      // anti-enumeration shape for board-excluded/private runs, below).
+      // The pre-migration legacy `/api/runs/{runId}/path` route used to
+      // call this with no viewer at all (a straight, unauthenticated
+      // bypass of this exact guard) - it has been retired entirely rather
+      // than gated; see worker.ts.
       const viewer = normalizeAuthorizedAccount(viewerAccountInput);
       const receipt = receiptIdsCte(viewer);
       const { results } = await db.prepare(

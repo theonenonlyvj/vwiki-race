@@ -2975,7 +2975,9 @@ describe("Task 4 D1 projections", () => {
       rank: 4,
       startedAt: "2026-07-14T01:02:00.000Z",
     });
-    await expect(repository.getPublicRunPath("same-dnf")).resolves.toHaveLength(2);
+    // `account` qualifies as viewer via its own eligible completed run on
+    // this challenge ("same-first", above).
+    await expect(repository.getPublicRunPath("same-dnf", account)).resolves.toHaveLength(2);
     expect(rows.some((row) => row.runId === "zero-click-dnf")).toBe(false);
   });
 
@@ -3056,10 +3058,13 @@ describe("Task 4 D1 projections", () => {
     ).run();
     await insertLegacyRun({ id: "private-path-run", accountId: account.accountId });
     const { repository } = fixture();
-    await expect(repository.getPublicRunPath("public-path-run")).resolves.toEqual([
+    // `account` qualifies as viewer via its own eligible completed run
+    // ("public-path-run" itself) - see the FB-4 tests below for the
+    // NON-OWN-run disclosure cases.
+    await expect(repository.getPublicRunPath("public-path-run", account)).resolves.toEqual([
       expect.objectContaining({ destinationTitle: "Gravity", stepNumber: 1 }),
     ]);
-    await expect(repository.getPublicRunPath("private-path-run")).rejects.toMatchObject({
+    await expect(repository.getPublicRunPath("private-path-run", account)).rejects.toMatchObject({
       code: "run_path_not_found", status: 404,
     });
   });
@@ -3079,13 +3084,13 @@ describe("Task 4 D1 projections", () => {
                '2026-07-14T01:00:04.200Z')`,
     ).run();
     const { repository } = fixture();
-    await expect(repository.getPublicRunPath("excluded-path-run")).resolves.toEqual([
+    await expect(repository.getPublicRunPath("excluded-path-run", account)).resolves.toEqual([
       expect.objectContaining({ destinationTitle: "Gravity", stepNumber: 1 }),
     ]);
 
     await repository.setRunBoardExclusion("excluded-path-run", true);
 
-    await expect(repository.getPublicRunPath("excluded-path-run")).rejects.toMatchObject({
+    await expect(repository.getPublicRunPath("excluded-path-run", account)).rejects.toMatchObject({
       code: "run_path_not_found", status: 404,
     });
   });
@@ -3107,7 +3112,7 @@ describe("Task 4 D1 projections", () => {
     ).run();
 
     const { repository } = fixture();
-    await expect(repository.getPublicRunPath("historical-path-run")).resolves.toEqual([
+    await expect(repository.getPublicRunPath("historical-path-run", account)).resolves.toEqual([
       expect.objectContaining({ destinationTitle: "Gravity", stepNumber: 1 }),
     ]);
   });
@@ -3132,7 +3137,7 @@ describe("Task 4 D1 projections", () => {
     ).run();
 
     const { repository } = fixture();
-    await expect(repository.getPublicRunPath("malformed-historical-path"))
+    await expect(repository.getPublicRunPath("malformed-historical-path", account))
       .rejects.toMatchObject({ code: "run_path_not_found", status: 404 });
   });
 
@@ -3271,8 +3276,10 @@ describe("Task 4 D1 projections", () => {
       CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
     };
 
-    // No Authorization header at all - unlike the pre-migration legacy
-    // `/api/runs/{id}/path` route, this one refuses to answer anonymously.
+    // No Authorization header at all - this route refuses to answer
+    // anonymously (the pre-migration legacy `/api/runs/{id}/path` route,
+    // which used to answer anonymously, has been retired entirely - see
+    // the dedicated test below).
     const unauthorized = await worker.fetch(new Request(route), workerEnv);
     expect(unauthorized.status).toBe(401);
     expect(accountReadLimit).not.toHaveBeenCalled();
@@ -3298,6 +3305,51 @@ describe("Task 4 D1 projections", () => {
     await expect(allowed.json()).resolves.toEqual({
       path: [expect.objectContaining({ destinationTitle: "Gravity", stepNumber: 1 })],
     });
+  });
+
+  it("FB-4 review fix: the retired legacy GET /api/runs/{id}/path route no longer answers anonymously (or at all)", async () => {
+    await insertCompletedV2({
+      id: "winner-run",
+      accountId: "other-account",
+      elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO run_path_steps
+         (run_id, step_number, source_title, clicked_anchor_text, destination_title,
+          destination_page_id, elapsed_since_start_ms, created_at)
+       VALUES ('winner-run', 1, 'Moon', 'gravity', 'Gravity', 38579, 4000,
+               '2026-07-14T01:00:04.000Z')`,
+    ).run();
+    const { repository } = fixture();
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: createApiHandlers(repository),
+        identity: {},
+        runProtocol: repository,
+        authorize: vi.fn(async () => {
+          throw new ApiError("unauthorized", "Sign in.", 401);
+        }),
+      } as unknown as WorkerTracking),
+    });
+    const workerEnv = {
+      VWIKI_RACE_DB: env.VWIKI_RACE_DB,
+      VGAMES_URL: "https://vgames.example",
+      CLICK_RATE_LIMITER: { limit: async () => ({ success: true }) },
+      ACCOUNT_READ_RATE_LIMITER: { limit: async () => ({ success: true }) },
+      CHALLENGE_CREATE_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    };
+
+    // The old anonymous, unguarded route - no Authorization header, and
+    // `authorize` above would reject one anyway - must not disclose the
+    // path (PKG-03 board rows publicly carry `runId`, so this was a
+    // straight bypass of the v2 route's viewer-finished guard).
+    const legacy = await worker.fetch(
+      new Request("https://worker.example/api/runs/winner-run/path"),
+      workerEnv,
+    );
+    expect(legacy.status).toBe(404);
+    await expect(legacy.json()).resolves.toMatchObject({ error: { code: "not_found" } });
   });
 
   it("returns an owned active protocol-2 zero-click recovery path through the authenticated rate-limited Worker route", async () => {

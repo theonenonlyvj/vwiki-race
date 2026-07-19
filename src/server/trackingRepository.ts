@@ -338,18 +338,19 @@ export interface RunProtocolRepository extends TrackingRepository {
   ): Promise<ServerPathStep[]>;
   getAccountStats(account: AuthorizedAccount): Promise<AccountStats>;
   /**
-   * FB-4 (council 2026-07-19, owner decision 10): `viewerAccount` is
-   * optional so the pre-migration legacy `/api/runs/{runId}/path` route
-   * keeps its long-standing fully-public behavior (no guard) for any
-   * surviving old cached client; the current `/api/v2/...` route always
-   * supplies a viewer, which enforces server-side that the viewer has an
-   * eligible completed run on the SAME challenge as the target run (own or
-   * not) before disclosing anything - invariant 5, never client-trusted.
-   * See d1TrackingRepository.ts's implementation doc comment.
+   * FB-4 (council 2026-07-19, owner decision 10; review fix): `viewerAccount`
+   * is required - the `/api/v2/...` route always supplies one, which
+   * enforces server-side that the viewer has an eligible completed run on
+   * the SAME challenge as the target run (own or not) before disclosing
+   * anything - invariant 5, never client-trusted. (The pre-migration legacy
+   * `/api/runs/{runId}/path` route, which used to call this with no viewer
+   * at all - a straight bypass of this guard - has been retired entirely;
+   * see worker.ts.) See d1TrackingRepository.ts's implementation doc
+   * comment.
    */
   getPublicRunPath(
     runId: string,
-    viewerAccount?: AuthorizedAccount,
+    viewerAccount: AuthorizedAccount,
   ): Promise<ServerPathStep[]>;
   /**
    * Browse's per-card aggregate (Increment 5, unauthenticated, like

@@ -1107,7 +1107,7 @@ describe("Worker API route versions", () => {
     ).toBe(404);
   });
 
-  it("applies canonical legacy creation, eligible path, and click policies", async () => {
+  it("applies canonical legacy creation and click policies; the retired legacy path GET answers 404", async () => {
     const tracking = fakeWorkerTracking();
     const worker = createWorker({ createTracking: () => tracking });
     const limit = vi.fn(async () => ({ success: true }));
@@ -1136,8 +1136,17 @@ describe("Worker API route versions", () => {
       expect.stringMatching(/^legacy-create:/),
     );
 
-    await worker.fetch(new Request("https://worker.example/api/runs/run-1/path"), env);
-    expect(tracking.runProtocol?.getPublicRunPath).toHaveBeenCalledWith("run-1");
+    // FB-4 review fix (2026-07-19): the legacy GET .../path route used to
+    // serve this unauthenticated with no viewer-finished guard - a
+    // straight bypass of the v2 route's server-side guard (board rows
+    // publicly carry `runId` per PKG-03). It has been retired entirely
+    // rather than gated, since no current client calls it.
+    const legacyPath = await worker.fetch(
+      new Request("https://worker.example/api/runs/run-1/path"), env,
+    );
+    expect(legacyPath.status).toBe(404);
+    await expect(legacyPath.json()).resolves.toMatchObject({ error: { code: "not_found" } });
+    expect(tracking.runProtocol?.getPublicRunPath).not.toHaveBeenCalled();
     expect(tracking.handlers.getRunPath).not.toHaveBeenCalled();
 
     await worker.fetch(new Request("https://worker.example/api/runs/run-1/click", {

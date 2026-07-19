@@ -539,13 +539,16 @@ async function dispatchV2(
       );
     }
     if (request.method === "GET" && action === "path") {
-      // FB-4 (council 2026-07-19, owner decision 10): unlike the legacy
-      // `/api/runs/{runId}/path` route below (still fully public, for any
-      // surviving old cached client), this route now requires a viewer
-      // identity and passes it through to the repository's own
+      // FB-4 (council 2026-07-19, owner decision 10): this route requires a
+      // viewer identity and passes it through to the repository's own
       // viewer-finished guard - see getPublicRunPath's doc comment
       // (trackingRepository.ts) for why client-side `pathsUnlocked` gating
-      // alone stopped being a real access boundary.
+      // alone stopped being a real access boundary. The legacy
+      // `/api/runs/{runId}/path` route (below, in `dispatchLegacy`) has been
+      // retired entirely (review fix) rather than gated - it served the
+      // identical data fully unauthenticated and was a straight bypass of
+      // this guard (board rows publicly carry `runId` per PKG-03), and no
+      // current client ever calls it.
       const account = await tracking.authorize(request);
       await enforceAccountReadRateLimit(env, account.accountId, "path");
       return json(
@@ -680,13 +683,11 @@ async function dispatchLegacy(
   if (runMatch?.[1] && runMatch[2]) {
     const runId = decodeURIComponent(runMatch[1]);
     const action = runMatch[2];
-    if (request.method === "GET" && action === "path") {
-      return json(
-        { path: await protocol(tracking).getPublicRunPath(runId) },
-        undefined,
-        corsHeaders,
-      );
-    }
+    // FB-4 review fix (2026-07-19): the legacy GET .../path route was
+    // retired entirely - it served the same path data with no auth and no
+    // viewer-finished guard, a straight bypass of the v2 route's guard
+    // above. Falls through to the generic 404 below. See the comment on the
+    // v2 `path` route.
     if (request.method === "POST" && action === "click") {
       const account = await tracking.authorize(request);
       await enforceClickRateLimit(env, account.accountId);
