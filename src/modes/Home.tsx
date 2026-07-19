@@ -38,6 +38,17 @@ type DailyState = "not-attempted" | "dnf" | "finished";
  * daily post-drop; YESTERDAY's daily pre-drop (badged honestly, with the
  * 5:00 AM Central drop line - it's still playable); the pre-redesign
  * default-challenge fallback only when the catalog has no daily at all.
+ *
+ * PKG-06 (council 2026-07-19, owner-proxy ruling): pre-play, Home must never
+ * be just the hero card over a void (mockup-home-stateful-v2's "BEFORE"
+ * frame always pairs hero + streak row + a populated recap board). The
+ * recap board below always renders in a pre-play state now - yesterday's
+ * results reusing the already-fetched hero board when the hero itself IS
+ * yesterday's daily (the pre-drop case that used to suppress this card
+ * entirely), or a compact Boards link when the catalog has no prior daily
+ * at all. Explicitly NOT today's live board pre-play even post-drop - the
+ * spec's whole reason for preferring yesterday's board here is "the player
+ * has no stake in today's board yet, and it discourages scouting."
  */
 export default function Home({
   accountStats,
@@ -242,9 +253,19 @@ export default function Home({
         ) : null}
       </div>
 
-      {dailyState !== "finished" ? <StreakTrendRow stats={accountStats} /> : null}
+      {dailyState !== "finished" ? (
+        <StreakTrendRow hasIdentifiedSession={identityAccountId !== null} stats={accountStats} />
+      ) : null}
 
-      {dailyState !== "finished" && yesterdaysDaily && !yesterdayIsHero ? (
+      {/* PKG-06 (council 2026-07-19): Home must never leave the pre-play
+          hero as a bare card over a void (mockup-home-stateful-v2's "BEFORE"
+          frame always pairs the hero with a populated recap board). This
+          used to read `yesterdaysDaily && !yesterdayIsHero`, which suppressed
+          this card exactly in the pre-drop case (FIX 4: hero IS yesterday's
+          daily) - the actual current-prod hollow state. `yesterdayBoard`
+          already resolves to `heroBoardMatches` in that case (see above), so
+          dropping `!yesterdayIsHero` is the whole fix; no new fetch. */}
+      {dailyState !== "finished" && yesterdaysDaily ? (
         <BoardSnippet
           title="Yesterday's results"
           rows={yesterdayBoard ? boardSnippetRowsFromBoard(yesterdayBoard, identityAccountId) : []}
@@ -257,6 +278,26 @@ export default function Home({
             see full board ›
           </button>
         </BoardSnippet>
+      ) : null}
+
+      {/* No prior daily in the catalog at all (e.g. before the first daily
+          ever ran) - still never a bare hero. Deliberately NOT today's board
+          here even when the hero IS today's real daily: the spec's whole
+          reason for preferring yesterday's board pre-play is "the player has
+          no stake in today's board yet, and it discourages scouting" - this
+          fallback keeps that invariant by pointing at Boards instead of
+          leaking today's live standings. */}
+      {dailyState !== "finished" && !yesterdaysDaily ? (
+        <p className="home-boards-fallback muted">
+          No prior daily board yet.{" "}
+          <button
+            className="link-button"
+            onClick={() => onGoToBoards()}
+            type="button"
+          >
+            See Boards ›
+          </button>
+        </p>
       ) : null}
 
       {dailyState === "finished" && myPlacement ? (
@@ -283,7 +324,7 @@ export default function Home({
             suggestion={playAnotherSuggestion}
           />
 
-          <StreakTrendRow stats={accountStats} />
+          <StreakTrendRow hasIdentifiedSession={identityAccountId !== null} stats={accountStats} />
 
           <p className="ritual-line muted">
             New daily drops 5:00 AM Central — come defend your spot.
@@ -310,9 +351,31 @@ export default function Home({
  * has to pick between 3/10/10 depending on the selected window).
  * The whole row still disappears when there's truly nothing to show yet -
  * no streak and zero dailies played, ever (a brand-new account).
+ *
+ * PKG-06 (council 2026-07-19, owner-proxy ruling, Judge A rescope): a guest
+ * with no identified session at all (`stats === null` because there's
+ * nothing to fetch yet, per identity-only-at-Start/Create - invariant 4)
+ * used to render nothing here, contradicting the "streak row (or its empty
+ * state)" acceptance bar for the pre-play guest view. `hasIdentifiedSession`
+ * disambiguates that from the OTHER way `stats` reads null - an identified
+ * account whose stats fetch simply hasn't landed yet or errored - the exact
+ * loaded/pending/errored ambiguity `shouldShowTeachingGate` (teachingGate.ts)
+ * already had to solve for the same reason ("the M1 fix"); only the
+ * genuinely-no-session case gets the static line, never a guess for a
+ * pending fetch.
  */
-function StreakTrendRow({ stats }: { stats: AccountStats | null }) {
-  if (!stats) return null;
+function StreakTrendRow({
+  hasIdentifiedSession,
+  stats,
+}: {
+  hasIdentifiedSession: boolean;
+  stats: AccountStats | null;
+}) {
+  if (!stats) {
+    return hasIdentifiedSession ? null : (
+      <p className="home-streak-trend-row muted">Start your streak today</p>
+    );
+  }
   const { dailyStreak, trend30 } = stats;
   if (dailyStreak <= 0 && !trend30.ranked && trend30.playedCount === 0) return null;
 

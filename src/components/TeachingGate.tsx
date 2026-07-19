@@ -10,6 +10,13 @@ import ModalDialog from "./ModalDialog";
  * parenthetical opens a quick-dismiss popup reusing the app's existing
  * dialog pattern (ModalDialog - the same shell the identity/End Run dialogs
  * use).
+ *
+ * PKG-06 (council 2026-07-19, owner-proxy ruling): the spec's exact one-
+ * liner + popup copy is what ships - NOT the numbered 3-step strip an
+ * earlier, superseded exploratory mockup proposed; that would silently
+ * un-ratify a documented simplification (the spec cuts the rivalry strip
+ * the same way) rather than execute one. The one real, verified gap was the
+ * missing reassurance footer line the spec calls for right under the strip.
  */
 export default function TeachingGate({ pairChallenge }: { pairChallenge: Challenge | null }) {
   const [popupOpen, setPopupOpen] = useState(false);
@@ -29,6 +36,8 @@ export default function TeachingGate({ pairChallenge }: { pairChallenge: Challen
         >
           (how to play)
         </button>
+        <br />
+        No account needed to look around.
       </p>
 
       {popupOpen ? (

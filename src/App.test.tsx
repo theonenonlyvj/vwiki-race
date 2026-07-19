@@ -3645,6 +3645,23 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
     }
   });
 
+  it("PKG-06: the teaching gate strip carries the spec's 'No account needed to look around.' footer line, and it hides along with the strip once accountStats reports a finish", async () => {
+    const fetchImpl = createFetchMock({ challenges: twoChallenges(), accountCompleted: 0 });
+    const view = render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={memoryStorage()} />);
+
+    expect(await screen.findByText(/two articles\. links only\. beat the clock\./i)).toBeVisible();
+    expect(screen.getByText(/no account needed to look around\./i)).toBeVisible();
+    view.unmount();
+    window.history.pushState({}, "", "/");
+
+    const finishedFetch = createFetchMock({ challenges: twoChallenges(), accountCompleted: 1 });
+    render(<App apiOrigin={apiOrigin} fetchImpl={finishedFetch} storage={claimedStorage()} />);
+    await screen.findByRole("button", { name: /▶ race/i });
+    await waitFor(() => expect(
+      screen.queryByText(/no account needed to look around\./i),
+    ).toBeNull());
+  });
+
   it("shows the first-visit teaching gate on Home AND Challenge Detail for a zero-finish account, and hides it once accountStats reports a finish", async () => {
     const fetchImpl = createFetchMock({ challenges: twoChallenges(), accountCompleted: 0 });
     const user = userEvent.setup();
@@ -3850,11 +3867,65 @@ describe("Home board dedup + pre-drop hero (desktop pass, FIX 3/FIX 4)", () => {
     expect(screen.getByText(/yesterday's daily · weird/i)).toBeVisible();
     expect(screen.getByText(/new daily drops 5:00 am central\./i)).toBeVisible();
     expect(screen.getByRole("button", { name: /▶ race/i })).toBeEnabled();
-    // The hero IS yesterday's daily - no duplicate "Yesterday's results"
-    // card underneath repeating the same challenge.
-    expect(screen.queryByRole("region", { name: /yesterday's results/i })).toBeNull();
+    // PKG-06: the hero IS yesterday's daily, so the "Yesterday's results"
+    // recap now reuses the hero's own (already-fetched) board - one card,
+    // not a silent hollow gap where a second, separately-fetched card used
+    // to be suppressed. No board data was seeded for this challenge, so it
+    // reads the shared BoardSnippet empty state, not a duplicate/second
+    // board.
+    const yesterdayCard = screen.getByRole("region", { name: /yesterday's results/i });
+    expect(within(yesterdayCard).getByText(/no completed runs yet\./i)).toBeVisible();
     // And the silent fallback pair must NOT be the hero.
     expect(screen.queryByText(fullTextMatch(/Apple -> Fruit/), { selector: "strong" })).toBeNull();
+  });
+
+  it("PKG-06: pre-drop, a populated hero board renders as the 'Yesterday's results' recap with a single board fetch (reuse, not a duplicate request)", async () => {
+    const yesterdayChallenge = dailyChallenge("challenge-0002", {
+      dailyDate: "2026-07-16",
+      start: "Mars",
+      target: "Water",
+    });
+    const fetchImpl = createFetchMock({
+      challenges: [yesterdayChallenge],
+      boardByChallenge: {
+        "challenge-0002": {
+          placements: [
+            { accountId: "acc-other", displayName: "Ari", placement: 1, elapsedMs: 20_000, clickCount: 3 },
+          ],
+        },
+      },
+    });
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={fetchImpl}
+        storage={claimedStorage()}
+        todayUtc={() => "2026-07-17"}
+      />,
+    );
+
+    const yesterdayCard = await screen.findByRole("region", { name: /yesterday's results/i });
+    expect(within(yesterdayCard).getByText(/ari/i)).toBeVisible();
+    expect(within(yesterdayCard).getByText("#1")).toBeVisible();
+    await waitFor(() => expect(boardCalls(fetchImpl, "challenge-0002")).toBe(1));
+  });
+
+  it("PKG-06: no prior daily in the catalog at all - still never a bare hero, falls back to a compact link to Boards", async () => {
+    const fetchImpl = createFetchMock({ challenges: [twoChallenges()[0]] });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await screen.findByRole("button", { name: /▶ race/i });
+    // Deliberately NOT a "Yesterday's results"/board region - there is no
+    // prior daily to recap, and showing today's own (hero's) live board here
+    // would be scouting (spec: "the player has no stake in today's board
+    // yet, and it discourages scouting").
+    expect(screen.queryByRole("region", { name: /yesterday's results/i })).toBeNull();
+    const seeBoards = screen.getByRole("button", { name: /see boards/i });
+    expect(seeBoards).toBeVisible();
+
+    await user.click(seeBoards);
+    expect(await screen.findByRole("heading", { name: "Boards" })).toBeVisible();
   });
 
   it("post-drop stays unchanged: today's daily heroes with its plain flavor badge and no drop-time line", async () => {
@@ -3965,6 +4036,27 @@ describe("Home v2: guarded streak/trend chip (Increment 4)", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
     await screen.findByRole("button", { name: /▶ race/i });
+    expect(screen.queryByText(/day streak/i)).toBeNull();
+    expect(screen.queryByText(/30-day avg/i)).toBeNull();
+  });
+
+  it("PKG-06: a true guest (no identified session yet - invariant 4, identity only at Start/Create) sees a stats-independent 'Start your streak today' line instead of no row at all", async () => {
+    const fetchImpl = createFetchMock({ challenges: [twoChallenges()[0]] });
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={memoryStorage()} />);
+
+    await screen.findByRole("button", { name: /▶ race/i });
+    expect(screen.getByText(/start your streak today/i)).toBeVisible();
+  });
+
+  it("PKG-06: does NOT show the guest streak line for an identified account whose stats simply haven't loaded yet (the same loaded/pending ambiguity teachingGate.ts already had to disambiguate)", async () => {
+    const fetchImpl = createFetchMock({
+      challenges: [twoChallenges()[0]],
+      delayedAccountStats: new Promise(() => {}),
+    });
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await screen.findByRole("button", { name: /▶ race/i });
+    expect(screen.queryByText(/start your streak today/i)).toBeNull();
     expect(screen.queryByText(/day streak/i)).toBeNull();
     expect(screen.queryByText(/30-day avg/i)).toBeNull();
   });
@@ -4714,6 +4806,12 @@ function createFetchMock(options?: {
   // never-resolving promise instead - models a post-race stats refetch that
   // never comes back, to prove the ritual hook no longer depends on it.
   delayedStatsAfterFirst?: Promise<Response>;
+  // PKG-06: unlike delayedStatsAfterFirst above, this delays the FIRST
+  // (and every) /accounts/me/stats read - models an identified account whose
+  // stats simply haven't landed yet, to prove Home's guest-only streak-row
+  // empty state doesn't fire for this case (the loaded/pending ambiguity
+  // teachingGate.ts already solves the same way for the teaching gate).
+  delayedAccountStats?: Promise<Response>;
   // Increment 4: Home's guarded streak/trend chip and Boards' trend
   // segments.
   accountDailyStreak?: number;
@@ -4910,6 +5008,7 @@ function createFetchMock(options?: {
 
     if (url === "/api/v2/accounts/me/stats") {
       statsReads += 1;
+      if (options?.delayedAccountStats) return options.delayedAccountStats;
       if (options?.statsUnauthorizedAfterFirst && statsReads > 1) {
         return jsonError("unauthorized", "Session expired.", 401);
       }
