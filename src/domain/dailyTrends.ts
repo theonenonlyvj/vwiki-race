@@ -1,4 +1,5 @@
 import { centralDateDaysBefore, centralDateKey } from "./challengeSelection";
+import { centralWallClockEpoch } from "./dailyCountdown";
 
 /**
  * Boards' rolling-trend windows (Increment 4, UX redesign spec §Boards -
@@ -110,5 +111,38 @@ export function partitionChallengesByTrendWindow(
   return {
     ids: inWindow.map((challenge) => challenge.id),
     activeCount: inWindow.filter((challenge) => challenge.isActive).length,
+  };
+}
+
+/**
+ * The UTC-instant bounds of a 7d/30d trend window's Central-date range,
+ * expressed as `created_at`-comparable ISO timestamp strings (FB-10 fixer
+ * pass, code review finding: `listDailyTrends` used to filter its main query
+ * with a per-challenge `IN (?,?,...)` bind list built from `windowedIds` -
+ * the exact "F1 hard fuse" bug class `getAccountDailyStreak` already hit
+ * once, since D1 caps bound parameters at ~100/statement and Miniflare
+ * doesn't enforce that locally. `created_at` is always a
+ * `Date#toISOString()` string (see `d1TrackingRepository.ts`'s
+ * `timestamp()`), so it's lexicographically chronological - a challenge
+ * belongs to the window iff `start <= created_at < end` for the two bounds
+ * this returns, exactly matching `partitionChallengesByTrendWindow`'s
+ * Central-date filter (`createdCentral >= windowStart && createdCentral <=
+ * todayCentral`) without ever building a per-row bind list. `start` is the
+ * UTC instant of Central midnight on the window's first day (inclusive);
+ * `end` is the UTC instant of Central midnight on the day AFTER
+ * `todayCentral` (exclusive), both resolved once via `centralWallClockEpoch`
+ * so DST is handled the same DST-correct way as everywhere else in this
+ * app - never a wall-clock-delta calculation. Not used for lifetime
+ * (`windowDays: null`), which has no bound at all.
+ */
+export function dailyTrendWindowCreatedAtBounds(
+  todayCentral: string,
+  windowDays: 7 | 30,
+): { start: string; end: string } {
+  const windowStart = dailyTrendWindowStart(todayCentral, windowDays);
+  const windowEndExclusiveDate = centralDateDaysBefore(todayCentral, -1);
+  return {
+    start: new Date(centralWallClockEpoch(windowStart, 0)).toISOString(),
+    end: new Date(centralWallClockEpoch(windowEndExclusiveDate, 0)).toISOString(),
   };
 }

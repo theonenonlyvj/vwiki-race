@@ -4799,6 +4799,59 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
   });
 });
 
+describe("listDailyTrends - D1 bind-cap regression (FB-10 fixer pass)", () => {
+  it(
+    "aggregates across 150 challenges created inside a 30d window via a fixed 2-bind created_at range (D1 caps bound params at ~100/statement; Miniflare doesn't enforce it, so bind-arg count is asserted directly)",
+    async () => {
+      const accountId = "trend-bindcap-account";
+      const total = 150;
+      for (let index = 0; index < total; index += 1) {
+        const challengeId = `trend-bindcap-challenge-${index}`;
+        // All created "today" (well inside the 30d window ending
+        // 2026-07-18) - the point is many CHALLENGES in-window, not many
+        // runs on one challenge (that's `listChallengePlacements`'s own
+        // no-LIMIT test above).
+        await insertDailyChallenge({ id: challengeId, sortOrder: 5000 + index, createdAt: "2026-07-18T12:00:00.000Z" });
+        await insertCompletedV2({
+          id: `${challengeId}-run`,
+          accountId,
+          elapsedMs: 4_000 + index,
+          completedAt: "2026-07-18T20:00:00.000Z",
+          challengeId,
+        });
+      }
+
+      const { db: countingDb, maxBindArgs } = bindCountingDb(env.VWIKI_RACE_DB);
+      const repository = createD1TrackingRepository({
+        db: countingDb,
+        now: () => new Date("2026-07-18T01:00:00.000Z"),
+        randomId: () => "unused",
+      });
+
+      // Correctness at scale: every one of the 150 in-window challenges
+      // counts toward this account's played total.
+      const { ranked, unranked } = await repository.listDailyTrends(30, "2026-07-18");
+      const entry = [...ranked, ...unranked].find((row) => row.accountId === accountId);
+      expect(entry?.playedCount).toBe(total);
+
+      // The hard fuse itself: the pre-fix implementation filtered the main
+      // query with a per-challenge `IN (?,?,...)` list built from every
+      // challenge created inside the window - at this same 150-challenge
+      // scale it would bind ~151 params (150 challenge ids + 1 for
+      // `MIN_COUNTED_DNF_CLICKS`). Cloudflare D1 caps bound parameters at
+      // ~100 per statement, so that shape 500s in real D1; Miniflare
+      // doesn't enforce the cap, so a naive "does it throw" test can't
+      // catch this by construction - the rewritten filter uses a
+      // `created_at >= ? AND created_at < ?` subquery, exactly 2 fixed
+      // binds (plus `MIN_COUNTED_DNF_CLICKS`) no matter how many challenges
+      // exist in the window, so this stays small and constant regardless of
+      // catalog size.
+      expect(maxBindArgs()).toBeLessThanOrEqual(5);
+    },
+    20_000,
+  );
+});
+
 describe("listAllPlayersRoster (PKG-14: direct owner feedback - lifetime/board stats must include everyone who's played)", () => {
   it("includes an account whose only run is on a custom (non-daily) challenge - the exact gap listDailyTrends has", async () => {
     const accountId = "roster-custom-only";

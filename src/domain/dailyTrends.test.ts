@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   dailyTrendGuard,
   dailyTrendPreviousWindowEnd,
+  dailyTrendWindowCreatedAtBounds,
   dailyTrendWindowStart,
   partitionChallengesByTrendWindow,
   type TrendChallengeCandidate,
@@ -127,6 +128,56 @@ describe("partitionChallengesByTrendWindow (FB-10: all challenges, not just dail
   it("returns empty when the catalog has no challenges at all", () => {
     expect(partitionChallengesByTrendWindow([], 7, "2026-07-18")).toEqual({ ids: [], activeCount: 0 });
     expect(partitionChallengesByTrendWindow([], null, "2026-07-18")).toEqual({ ids: [], activeCount: 0 });
+  });
+});
+
+describe("dailyTrendWindowCreatedAtBounds (FB-10 fixer pass: fixed 2-bind `created_at` range, no per-challenge IN list)", () => {
+  it("bounds a 7d window at Central midnight of the window start (inclusive) through Central midnight the day after today (exclusive) - July is CDT, UTC-5, so Central midnight is 05:00 UTC", () => {
+    // dailyTrendWindowStart("2026-07-18", 7) === "2026-07-12" (asserted above).
+    expect(dailyTrendWindowCreatedAtBounds("2026-07-18", 7)).toEqual({
+      start: "2026-07-12T05:00:00.000Z",
+      end: "2026-07-19T05:00:00.000Z",
+    });
+  });
+
+  it("bounds a 30d window the same way", () => {
+    // dailyTrendWindowStart("2026-07-18", 30) === "2026-06-19" (asserted above).
+    expect(dailyTrendWindowCreatedAtBounds("2026-07-18", 30)).toEqual({
+      start: "2026-06-19T05:00:00.000Z",
+      end: "2026-07-19T05:00:00.000Z",
+    });
+  });
+
+  it("carries the exclusive end across a month/year boundary (today = Dec 31)", () => {
+    const { end } = dailyTrendWindowCreatedAtBounds("2026-12-31", 7);
+    expect(end).toBe("2027-01-01T06:00:00.000Z"); // December is CST (UTC-6).
+  });
+
+  it("matches partitionChallengesByTrendWindow's own inclusion boundaries exactly - a challenge at the window's inclusive Central-date start is IN, one Central calendar day earlier is OUT", () => {
+    const { start } = dailyTrendWindowCreatedAtBounds("2026-07-18", 7);
+    const boundaryChallenge: TrendChallengeCandidate = {
+      id: "boundary",
+      createdAt: "2026-07-12T12:00:00.000Z",
+      isActive: true,
+    };
+    const justOutsideChallenge: TrendChallengeCandidate = {
+      id: "just-outside",
+      createdAt: "2026-07-11T12:00:00.000Z",
+      isActive: true,
+    };
+    expect(boundaryChallenge.createdAt >= start).toBe(true);
+    expect(justOutsideChallenge.createdAt >= start).toBe(false);
+    expect(partitionChallengesByTrendWindow([boundaryChallenge], 7, "2026-07-18").ids).toEqual(["boundary"]);
+    expect(partitionChallengesByTrendWindow([justOutsideChallenge], 7, "2026-07-18").ids).toEqual([]);
+  });
+
+  it("the exclusive end excludes a challenge created exactly at the boundary instant and includes the instant just before it", () => {
+    const { end } = dailyTrendWindowCreatedAtBounds("2026-07-18", 7);
+    expect(end).toBe("2026-07-19T05:00:00.000Z");
+    const justBefore = "2026-07-19T04:59:59.999Z";
+    const atBoundary = "2026-07-19T05:00:00.000Z";
+    expect(justBefore < end).toBe(true);
+    expect(atBoundary < end).toBe(false);
   });
 });
 

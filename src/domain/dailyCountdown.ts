@@ -63,8 +63,15 @@ function centralUtcOffsetMinutesAt(epochMs: number): number {
  * America/Chicago's UTC offset only ever takes one of two values, and the
  * first guess is already within a few hours of the true instant (nowhere
  * near a THIRD offset region to worry about).
+ *
+ * Exported (FB-10 fixer pass, `dailyTrends.ts`'s
+ * `dailyTrendWindowCreatedAtBounds`): the same DST-correct Central-date ->
+ * UTC-instant conversion is also what turns a trend window's Central-date
+ * boundaries into `created_at`-comparable ISO bounds, instead of
+ * `listDailyTrends` binding one SQL param per in-window challenge (the "F1
+ * hard fuse" bind-cap bug class - see that function's own comment).
  */
-function centralWallClockEpoch(dateKey: string, hour: number): number {
+export function centralWallClockEpoch(dateKey: string, hour: number): number {
   const [year, month, day] = dateKey.split("-").map(Number);
   const targetAsIfUtc = Date.UTC(year, month - 1, day, hour, 0, 0);
   const firstGuessOffset = centralUtcOffsetMinutesAt(targetAsIfUtc);

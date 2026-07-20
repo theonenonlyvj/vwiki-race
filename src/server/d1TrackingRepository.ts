@@ -10,6 +10,7 @@ import { dailyFlavorForCentralDate } from "../domain/dailyEditorial";
 import { centralDateKey, previousCentralDate } from "../domain/challengeSelection";
 import {
   dailyTrendGuard,
+  dailyTrendWindowCreatedAtBounds,
   partitionChallengesByTrendWindow,
 } from "../domain/dailyTrends";
 import type {
@@ -2455,15 +2456,21 @@ export function createD1TrackingRepository(options: {
       // `daily_features.daily_date` - see `partitionChallengesByTrendWindow`.
       //
       // `windowedIds` is `null` for lifetime, meaning "no challenge filter
-      // at all" (every challenge ever). It's deliberately NOT built via a
-      // per-row `IN (...)` bind list for lifetime - that's the exact "F1
-      // hard fuse" bug `getAccountDailyStreak` above already hit once (an
-      // unbounded, ever-growing row set turned into one bind param per row,
-      // blowing D1's ~100-param cap). 7d/30d are safe to bind as `IN (...)`
-      // because they're bounded by a real, short calendar window (and this
-      // app's challenge-creation rate limits), not by the catalog's entire
-      // history - the one case that's genuinely unbounded (lifetime) never
-      // builds a bind list at all.
+      // at all" (every challenge ever). Below, this is used ONLY for the
+      // "nothing in this window" early-return check - never as a bind list.
+      // FB-10 fixer pass (code review finding): an earlier version of this
+      // fix bound `windowedIds` directly as a per-row `IN (?,?,...)` list
+      // for 7d/30d, reasoning it was "bounded by a short calendar window."
+      // That's exactly the "F1 hard fuse" bug class `getAccountDailyStreak`
+      // above already hit once - the window is short in TIME, not in ROW
+      // COUNT, and this app is public with a 10-challenge-create/min/account
+      // rate limit (every "Create a random new one" click mints one), so
+      // ~99+ challenges created inside a rolling 30-day window blows D1's
+      // ~100-param cap in production while Miniflare (which doesn't enforce
+      // the cap) keeps every local test green. The main query below instead
+      // filters 7d/30d with exactly 2 fixed `created_at` binds via
+      // `dailyTrendWindowCreatedAtBounds` - see the "300 in-window
+      // challenges" bind-cap regression test.
       let windowedIds: string[] | null = null;
       let activeChallengesInWindow: number;
       if (windowDays === null) {
@@ -2496,22 +2503,34 @@ export function createD1TrackingRepository(options: {
       // PKG-14: the participation guard is reality-scaled off how many
       // ACTIVE challenges exist in this exact window (lifetime = ever) -
       // FB-10: a retired/deactivated challenge (however recently created)
-      // never inflates it, but `windowedIds` below still includes it, so a
-      // challenge a user played before it was deactivated still counts in
-      // their `played_count` numerator.
+      // never inflates it, but the `challengeFilterSql` subquery below still
+      // includes it (no `is_active` filter there), so a challenge a user
+      // played before it was deactivated still counts in their
+      // `played_count` numerator.
       const guard = dailyTrendGuard(windowDays, activeChallengesInWindow);
 
       // No challenge at all exists in this window (young catalog, or a
-      // genuinely empty stretch) - `IN ()` is invalid SQL, and there's
-      // nothing to rank or count either way.
+      // genuinely empty stretch) - nothing to rank or count either way. Zero
+      // cost check: `windowedIds` already came from the zero-bind catalog
+      // read above, purely in-memory here.
       if (windowedIds !== null && windowedIds.length === 0) {
         return { ranked: [], unranked: [], guard };
       }
 
-      const challengeFilterSql = windowedIds === null
-        ? ""
-        : `AND r.challenge_id IN (${windowedIds.map(() => "?").join(",")})`;
-      const challengeFilterBindings = windowedIds ?? [];
+      // FB-10 fixer pass (code review finding): filtered by a fixed 2-bind
+      // `created_at` range via a subquery, NOT a per-challenge `IN
+      // (?,?,...)` list over `windowedIds` - see this function's opening
+      // comment for why that would have reintroduced the "F1 hard fuse" bug.
+      // Lifetime (`windowDays === null`) has no bound at all, same as
+      // before.
+      let challengeFilterSql = "";
+      let challengeFilterBindings: string[] = [];
+      if (windowDays !== null) {
+        const bounds = dailyTrendWindowCreatedAtBounds(todayCentral, windowDays);
+        challengeFilterSql =
+          `AND r.challenge_id IN (SELECT id FROM challenges WHERE created_at >= ? AND created_at < ?)`;
+        challengeFilterBindings = [bounds.start, bounds.end];
+      }
 
       // Deliberately no LIMIT anywhere in this query (Task 3.1's flagged
       // "revisit at Increment 4"): a rolling trend must weigh every
