@@ -17,3 +17,4 @@
 | 12 | viota 9e64e9a push | Approved (turned out already pushed) |
 | D | Defaults batch | Accepted: DNF salmon, roster by races, keyboard-racing deferred, private-browsing notice YES, roster-privacy deferred |
 | FB-7 | Sub-2-click DNFs | **Non-attempts everywhere** (owner: "those dont really even count"): hidden from all boards, don't tick played/streak/guard/You-tiles. Exceptions: own Results page after ending, "Your history" per-attempt list, roster racesStarted census. Amends the round-1 "DNF counts as played" ruling for clicks < 2. |
+| FB-8/9/10 (07-20) | Body de-bold; Browse played-chips + reverse-chron; Stats windows | Body text ≤500/400 (chrome keeps weight). Browse: chip gate fixed (was rendering premature NEW while outcomes loaded), catalog newest-first, daily pinned. **Stats 7d/30d/Lifetime aggregate ALL challenges** (window = challenge creation date, active-only denominators, FB-7 threshold); streak stays daily-only. |
