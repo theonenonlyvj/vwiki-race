@@ -315,6 +315,15 @@ ol {
   line-height: 1;
 }
 
+/* FB-8: the "e.g. get from <strong>X</strong> to <strong>Y</strong>" inline
+   emphasis had no author font-weight, so it rendered at the UA bold
+   default. Capped at 500 like the rest of this pass' content-title tier -
+   still a step up from the surrounding paragraph so the emphasis reads,
+   just not full bold. */
+.teaching-gate-dialog strong {
+  font-weight: 500;
+}
+
 .icon-button {
   display: grid;
   width: 44px;
@@ -374,12 +383,19 @@ ol {
 .identity-current-name span {
   color: var(--muted);
   font-size: 0.72rem;
-  font-weight: 700;
+  /* FB-8: kicker label, not a chip/badge - debolded with every other
+     small-caps meta label in this file (default: body/meta text isn't
+     bold). */
+  font-weight: 400;
   text-transform: uppercase;
 }
 
 .identity-current-name strong {
   color: #0debd7;
+  /* FB-8: this <strong> had no author font-weight, so it rendered at the
+     UA default (bold/700) - explicit 500 caps it at the content-title
+     ceiling like every other card/row title in this pass. */
+  font-weight: 500;
 }
 
 .secondary-button {
@@ -486,7 +502,8 @@ h1 {
 .article-heading span,
 .empty-state span {
   font-size: 0.72rem;
-  font-weight: 700;
+  /* FB-8: kicker/label text (not a chip/badge) - debolded. */
+  font-weight: 400;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -513,6 +530,11 @@ h1 {
 .challenge-route strong {
   color: #f9ffff;
   font-size: 1.32rem;
+  /* FB-8: this <strong> had no author font-weight, so it rendered at the
+     UA default (bold/700) - the challenge title (Home hero, Boards segment
+     header, Challenge Detail) is a card/row title, so it's capped at the
+     500 ceiling like the rest of this pass instead of left at full bold. */
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -522,6 +544,16 @@ h1 {
   border-left: 3px solid var(--coral);
   color: var(--cyan);
   padding-left: 8px;
+}
+
+/* FB-8: the live race HUD's "Opening <article>..." status line
+   (RaceMode.tsx's `.header-navigation-status`, a bare <strong>) is not
+   actually nested under `.challenge-route` - the rule above never matches
+   it, so it was falling through to the UA bold default. Targeted directly
+   here (status/meta text, not a card title) rather than folding the fix
+   into that pre-existing scoping gap, which is unrelated to this pass. */
+.header-navigation-status {
+  font-weight: 400;
 }
 
 .run-metrics {
@@ -541,6 +573,11 @@ h1 {
 .run-metrics dd,
 .account-chip {
   color: #ffffff;
+  /* FB-8 judgment call: kept bold. Both render inside a bordered/clip-path
+     pill (`.run-metrics div`/`.account-chip` base rule above - border +
+     background + padding), i.e. actual chip chrome (HUD stat readout /
+     account chip), not body copy - same exemption bucket as
+     buttons/nav/badges. */
   font-weight: 700;
 }
 
@@ -610,7 +647,8 @@ h1 {
   max-width: 240px;
   color: var(--muted);
   font-size: 0.72rem;
-  font-weight: 600;
+  /* FB-8: hint copy - secondary/meta text, 400. */
+  font-weight: 400;
   line-height: 1.35;
   text-transform: none;
 }
@@ -678,7 +716,8 @@ h1 {
 
 .path-history .path-ellipsis {
   color: #ffad9f;
-  font-weight: 700;
+  /* FB-8: part of the breadcrumb's body content, not chrome. */
+  font-weight: 400;
 }
 
 .target-reference {
@@ -713,6 +752,8 @@ h1 {
   content: "+";
   grid-column: 1;
   grid-row: 1;
+  /* FB-8 judgment call: kept bold - a disclosure-toggle glyph (+/-), not
+     body copy. */
   font-weight: 700;
 }
 
@@ -726,7 +767,8 @@ h1 {
   padding-left: 16px;
   color: #8fb0b5;
   font-size: 0.62rem;
-  font-weight: 700;
+  /* FB-8: kicker label, not a chip/badge. */
+  font-weight: 400;
   text-transform: uppercase;
 }
 
@@ -735,6 +777,10 @@ h1 {
   overflow-wrap: anywhere;
   font-size: 0.82rem;
   line-height: 1.15;
+  /* FB-8: no author font-weight previously - rendered at UA bold. This is
+     the target article's title, so it's capped at the 500 content-title
+     ceiling. */
+  font-weight: 500;
 }
 
 .target-reference > p {
@@ -884,7 +930,10 @@ h1 {
 
 .site-footer a {
   color: var(--cyan);
-  font-weight: 600;
+  /* FB-8 judgment call: this is a plain text link in body copy (not the
+     mode-nav's "nav labels"), so it follows the body default - 400. The
+     underline that appears below is what carries the affordance. */
+  font-weight: 400;
   text-decoration: none;
   border-bottom: 1px solid var(--cyan);
   padding-bottom: 1px;
@@ -962,7 +1011,8 @@ h1 {
 
 .daily-hero-status {
   margin: 8px 0 0;
-  font-weight: 700;
+  /* FB-8: status sentence (body copy). */
+  font-weight: 400;
 }
 
 .daily-hero-done {
@@ -991,7 +1041,8 @@ h1 {
    rather than another bordered card. */
 .home-streak-trend-row {
   margin: 0;
-  font-weight: 600;
+  /* FB-8: "slim" muted meta line (per its own comment above). */
+  font-weight: 400;
 }
 
 .teaching-gate-strip {
@@ -1408,7 +1459,8 @@ h1 {
 .pre-race-start-article {
   margin-top: 18px;
   color: var(--muted);
-  font-weight: 700;
+  /* FB-8: guard copy - secondary/meta text, 400. */
+  font-weight: 400;
 }
 
 /* The clock-commit CTA class (PKG-04 owner-proxy ruling: coral reserved for
@@ -1490,7 +1542,8 @@ h1 {
   color: var(--muted);
   font-family: var(--viota-ui-font);
   font-size: 0.72rem;
-  font-weight: 700;
+  /* FB-8: kicker label, not a chip/badge. */
+  font-weight: 400;
   text-transform: uppercase;
 }
 
@@ -1526,7 +1579,8 @@ h1 {
 .challenge-share span {
   color: #3a5c63;
   font-size: 0.78rem;
-  font-weight: 700;
+  /* FB-8: "Share:" label - meta text. */
+  font-weight: 400;
 }
 
 .challenge-share input {
@@ -1565,6 +1619,9 @@ h1 {
   color: #202122;
   font-family: sans-serif;
   font-size: 0.92rem;
+  /* FB-8: out of scope - raw Wikipedia-chrome mimicry (explicit
+     `sans-serif`, not Fredoka/`--viota-ui-font`), the one place the spec
+     says native Wikipedia styling stands. */
   font-weight: 700;
   min-height: 42px;
   padding: 10px 18px;
@@ -1722,6 +1779,8 @@ h1 {
 
 .article-content th {
   background: #eaecf0;
+  /* FB-8: out of scope - raw in-race Wikipedia article rendering, the one
+     place the spec says native styling stands. */
   font-weight: 700;
 }
 
@@ -1806,7 +1865,8 @@ h1 {
   grid-column: 1 / -1;
   color: var(--coral);
   font-size: 0.68rem;
-  font-weight: 700;
+  /* FB-8: kicker label, not a chip/badge. */
+  font-weight: 400;
   text-transform: uppercase;
 }
 
@@ -1821,7 +1881,10 @@ h1 {
   grid-row: 2;
   color: #ffffff;
   font-size: 1.15rem;
-  font-weight: 700;
+  /* FB-8: the panel's headline stat - capped at the content-title ceiling
+     rather than left at full bold, same as every other row/card title in
+     this pass. */
+  font-weight: 500;
   margin: 0;
   text-align: right;
 }
@@ -1829,14 +1892,16 @@ h1 {
 .result-panel .result-standing {
   grid-column: 1 / -1;
   color: #ffd7cf;
-  font-weight: 700;
+  /* FB-8: a sentence ("You beat X% of players") - body copy. */
+  font-weight: 400;
   margin-top: 2px;
 }
 
 .result-panel .ritual-hook {
   grid-column: 1 / -1;
   color: var(--coral);
-  font-weight: 700;
+  /* FB-8: a sentence - body copy. */
+  font-weight: 400;
   margin: 4px 0 0;
 }
 
@@ -1880,6 +1945,8 @@ h1 {
   gap: 6px;
   align-items: baseline;
   color: var(--text);
+  /* FB-8 judgment call: kept bold - an interactive disclosure toggle
+     (cursor: pointer, acts like `.link-button`), not body copy. */
   font-weight: 700;
   list-style: none;
 }
@@ -1891,6 +1958,7 @@ h1 {
 .path-recap .link-affordance {
   color: var(--cyan);
   font-size: 0.8rem;
+  /* FB-8: a link affordance, not body copy - kept bold. */
   font-weight: 700;
 }
 
@@ -1905,6 +1973,10 @@ h1 {
   font-size: 0.95rem;
   color: var(--text);
   margin: 0 0 8px;
+  /* FB-8: no author font-weight previously - rendered at UA bold. These are
+     sub-panel titles ("Today's board"/"Play again"/"Claim your stats"),
+     capped at the 500 content-title ceiling. */
+  font-weight: 500;
 }
 
 .board-snippet ol {
@@ -1946,7 +2018,10 @@ h1 {
 
 .board-snippet li.is-you {
   color: var(--cyan);
-  font-weight: 700;
+  /* FB-8 judgment call (explicitly allowed by the brief): the "you" row
+     highlight - full 400 killed the row's visual distinction from its
+     neighbors, so this keeps 600 rather than going all the way to 400. */
+  font-weight: 600;
 }
 
 /* PKG-03 remainder fix (2026-07-19): Challenge Detail's main Leaderboard
@@ -1966,6 +2041,8 @@ h1 {
   align-items: center;
   color: var(--cyan);
   cursor: pointer;
+  /* FB-8 judgment call: kept bold - underlined link-style disclosure
+     toggle chrome, not body copy. */
   font-weight: 700;
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -1977,7 +2054,9 @@ h1 {
 
 .board-snippet .rank {
   color: var(--cyan);
-  font-weight: 700;
+  /* FB-8: the row's rank number is content (a list-item value), capped at
+     the 500 title ceiling rather than left at full bold. */
+  font-weight: 500;
 }
 
 /* QF-04: shared across all three DNF-rank renderers (BoardSnippet,
@@ -2016,7 +2095,8 @@ h1 {
 .share-result span {
   color: var(--text-bright);
   font-size: 0.78rem;
-  font-weight: 700;
+  /* FB-8: "Share:" label - meta text. */
+  font-weight: 400;
 }
 
 .share-result input {
@@ -2049,6 +2129,20 @@ h1 {
   line-height: 1.2;
 }
 
+/* FB-8: `.result-panel h2` already gets an explicit font-weight: 400 from
+   its own display-font rule above (styles.css ~1813) - scoped separately
+   here (rather than adding font-weight to the shared rule above) so this
+   doesn't fight that declaration on source order. The other four had no
+   author font-weight at all and were rendering at UA bold: these are page/
+   mode headings ("Challenges", "Stats", "Leaderboard", the Home loading
+   state), capped at the 500 content-title ceiling. */
+.empty-state h2,
+.challenge-browser h2,
+.leaderboard-panel h2,
+.stats-panel h2 {
+  font-weight: 500;
+}
+
 /* PKG-04: Challenge Detail's "Your history" sub-heading, now that it sits
    inside `.leaderboard-panel` chrome (matches `.board-snippet h3`'s
    treatment elsewhere - a panel sub-section title, not the panel's own
@@ -2057,6 +2151,9 @@ h1 {
   margin: 0 0 8px;
   font-family: var(--viota-ui-font);
   font-size: 0.95rem;
+  /* FB-8: no author font-weight previously - rendered at UA bold. Sub-panel
+     title, capped at 500. */
+  font-weight: 500;
 }
 
 .result-panel p,
@@ -2101,7 +2198,8 @@ h1 {
   color: #d9f0f2;
   cursor: pointer;
   font-size: 0.82rem;
-  font-weight: 700;
+  /* FB-8: a checkbox's text label, not a button/nav/chip - meta text. */
+  font-weight: 400;
   line-height: 1.15;
   padding: 0 4px;
 }
@@ -2135,7 +2233,8 @@ h1 {
 .challenge-list span {
   color: var(--muted);
   font-size: 0.78rem;
-  font-weight: 700;
+  /* FB-8: card kicker label (e.g. the label above the title) - meta text. */
+  font-weight: 400;
 }
 
 .challenge-list .challenge-meta {
@@ -2173,13 +2272,18 @@ h1 {
 
 .challenge-list strong {
   overflow-wrap: anywhere;
+  /* FB-8: no author font-weight previously - rendered at UA bold. Belt and
+     braces alongside the more specific `.browse-card-title-row strong`
+     below (the actual card-title element) at the same 500 ceiling. */
+  font-weight: 500;
 }
 
 .challenge-list em {
   color: var(--muted);
   font-size: 0.76rem;
   font-style: normal;
-  font-weight: 700;
+  /* FB-8: "Created by X" - meta/created-by text, the owner's exact example. */
+  font-weight: 400;
 }
 
 /* Browse full card spec (Increment 5): title + state chip share one row and
@@ -2202,6 +2306,10 @@ h1 {
 .browse-card-title-row strong {
   flex: 1 1 auto;
   min-width: 0;
+  /* FB-8 (owner's flagged screenshot surface): this <strong> had no author
+     font-weight, so every Browse card title rendered at the UA bold
+     default (700) - explicit 500 caps it at the content-title ceiling. */
+  font-weight: 500;
 }
 
 .challenge-list .browse-card-meta {
@@ -2210,7 +2318,9 @@ h1 {
   min-width: 0;
   color: var(--muted);
   font-size: 0.76rem;
-  font-weight: 700;
+  /* FB-8 (owner's flagged screenshot surface): "players · best lines" -
+     meta text, 400. */
+  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2282,7 +2392,8 @@ h1 {
 .browse-catalog-heading {
   margin: 14px 0 0;
   font-size: 0.72rem;
-  font-weight: 700;
+  /* FB-8: section eyebrow label, not a chip/badge - meta text. */
+  font-weight: 400;
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
@@ -2312,7 +2423,8 @@ h1 {
 
 .leaderboard .rank {
   color: #0debd7;
-  font-weight: 700;
+  /* FB-8: rank value is content, capped at the 500 title ceiling. */
+  font-weight: 500;
 }
 
 .leaderboard li.dnf {
@@ -2343,6 +2455,7 @@ h1 {
 .provenance-badge {
   padding: 1px 5px;
   font-size: 0.64rem;
+  /* FB-8: a badge, not body copy - chrome, kept bold. */
   font-weight: 700;
   line-height: 1.25;
   text-transform: uppercase;
@@ -2368,6 +2481,8 @@ h1 {
   align-items: center;
   color: var(--cyan);
   cursor: pointer;
+  /* FB-8 judgment call: kept bold - link-style disclosure toggle chrome
+     (same as `.board-snippet .path-disclosure summary`), not body copy. */
   font-weight: 700;
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -2461,13 +2576,16 @@ h1 {
 .stat-grid dt {
   color: var(--muted);
   font-size: 0.72rem;
-  font-weight: 700;
+  /* FB-8: kicker label, not a chip/badge. */
+  font-weight: 400;
   text-transform: uppercase;
 }
 
 .stat-grid dd {
   color: #ffffff;
   font-size: 1.28rem;
+  /* FB-8 judgment call: kept bold - the stat's numeric value inside the
+     bordered `.stat-grid div` tile (chip chrome), not body copy. */
   font-weight: 700;
   margin-top: 2px;
 }
@@ -2477,6 +2595,10 @@ h1 {
   font-size: 0.84rem;
   margin: 0 0 8px;
   text-transform: uppercase;
+  /* FB-8: no author font-weight previously - rendered at UA bold. This is
+     an uppercase kicker subheading (not a "title"), so it follows the
+     meta/label bucket - 400. */
+  font-weight: 400;
 }
 
 .compact-list {
@@ -2576,14 +2698,16 @@ h1 {
   margin: 0;
   color: #ffad9f;
   font-size: 0.86rem;
-  font-weight: 700;
+  /* FB-8: uppercase section kicker, not a chip/badge - meta text. */
+  font-weight: 400;
   text-transform: uppercase;
 }
 
 .daily-admin-view-heading > span {
   color: var(--cyan);
   font-size: 0.82rem;
-  font-weight: 700;
+  /* FB-8: a count label next to the section kicker - meta text. */
+  font-weight: 400;
 }
 
 .daily-admin-empty {
@@ -2597,7 +2721,8 @@ h1 {
   gap: 5px 10px;
   color: var(--muted);
   font-size: 0.7rem;
-  font-weight: 700;
+  /* FB-8: meta counts line. */
+  font-weight: 400;
   text-transform: uppercase;
 }
 
@@ -2628,13 +2753,17 @@ h1 {
 .daily-row-title strong {
   color: #ffffff;
   overflow-wrap: anywhere;
+  /* FB-8: no author font-weight previously - rendered at UA bold. Admin
+     queue/nomination row title, capped at the 500 content-title ceiling. */
+  font-weight: 500;
 }
 
 .daily-row-title span,
 .daily-classifier-note {
   color: var(--muted);
   font-size: 0.78rem;
-  font-weight: 700;
+  /* FB-8: "Created by X"/"Nominated by Y" - meta/created-by text. */
+  font-weight: 400;
 }
 
 .daily-score-grid {
@@ -2652,13 +2781,17 @@ h1 {
 .daily-score-grid dt {
   color: var(--muted);
   font-size: 0.62rem;
-  font-weight: 700;
+  /* FB-8: kicker label, not a chip/badge. */
+  font-weight: 400;
   text-transform: uppercase;
 }
 
 .daily-score-grid dd {
   color: #ffffff;
   font-size: 0.95rem;
+  /* FB-8 judgment call: kept bold - the classifier score's numeric value,
+     same "value stays bold, label doesn't" pattern as `.stat-grid`/
+     `.run-metrics` above. */
   font-weight: 700;
   margin: 2px 0 0;
 }
