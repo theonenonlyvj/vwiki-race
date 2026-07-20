@@ -2864,11 +2864,24 @@ export function createD1TrackingRepository(options: {
         WHERE coalesce(r.canonical_account_id, r.account_id) IN (SELECT account_id FROM receipt_ids)
            OR a.canonical_account_id IN (SELECT account_id FROM receipt_ids)
       )`;
+      // FB-7 (owner ruling, 2026-07-19): `attempts`/`abandoned` are played
+      // derivations exactly like `dailyStreak`/`trend30` below (computed a
+      // few lines down from this same `account.accountId`) - unlike
+      // `listAllPlayersRoster`'s racesStarted (a deliberately raw census, own
+      // boundary comment above) or `listLeaderboard`'s "Your history" (a
+      // spec-mandated full per-run list, own boundary comment above), You's
+      // "Attempts"/"DNFs" tiles are a "how many times did I play" count -
+      // this is in fact the exact site the owner's own 1-click Daily #4 DNF
+      // prompted the ruling from. So a sub-threshold (0/1-click) DNF must not
+      // tick either tile: `attempts` now counts completed runs plus
+      // gated (>= MIN_COUNTED_DNF_CLICKS) DNFs, not every row, and `abandoned`
+      // itself is gated the same way as every other played-derivation in
+      // this file.
       const totals = await db.prepare(
         `${ownerCte}
-         SELECT count(*) attempts,
+         SELECT sum(status = 'completed' OR (status = 'abandoned' AND click_count >= ?)) attempts,
                 sum(status = 'completed') completed,
-                sum(status = 'abandoned') abandoned,
+                sum(status = 'abandoned' AND click_count >= ?) abandoned,
                 sum(status = 'completed' AND protocol_version = 2 AND elapsed_ms IS NOT NULL) timed_completed,
                 coalesce(sum(CASE WHEN status = 'completed' THEN click_count ELSE 0 END), 0) total_clicks,
                 min(CASE WHEN status = 'completed' THEN click_count END) best_clicks,
@@ -2876,7 +2889,7 @@ export function createD1TrackingRepository(options: {
                 coalesce(avg(CASE WHEN status = 'completed' THEN click_count END), 0) average_clicks,
                 coalesce(avg(CASE WHEN status = 'completed' AND protocol_version = 2 THEN elapsed_ms END), 0) average_elapsed_ms
          FROM owner_runs`,
-      ).bind(...receipt.bindings).first<AccountStatsTotalsRow>();
+      ).bind(...receipt.bindings, MIN_COUNTED_DNF_CLICKS, MIN_COUNTED_DNF_CLICKS).first<AccountStatsTotalsRow>();
       const countRows = async (sql: string): Promise<Array<{ title: string; count: number }>> => {
         const { results } = await db.prepare(`${ownerCte} ${sql}`).bind(...receipt.bindings).all<CountRow>();
         return results.map((row) => ({ title: row.title, count: Number(row.count) }));

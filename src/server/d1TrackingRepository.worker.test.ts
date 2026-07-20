@@ -3648,6 +3648,36 @@ describe("Task 4 D1 projections", () => {
     await expect(count("account_profiles")).resolves.toBe(0);
     await expect(count("account_aliases")).resolves.toBe(1);
   });
+
+  it("FB-7 (owner ruling, 2026-07-19): excludes a 1-click DNF from attempts/abandoned - the exact site the owner's own Daily #4 DNF prompted this ruling from", async () => {
+    await insertAbandonedV2({
+      id: "stats-one-click-dnf",
+      accountId: account.accountId,
+      clickCount: 1,
+      elapsedMs: 1_000,
+      abandonedAt: "2026-07-14T01:00:01.000Z",
+    });
+
+    const { repository } = fixture();
+    const stats = await repository.getAccountStats(account);
+
+    expect(stats.totals).toMatchObject({ attempts: 0, completed: 0, abandoned: 0 });
+  });
+
+  it("counts a 2-click DNF in attempts/abandoned (exactly at the FB-7 threshold)", async () => {
+    await insertAbandonedV2({
+      id: "stats-two-click-dnf",
+      accountId: account.accountId,
+      clickCount: 2,
+      elapsedMs: 1_000,
+      abandonedAt: "2026-07-14T01:00:01.000Z",
+    });
+
+    const { repository } = fixture();
+    const stats = await repository.getAccountStats(account);
+
+    expect(stats.totals).toMatchObject({ attempts: 1, completed: 0, abandoned: 1 });
+  });
 });
 
 describe("board exclusion (migration 0006)", () => {
