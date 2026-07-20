@@ -290,7 +290,10 @@ export interface DailyTrendUnrankedEntry {
  * simpler raw completed-run count `AccountStats.totals.completed` already
  * uses (no ranked-eligibility filter) - this roster is a friendly census,
  * not a ranking. Alias-resolved through `account_aliases` like every other
- * board/roster query, so a re-linked account can't double-count.
+ * board/roster query, so a re-linked account can't double-count. FB-7
+ * (owner ruling, 2026-07-19): `racesStarted` is deliberately NOT gated by
+ * the `MIN_COUNTED_DNF_CLICKS` DNF threshold applied everywhere else
+ * "played" is derived - it stays this raw, honest count.
  */
 export interface AllPlayersRosterEntry {
   accountId: string;

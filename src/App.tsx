@@ -35,6 +35,9 @@ import {
   createVWikiRaceApiClient,
   type VWikiRaceApiClient,
 } from "./services/vwikiRaceApiClient";
+// FB-7 (owner ruling, 2026-07-19): shared with the server's DNF eligibility
+// threshold - see MIN_COUNTED_DNF_CLICKS's doc comment in runProtocol.ts.
+import { MIN_COUNTED_DNF_CLICKS } from "./server/runProtocol";
 import {
   clearChallengeUrl,
   exitAdminDailiesUrl,
@@ -230,14 +233,17 @@ export default function App({
   // account-stats effect below, which now fetches proactively (any
   // identified session, not just while "You" is open) for this reason.
   const [statsRefreshVersion, setStatsRefreshVersion] = useState(0);
-  // Local, session-only memory of "ended a run for this challenge" (any
-  // click count) - Home's DNF sub-state (spec: "attempted-not-finished" =
-  // "a DNF row (>=1 click) or an end-run this session"). A 0-click abandon
-  // never produces a leaderboard row at all, so this is the only way Home
-  // can reflect that acknowledgment without a new server endpoint. Reset
-  // only by a full reload (deliberately not persisted - it's "this
-  // session's" memory, distinct from the teaching gate, which must never
-  // read device-local state).
+  // Local, session-only memory of "ended a run for this challenge" - Home's
+  // DNF sub-state (spec: "attempted-not-finished" = "a board-visible DNF row
+  // or an end-run this session"). This is the only way Home can reflect that
+  // acknowledgment immediately, without waiting on/adding a server refetch.
+  // FB-7 (owner ruling, 2026-07-19): only recorded when the ended run had >=
+  // MIN_COUNTED_DNF_CLICKS - a sub-threshold bail is a non-attempt and must
+  // leave Home in the FRESH state, matching the server's view (which also
+  // never surfaces a sub-threshold DNF as a board row) on reload. Reset only
+  // by a full reload (deliberately not persisted - it's "this session's"
+  // memory, distinct from the teaching gate, which must never read
+  // device-local state).
   const [sessionDnfChallengeIds, setSessionDnfChallengeIds] = useState<
     ReadonlySet<string>
   >(new Set());
@@ -1314,14 +1320,17 @@ export default function App({
           ? "Run ended. Your DNF and path were saved."
           : "Run ended. The attempt was saved to your stats.");
       }
-      // Home's DNF sub-state (spec: "an end-run this session") - a 0-click
-      // abandon leaves no leaderboard row at all, so this is local memory of
-      // it, not a server read. Harmless to also record clicked DNFs here;
-      // Home's own leaderboard row check already covers those independently.
+      // Home's DNF sub-state (spec: "an end-run this session") - local
+      // memory of it, not a server read, so Home can reflect it immediately.
       // Recovery's "End Old Run" is excluded (matches dnfSnapshot's own
       // guard above) - it's a stale/legacy run being cleared out, not "the
-      // account tried and gave up on today's daily this session."
-      if (endedChallengeId && !isRecoveryEnd) {
+      // account tried and gave up on today's daily this session." FB-7
+      // (owner ruling, 2026-07-19): also gated on
+      // `acceptedClickCount >= MIN_COUNTED_DNF_CLICKS` - a sub-threshold
+      // bail is a non-attempt and must leave Home in the FRESH state, same
+      // as the server (which never surfaces a sub-threshold DNF as a board
+      // row) shows on reload.
+      if (endedChallengeId && !isRecoveryEnd && acceptedClickCount >= MIN_COUNTED_DNF_CLICKS) {
         markSessionDnf(endedChallengeId);
       }
       if (endedChallengeId) {

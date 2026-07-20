@@ -27,12 +27,17 @@ type DailyState = "not-attempted" | "dnf" | "finished";
  * "Yesterday's results" could show one player twice; the board is one row
  * per canonical account, placements first, invariant-2-correct server-side).
  * Finished = your accountId is in `placements`; DNF = it's in `dnfs` (or
- * `sessionDnfChallengeIds` - a 0-click abandon leaves no board row at all,
- * so App.tsx remembers "ended a run for this challenge this session"
- * locally for that case only; never used for the teaching gate, which stays
- * server-derived - migration note iii). AccountId matching works after a
- * guest->claimed upgrade too, since claims carry the same canonical
- * accountId - see the server's account_aliases resolution.
+ * `sessionDnfChallengeIds` - App.tsx remembers "ended a run for this
+ * challenge this session" locally, for the window before the next board
+ * fetch catches up). FB-7 (owner ruling, 2026-07-19): a DNF only counts as a
+ * real attempt at >= MIN_COUNTED_DNF_CLICKS - both `dnfs` (server-filtered,
+ * see `listChallengeDnfs`) and `sessionDnfChallengeIds` (App.tsx only
+ * records it past the same threshold) already enforce this, so a
+ * sub-threshold bail reads as "not-attempted" here with no extra gating
+ * needed. Never used for the teaching gate, which stays server-derived -
+ * migration note iii. AccountId matching works after a guest->claimed
+ * upgrade too, since claims carry the same canonical accountId - see the
+ * server's account_aliases resolution.
  *
  * The hero itself is `selectHomeHeroChallenge`'s pick (FIX 4): today's real
  * daily post-drop; YESTERDAY's daily pre-drop (badged honestly, with the

@@ -2981,6 +2981,34 @@ describe("Task 4 D1 projections", () => {
     expect(rows.some((row) => row.runId === "zero-click-dnf")).toBe(false);
   });
 
+  it("FB-7 (owner ruling, 2026-07-19): getPublicRunPath refuses a sub-threshold (1-click) DNF's path - it's no longer board-visible anywhere", async () => {
+    await insertCompletedV2({
+      id: "public-path-viewer-own-completed",
+      accountId: account.accountId,
+      elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:04.000Z",
+    });
+    await insertLegacyRun({ id: "one-click-dnf-path", accountId: "one-click-dnf-account" });
+    await env.VWIKI_RACE_DB.prepare(
+      `UPDATE runs SET status='abandoned', protocol_version=2, click_count=1,
+         abandoned_at='2026-07-14T01:00:05.000Z', elapsed_ms=5000,
+         wall_elapsed_ms=5000 WHERE id='one-click-dnf-path'`,
+    ).run();
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO run_path_steps
+         (run_id, step_number, source_title, clicked_anchor_text, destination_title,
+          destination_page_id, elapsed_since_start_ms, created_at)
+       VALUES ('one-click-dnf-path', 1, 'Moon', 'gravity', 'Gravity', 38579, 5000,
+               '2026-07-14T01:00:05.000Z')`,
+    ).run();
+
+    const { repository } = fixture();
+    // `account` qualifies as viewer via its own eligible completed run above.
+    await expect(repository.getPublicRunPath("one-click-dnf-path", account)).rejects.toMatchObject({
+      code: "run_path_not_found", status: 404,
+    });
+  });
+
   it("derives repeat attempts across VGames account aliases", async () => {
     await insertCompletedV2({
       id: "alias-first",
@@ -3945,7 +3973,7 @@ describe("listChallengeDnfs", () => {
     expect(dnfs.map((d) => d.accountId)).not.toContain(accountB);
   });
 
-  it("never surfaces a 0-click abandon (matches listLeaderboard's click_count > 0 eligibility)", async () => {
+  it("never surfaces a 0-click abandon (FB-7: sub-threshold DNFs are non-attempts)", async () => {
     const accountC = "dnf-account-c";
     await insertLegacyRun({ id: "c-zero-click", accountId: accountC });
     await env.VWIKI_RACE_DB.prepare(
@@ -3958,6 +3986,38 @@ describe("listChallengeDnfs", () => {
     const dnfs = await repository.listChallengeDnfs("challenge-0001");
 
     expect(dnfs.map((d) => d.accountId)).not.toContain(accountC);
+  });
+
+  it("never surfaces a 1-click abandon either (FB-7 owner ruling, 2026-07-19: the DNF threshold is >= 2 clicks, not > 0)", async () => {
+    const accountOneClick = "dnf-account-one-click";
+    await insertAbandonedV2({
+      id: "one-click-dnf",
+      accountId: accountOneClick,
+      clickCount: 1,
+      elapsedMs: 3_000,
+      abandonedAt: "2026-07-14T01:00:03.000Z",
+    });
+
+    const { repository } = fixture();
+    const dnfs = await repository.listChallengeDnfs("challenge-0001");
+
+    expect(dnfs.map((d) => d.accountId)).not.toContain(accountOneClick);
+  });
+
+  it("surfaces a 2-click abandon (exactly at the FB-7 threshold)", async () => {
+    const accountTwoClick = "dnf-account-two-click";
+    await insertAbandonedV2({
+      id: "two-click-dnf",
+      accountId: accountTwoClick,
+      clickCount: 2,
+      elapsedMs: 3_000,
+      abandonedAt: "2026-07-14T01:00:03.000Z",
+    });
+
+    const { repository } = fixture();
+    const dnfs = await repository.listChallengeDnfs("challenge-0001");
+
+    expect(dnfs.map((d) => d.accountId)).toContain(accountTwoClick);
   });
 
   it("respects board exclusion", async () => {
@@ -4106,6 +4166,18 @@ describe("listChallengesSummary (Increment 5)", () => {
     expect(summary.find((s) => s.challengeId === "challenge-0001")?.playerCount).toBe(0);
   });
 
+  it("FB-7 (owner ruling, 2026-07-19): excludes a 1-click abandon from player count too", async () => {
+    await insertAbandonedV2({
+      id: "summary-one-click", accountId: "summary-one-click-account", clickCount: 1,
+      elapsedMs: 1_000, abandonedAt: "2026-07-14T01:00:01.000Z", challengeId: "challenge-0001",
+    });
+
+    const { repository } = fixture();
+    const summary = await repository.listChallengesSummary();
+
+    expect(summary.find((s) => s.challengeId === "challenge-0001")?.playerCount).toBe(0);
+  });
+
   it("respects board exclusion for both player count and best", async () => {
     await insertCompletedV2({
       id: "summary-excluded-best", accountId: "summary-excl-account", elapsedMs: 3_000,
@@ -4192,6 +4264,21 @@ describe("getAccountChallengeOutcomes (Increment 5)", () => {
          abandoned_at='2026-07-14T01:00:02.000Z', elapsed_ms=2000,
          wall_elapsed_ms=2000 WHERE id='outcomes-zero-click'`,
     ).run();
+
+    const { repository } = fixture();
+    const outcomes = await repository.getAccountChallengeOutcomes(me);
+
+    expect(outcomes.map((o) => o.challengeId)).not.toContain("challenge-0001");
+  });
+
+  it("FB-7 (owner ruling, 2026-07-19): omits a challenge where the account's only run was a 1-click DNF - the client reads this as 'NEW', not 'DNF'", async () => {
+    const me: AuthorizedAccount = {
+      accountId: "outcomes-one-click-account", displayName: "Casey", status: "claimed", aliases: [],
+    };
+    await insertAbandonedV2({
+      id: "outcomes-one-click", accountId: me.accountId, clickCount: 1, elapsedMs: 1_000,
+      abandonedAt: "2026-07-14T01:00:01.000Z", challengeId: "challenge-0001",
+    });
 
     const { repository } = fixture();
     const outcomes = await repository.getAccountChallengeOutcomes(me);
@@ -4530,6 +4617,23 @@ describe("listDailyTrends (Increment 4)", () => {
     expect(ranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
     expect(unranked.find((entry) => entry.accountId === accountId)).toMatchObject({ playedCount: 10 });
   });
+
+  it("FB-7 (owner ruling, 2026-07-19): a day whose only interaction is a 1-click DNF is NOT played", async () => {
+    const accountId = "trend-subthreshold-dnf-account";
+    const challengeId = "trend-subthreshold-dnf-challenge";
+    await insertDailyChallenge({ id: challengeId, sortOrder: 3300 });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-18", challengeId, selectionSource: "automatic" });
+    await insertAbandonedV2({
+      id: "subthreshold-dnf-run", accountId, clickCount: 1, elapsedMs: 1_000,
+      abandonedAt: "2026-07-18T01:00:01.000Z", challengeId,
+    });
+
+    const { repository } = fixture();
+    const { ranked, unranked } = await repository.listDailyTrends(7, "2026-07-18");
+
+    expect(ranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
+    expect(unranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
+  });
 });
 
 describe("listAllPlayersRoster (PKG-14: direct owner feedback - lifetime/board stats must include everyone who's played)", () => {
@@ -4612,6 +4716,31 @@ describe("listAllPlayersRoster (PKG-14: direct owner feedback - lifetime/board s
     const roster = await repository.listAllPlayersRoster();
 
     expect(roster.find((entry) => entry.accountId === accountId)).toBeDefined();
+  });
+
+  it("FB-7 (owner ruling, 2026-07-19): racesStarted is unaffected by the DNF click threshold - even a 1-click (or 0-click) run counts", async () => {
+    const oneClickAccount = "roster-one-click-account";
+    const zeroClickAccount = "roster-zero-click-account";
+    await insertAbandonedV2({
+      id: "roster-one-click-run", accountId: oneClickAccount, clickCount: 1,
+      elapsedMs: 1_000, abandonedAt: "2026-07-18T01:00:01.000Z", challengeId: "challenge-0001",
+    });
+    await insertLegacyRun({ id: "roster-zero-click-run", accountId: zeroClickAccount, challengeId: "challenge-0002" });
+    await env.VWIKI_RACE_DB.prepare(
+      `UPDATE runs SET status='abandoned', protocol_version=2, click_count=0,
+         abandoned_at='2026-07-18T01:00:01.000Z', elapsed_ms=1000,
+         wall_elapsed_ms=1000 WHERE id='roster-zero-click-run'`,
+    ).run();
+
+    const { repository } = fixture();
+    const roster = await repository.listAllPlayersRoster();
+
+    expect(roster.find((entry) => entry.accountId === oneClickAccount)).toMatchObject({
+      racesStarted: 1, finishes: 0, wins: 0,
+    });
+    expect(roster.find((entry) => entry.accountId === zeroClickAccount)).toMatchObject({
+      racesStarted: 1, finishes: 0, wins: 0,
+    });
   });
 });
 
@@ -4698,6 +4827,24 @@ describe("getAccountDailyStreak (Increment 4)", () => {
 
     const { repository } = fixture();
     await expect(repository.getAccountDailyStreak(accountId, "2026-07-18")).resolves.toBe(2);
+  });
+
+  it("FB-7 (owner ruling, 2026-07-19): a 1-click DNF today is a sub-threshold non-attempt and does NOT extend the streak", async () => {
+    const accountId = "streak-subthreshold-today";
+    const yesterdayChallengeId = "streak-subthreshold-yesterday";
+    const todayChallengeId = "streak-subthreshold-today-challenge";
+    await insertDailyChallenge({ id: yesterdayChallengeId, sortOrder: 1360 });
+    await insertDailyChallenge({ id: todayChallengeId, sortOrder: 1361 });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-17", challengeId: yesterdayChallengeId, selectionSource: "automatic" });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-18", challengeId: todayChallengeId, selectionSource: "automatic" });
+    await insertCompletedV2({ id: "streak-subthreshold-yesterday-run", accountId, elapsedMs: 4_000, completedAt: "2026-07-17T01:00:04.000Z", challengeId: yesterdayChallengeId });
+    await insertAbandonedV2({ id: "streak-subthreshold-today-run", accountId, clickCount: 1, elapsedMs: 1_000, abandonedAt: "2026-07-18T01:00:01.000Z", challengeId: todayChallengeId });
+
+    const { repository } = fixture();
+    // Today's DNF doesn't count as played (sub-threshold), so it's treated
+    // as unplayed-so-far (grace) rather than extending or breaking the
+    // streak - yesterday's finish alone gives a streak of 1.
+    await expect(repository.getAccountDailyStreak(accountId, "2026-07-18")).resolves.toBe(1);
   });
 
   it("is alias-resolved", async () => {

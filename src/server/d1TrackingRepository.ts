@@ -32,6 +32,7 @@ import {
   fingerprintRunClick,
   fingerprintStartRun,
   MAX_RUN_CLICKS,
+  MIN_COUNTED_DNF_CLICKS,
   MIN_RESUMABLE_CLICKS,
   RUN_EXPIRY_MS,
   type AbandonRunV2Input,
@@ -2239,6 +2240,15 @@ export function createD1TrackingRepository(options: {
     },
 
     async listLeaderboard(challengeId) {
+      // FB-7 (owner ruling, 2026-07-19) boundary: deliberately NOT gated by
+      // `MIN_COUNTED_DNF_CLICKS`, unlike every board/streak/trend
+      // derivation elsewhere in this file. This is the only consumer of
+      // "Your history" on Challenge Detail (App.tsx's `listLeaderboard` ->
+      // `leaderboard` prop) - the viewer's own per-attempt record, not a
+      // public board - and the spec explicitly keeps ALL of a viewer's own
+      // attempts there, sub-threshold DNFs included. Its existing
+      // `click_count > 0` eligibility (excluding only 0-click ghosts) is
+      // unrelated pre-existing behavior, not part of this change.
       const { results } = await db
         .prepare(
           `WITH resolved AS (
@@ -2392,10 +2402,17 @@ export function createD1TrackingRepository(options: {
                AND ((protocol_version = 2 AND ranked_eligible = 1)
                     OR protocol_version = 1)
            ), dnf_eligible AS (
+             -- FB-7 (owner ruling): a DNF only counts as a real attempt -
+             -- board-visible here - at MIN_COUNTED_DNF_CLICKS or above.
+             -- Sub-threshold DNFs (0 or 1 clicks) are usually accidental
+             -- opens, not real attempts, and are dropped everywhere "played"
+             -- is derived (this query, listDailyTrends, getAccountDailyStreak,
+             -- listChallengesSummary, getAccountChallengeOutcomes,
+             -- getPublicRunPath, getPlayAnotherSuggestion's popularity CTE).
              SELECT *
              FROM resolved
              WHERE status = 'abandoned'
-               AND click_count > 0
+               AND click_count >= ?
                AND elapsed_ms IS NOT NULL
                AND abandoned_at IS NOT NULL
                AND account_id NOT IN (SELECT account_id FROM completed_eligible_accounts)
@@ -2416,7 +2433,7 @@ export function createD1TrackingRepository(options: {
                     best.abandoned_at ASC, best.id
            LIMIT 100`,
         )
-        .bind(challengeId)
+        .bind(challengeId, MIN_COUNTED_DNF_CLICKS)
         .all<ChallengeDnfQueryRow>();
       return results.map((row) => ({
         accountId: row.account_id,
@@ -2441,13 +2458,15 @@ export function createD1TrackingRepository(options: {
       // truncated per-daily field would silently distort every account's
       // average once aggregated across many dailies.
       //
-      // F2 (spec §Boards "≥1 eligible/leaderboard-visible run"): a
-      // board-visible DNF (≥1 click abandon, same eligibility shape as
+      // F2 (spec §Boards "≥1 eligible/leaderboard-visible run"), amended by
+      // FB-7 (owner ruling, 2026-07-19): a board-visible DNF (>=
+      // MIN_COUNTED_DNF_CLICKS, same eligibility shape as
       // `listChallengeDnfs`) counts toward `played_count` alongside
       // completed dailies, but `avg_placement` stays over `placements`
       // only (finished dailies) - `played_days` is a distinct UNION of
       // finished-challenge and DNF-challenge per account so a day that's
-      // both (unusual, but harmless) doesn't double-count.
+      // both (unusual, but harmless) doesn't double-count. Sub-threshold
+      // (0/1-click) DNFs are non-attempts and never enter `played_days`.
       // PKG-14: the participation guard is reality-scaled off how many
       // dailies actually exist in this exact window (lifetime = ever) -
       // this is the same `daily_features` row set `windowed_dailies` below
@@ -2498,7 +2517,7 @@ export function createD1TrackingRepository(options: {
              SELECT DISTINCT challenge_id, account_id
              FROM resolved
              WHERE status = 'abandoned'
-               AND click_count > 0
+               AND click_count >= ?
                AND elapsed_ms IS NOT NULL
                AND abandoned_at IS NOT NULL
            ), played_days AS (
@@ -2520,7 +2539,7 @@ export function createD1TrackingRepository(options: {
            LEFT JOIN avgs ON avgs.account_id = played.account_id
            LEFT JOIN account_profiles p ON p.account_id = played.account_id`,
         )
-        .bind(...dateBindings)
+        .bind(...dateBindings, MIN_COUNTED_DNF_CLICKS)
         .all<DailyTrendQueryRow>();
 
       const ranked: DailyTrendRankedEntry[] = [];
@@ -2562,6 +2581,13 @@ export function createD1TrackingRepository(options: {
       // the gap the owner hit (lollerskates/FranTheGreat only ever raced
       // custom challenges, so `listDailyTrends`'s daily-only join could
       // never surface them, not even as "not yet ranked").
+      //
+      // FB-7 (owner ruling, 2026-07-19): deliberately NOT gated by
+      // `MIN_COUNTED_DNF_CLICKS` - `racesStarted` (`started`, below) is a
+      // friendly census of every run row regardless of status or clicks, a
+      // strictly broader bar than "played" everywhere else in this file. It
+      // stays a raw, honest count; `finishes`/`wins` are unaffected either
+      // way since they already require `status = 'completed'`, never a DNF.
       const { results } = await db
         .prepare(
           `WITH resolved AS (
@@ -2644,14 +2670,16 @@ export function createD1TrackingRepository(options: {
       // statement, so once the catalog passed ~100 dailies ever played,
       // this query would 500 on every stats read in real D1 (Miniflare
       // doesn't enforce the cap, so that never surfaced locally). This is
-      // now a single join with exactly 2 fixed binds (`todayCentral`,
-      // `accountId`) no matter how many dailies exist - see the
-      // "150 daily_features rows" regression test.
+      // now a single join with exactly 3 fixed binds (`todayCentral`,
+      // `accountId`, `MIN_COUNTED_DNF_CLICKS`) no matter how many dailies
+      // exist - see the "150 daily_features rows" regression test.
       //
-      // F2: "played" here matches the trends participation guard - a
-      // board-visible DNF (≥1 click abandon, same eligibility shape as
+      // F2, amended by FB-7 (owner ruling, 2026-07-19): "played" here
+      // matches the trends participation guard - a board-visible DNF (>=
+      // MIN_COUNTED_DNF_CLICKS, same eligibility shape as
       // `listChallengeDnfs`/`listDailyTrends`) counts the same as a
-      // completed run. A date only ever lands in the result if
+      // completed run; a sub-threshold (0/1-click) DNF is a non-attempt and
+      // never lands here. A date only ever lands in the result if
       // `daily_features` has a row for it AND this account played that
       // row's challenge - a genuine catalog gap (no `daily_features` row)
       // can never appear here, so it still breaks the streak exactly like
@@ -2671,11 +2699,11 @@ export function createD1TrackingRepository(options: {
                  AND r.completed_at IS NOT NULL
                  AND ((r.protocol_version = 2 AND r.ranked_eligible = 1)
                       OR r.protocol_version = 1))
-               OR (r.status = 'abandoned' AND r.click_count > 0
+               OR (r.status = 'abandoned' AND r.click_count >= ?
                  AND r.elapsed_ms IS NOT NULL AND r.abandoned_at IS NOT NULL)
              )`,
         )
-        .bind(todayCentral, accountId)
+        .bind(todayCentral, accountId, MIN_COUNTED_DNF_CLICKS)
         .all<{ daily_date: string }>();
 
       const playedDates = new Set(results.map((row) => row.daily_date));
@@ -2749,6 +2777,11 @@ export function createD1TrackingRepository(options: {
       // call this with no viewer at all (a straight, unauthenticated
       // bypass of this exact guard) - it has been retired entirely rather
       // than gated; see worker.ts.
+      //
+      // FB-7 (owner ruling, 2026-07-19): the target run's own abandoned-DNF
+      // eligibility now requires >= MIN_COUNTED_DNF_CLICKS, matching
+      // `listChallengeDnfs` - a sub-threshold DNF is no longer board-visible
+      // anywhere, so its path shouldn't be disclosable here either.
       const viewer = normalizeAuthorizedAccount(viewerAccountInput);
       const receipt = receiptIdsCte(viewer);
       const { results } = await db.prepare(
@@ -2764,7 +2797,7 @@ export function createD1TrackingRepository(options: {
                (r.protocol_version = 2 AND r.ranked_eligible = 1)
                OR r.protocol_version = 1
              ))
-           OR (r.status = 'abandoned' AND r.click_count > 0
+           OR (r.status = 'abandoned' AND r.click_count >= ?
              AND r.abandoned_at IS NOT NULL)
          )
          AND EXISTS (
@@ -2784,7 +2817,7 @@ export function createD1TrackingRepository(options: {
              )
          )
          ORDER BY p.step_number`,
-      ).bind(...receipt.bindings, runId).all<PathStepRow>();
+      ).bind(...receipt.bindings, runId, MIN_COUNTED_DNF_CLICKS).all<PathStepRow>();
       if (!results.length) {
         throw new ApiError("run_path_not_found", "That completed ranked run was not found.", 404);
       }
@@ -2905,9 +2938,12 @@ export function createD1TrackingRepository(options: {
 
     async listChallengesSummary() {
       // One query across every active challenge (council: "no N+1 per
-      // challenge"), reusing the exact eligibility shape `listLeaderboard`/
+      // challenge"), reusing the exact eligibility shape `listChallengeDnfs`/
       // `listChallengePlacements` already established, just GROUP BY'd
-      // instead of scoped to a single challenge_id.
+      // instead of scoped to a single challenge_id. FB-7 (owner ruling,
+      // 2026-07-19): `player_count` (Browse's "N players") is a played
+      // derivation, so it's gated by `MIN_COUNTED_DNF_CLICKS` same as the
+      // rest - a sub-threshold DNF doesn't inflate the count.
       const { results } = await db
         .prepare(
           `WITH resolved AS (
@@ -2926,7 +2962,7 @@ export function createD1TrackingRepository(options: {
                status = 'completed' AND elapsed_ms IS NOT NULL AND completed_at IS NOT NULL
                AND ((protocol_version = 2 AND ranked_eligible = 1) OR protocol_version = 1)
              ) OR (
-               status = 'abandoned' AND click_count > 0
+               status = 'abandoned' AND click_count >= ?
                AND elapsed_ms IS NOT NULL AND abandoned_at IS NOT NULL
              )
            ), players AS (
@@ -2960,6 +2996,7 @@ export function createD1TrackingRepository(options: {
            WHERE c.is_active = 1
            ORDER BY c.sort_order`,
         )
+        .bind(MIN_COUNTED_DNF_CLICKS)
         .all<ChallengeSummaryQueryRow>();
       return results.map((row) => ({
         challengeId: row.challenge_id,
@@ -2971,6 +3008,11 @@ export function createD1TrackingRepository(options: {
     },
 
     async getAccountChallengeOutcomes(accountInput) {
+      // FB-7 (owner ruling, 2026-07-19): the "eligible" DNF branch below is
+      // gated by `MIN_COUNTED_DNF_CLICKS`, same as `listChallengeDnfs` - a
+      // sub-threshold DNF is absent from this response entirely, which
+      // `deriveChallengeStateChip` (client) already reads as "NEW", not
+      // "DNF" (see its doc comment: undefined -> NEW).
       const account = normalizeAuthorizedAccount(accountInput);
       const receipt = receiptIdsCte(account);
       const { results } = await db
@@ -2992,7 +3034,7 @@ export function createD1TrackingRepository(options: {
                status = 'completed' AND elapsed_ms IS NOT NULL AND completed_at IS NOT NULL
                AND ((protocol_version = 2 AND ranked_eligible = 1) OR protocol_version = 1)
              ) OR (
-               status = 'abandoned' AND click_count > 0
+               status = 'abandoned' AND click_count >= ?
                AND elapsed_ms IS NOT NULL AND abandoned_at IS NOT NULL
              )
            ), best_completed AS (
@@ -3012,7 +3054,7 @@ export function createD1TrackingRepository(options: {
            LEFT JOIN best_completed bc ON bc.challenge_id = e.challenge_id AND bc.rn = 1
            GROUP BY e.challenge_id`,
         )
-        .bind(...receipt.bindings)
+        .bind(...receipt.bindings, MIN_COUNTED_DNF_CLICKS)
         .all<ChallengeOutcomeQueryRow>();
       return results.map((row) => {
         const completed = Number(row.best_group) === 0;
@@ -3027,6 +3069,13 @@ export function createD1TrackingRepository(options: {
     },
 
     async getPlayAnotherSuggestion(accountInput, todayCentral) {
+      // Note: `touched` (above `resolved`/`eligible`) is deliberately NOT
+      // gated by `MIN_COUNTED_DNF_CLICKS` - "started" here means ANY run
+      // row at all, including a 0-click one, a strictly broader bar than
+      // "played" (see this method's doc comment in trackingRepository.ts).
+      // FB-7 (owner ruling, 2026-07-19) only touches `eligible`'s
+      // popularity-ranking DNF branch below, for consistency with
+      // `listChallengesSummary`'s identical "N players" shape.
       const account = normalizeAuthorizedAccount(accountInput);
       const receipt = receiptIdsCte(account);
       const row = await db
@@ -3051,7 +3100,7 @@ export function createD1TrackingRepository(options: {
                status = 'completed' AND elapsed_ms IS NOT NULL AND completed_at IS NOT NULL
                AND ((protocol_version = 2 AND ranked_eligible = 1) OR protocol_version = 1)
              ) OR (
-               status = 'abandoned' AND click_count > 0
+               status = 'abandoned' AND click_count >= ?
                AND elapsed_ms IS NOT NULL AND abandoned_at IS NOT NULL
              )
            ), players AS (
@@ -3077,7 +3126,7 @@ export function createD1TrackingRepository(options: {
            ORDER BY coalesce(p.player_count, 0) DESC, c.sort_order ASC
            LIMIT 1`,
         )
-        .bind(...receipt.bindings, todayCentral)
+        .bind(...receipt.bindings, MIN_COUNTED_DNF_CLICKS, todayCentral)
         .first<ChallengeRow>();
       return row ? mapChallengeRow(row) : null;
     },

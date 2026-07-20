@@ -473,11 +473,13 @@ describe("VWiki Race app", () => {
     // End the run (0 clicks) and return to the shell - if the buggy
     // refresh above had silently flipped `mode` to "challenges" -> "detail"
     // underneath the race takeover, it would surface right here: landing on
-    // Challenge Detail instead of back on Home.
+    // Challenge Detail instead of back on Home. FB-7 (owner ruling,
+    // 2026-07-19): a 0-click end is a sub-threshold DNF (non-attempt), so
+    // Home lands back on the FRESH state, not "Try again".
     await user.click(screen.getByRole("button", { name: /^end run$/i }));
     await user.click(await screen.findByRole("button", { name: /confirm end run/i }));
 
-    expect(await screen.findByRole("button", { name: /try again/i })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
     expect(screen.queryByRole("region", { name: /challenge detail/i })).toBeNull();
   });
 
@@ -2372,9 +2374,11 @@ describe("VWiki Race app", () => {
     const loginForm = screen.getByLabelText(/password/i).closest("form");
     await user.click(within(loginForm as HTMLFormElement).getByRole("button", { name: /^log in$/i }));
 
-    // Home's DNF sub-state (spec: "an end-run this session") - a voluntary
-    // 0-click End Run still counts as "attempted, not finished" today.
-    expect(await screen.findByRole("button", { name: /try again/i })).toBeEnabled();
+    // FB-7 (owner ruling, 2026-07-19): a voluntary 0-click End Run is a
+    // sub-threshold DNF - a non-attempt - so Home stays FRESH (never enters
+    // the DNF sub-state) rather than "attempted, not finished" today.
+    expect(await screen.findByRole("button", { name: /▶ race/i })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
     expect(abandonRunCalls(fetchImpl, "run-1")).toBe(2);
   });
 

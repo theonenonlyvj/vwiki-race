@@ -5,6 +5,18 @@ export const DECISION_TIME_GRACE_MS = 5_000;
 // clicks. Sub-threshold runs are transient "ghosts" that findActiveRun hides
 // and that startRunV2 auto-abandons to make way for a fresh start.
 export const MIN_RESUMABLE_CLICKS = 2;
+// FB-7 (owner ruling, 2026-07-19: "hide DNF runs [that] don't involve >1
+// click from the start. those dont really even count, no?"): a DNF only
+// counts as a real attempt - board-visible, played for
+// streak/trend/guard/roster-adjacent purposes - at this many clicks or more.
+// Below it, a DNF is usually an accidental open, the same artifact family as
+// the phantom "in progress" runs already fixed elsewhere. Completed runs
+// always count regardless of clicks; this only gates DNFs. Shares
+// `MIN_RESUMABLE_CLICKS`'s value but is a distinct concept (this gates
+// read-side "did this count as playing," not write-side active-run
+// visibility) - kept as its own named constant so the two can diverge later
+// without silently coupling.
+export const MIN_COUNTED_DNF_CLICKS = 2;
 
 export interface StartRunV2Input {
   challengeId: string;

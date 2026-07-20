@@ -257,11 +257,13 @@ export interface RunProtocolRepository extends TrackingRepository {
    * flagged "revisit at Increment 4": rolling trends must consider every
    * eligible finisher of each daily, not just the first 100.
    *
-   * F2 (spec §Boards "≥1 eligible/leaderboard-visible run"): a
-   * board-visible DNF counts toward each entry's `playedCount`
-   * (participation) the same as a finish does, both for clearing the
-   * ranking guard and for the below-guard progress count - but
-   * `avgPlacement` is only ever computed over finished dailies.
+   * F2 (spec §Boards "≥1 eligible/leaderboard-visible run"), amended by FB-7
+   * (owner ruling, 2026-07-19): a board-visible DNF (>=
+   * `MIN_COUNTED_DNF_CLICKS`, see runProtocol.ts) counts toward each entry's
+   * `playedCount` (participation) the same as a finish does, both for
+   * clearing the ranking guard and for the below-guard progress count - but
+   * `avgPlacement` is only ever computed over finished dailies. A
+   * sub-threshold (0/1-click) DNF is a non-attempt and never counts.
    *
    * PKG-14: `guard` is now computed HERE (not by the caller from `windowDays`
    * alone) because it's reality-scaled off `dailiesAvailable` - the count of
@@ -277,18 +279,23 @@ export interface RunProtocolRepository extends TrackingRepository {
   }>;
   /**
    * PKG-14 (direct owner feedback): Lifetime's "Everyone who's played"
-   * roster - every canonical account with ≥1 board-visible run across ANY
-   * challenge (daily or custom), independent of the ranked-trends
-   * participation guard entirely. See `AllPlayersRosterEntry`'s doc comment
-   * for the exact `racesStarted`/`finishes`/`wins` definitions.
+   * roster - every canonical account with ≥1 run row (ANY status/clicks)
+   * across ANY challenge (daily or custom), independent of the
+   * ranked-trends participation guard entirely. FB-7 (owner ruling,
+   * 2026-07-19): deliberately NOT gated by `MIN_COUNTED_DNF_CLICKS` -
+   * `racesStarted` stays a raw, honest census (broader than "played"
+   * everywhere else); `finishes`/`wins` are unaffected either way, since
+   * they already require a completed run. See `AllPlayersRosterEntry`'s doc
+   * comment for the exact `racesStarted`/`finishes`/`wins` definitions.
    */
   listAllPlayersRoster(): Promise<AllPlayersRosterEntry[]>;
   /**
    * Boards/Home streak (Increment 4): consecutive Central dates, ending
    * today or yesterday, on which `accountId` (alias-resolved) has ≥1
-   * eligible completed OR board-visible-DNF run on that date's daily (F2 -
-   * same participation definition as `listDailyTrends`). Silent reset on a
-   * missed day - no grace period.
+   * eligible completed OR board-visible-DNF run on that date's daily (F2,
+   * amended by FB-7 - same participation definition as `listDailyTrends`,
+   * including the >= `MIN_COUNTED_DNF_CLICKS` DNF threshold). Silent reset
+   * on a missed day - no grace period.
    */
   getAccountDailyStreak(accountId: string, todayCentral: string): Promise<number>;
   findQueuedDailyCandidate(flavor: DailyFlavor): Promise<DailyQueuedCandidate | null>;
