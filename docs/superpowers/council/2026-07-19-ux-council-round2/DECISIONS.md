@@ -16,3 +16,4 @@
 | 11 | Reks/sgattu merge | **Later** |
 | 12 | viota 9e64e9a push | Approved (turned out already pushed) |
 | D | Defaults batch | Accepted: DNF salmon, roster by races, keyboard-racing deferred, private-browsing notice YES, roster-privacy deferred |
+| FB-7 | Sub-2-click DNFs | **Non-attempts everywhere** (owner: "those dont really even count"): hidden from all boards, don't tick played/streak/guard/You-tiles. Exceptions: own Results page after ending, "Your history" per-attempt list, roster racesStarted census. Amends the round-1 "DNF counts as played" ruling for clicks < 2. |
