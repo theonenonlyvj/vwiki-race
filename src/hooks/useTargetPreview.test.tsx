@@ -26,7 +26,7 @@ describe("useTargetPreview", () => {
       status: "ready",
       challengeId: "challenge-1",
       canonicalTitle: "Target One",
-      preview: { blurb: "Target One is useful context." },
+      preview: { blurb: "Target One is a useful and notable subject with plenty of interesting context to explore." },
     });
   });
 
@@ -132,7 +132,7 @@ function article(canonicalTitle: string, pageId: number): Article {
     attributionUrl: `https://en.wikipedia.org/w/index.php?title=${canonicalTitle}&oldid=3`,
     attribution: "Wikipedia revision 3",
     links: [],
-    sanitizedHtml: `<p>${canonicalTitle} is useful context.</p>` as SanitizedWikipediaHtml,
+    sanitizedHtml: `<p>${canonicalTitle} is a useful and notable subject with plenty of interesting context to explore.</p>` as SanitizedWikipediaHtml,
   };
 }
 

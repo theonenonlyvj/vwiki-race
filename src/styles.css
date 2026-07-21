@@ -1560,7 +1560,11 @@ h1 {
   display: grid;
   min-height: calc(100vh - 28px);
   place-items: center;
-  width: min(760px, 100%);
+  /* PV-1: was min(760px, 100%) - at wide viewports the card read as a wide,
+     sparse block with a lot of dead space either side. 680px reads as an
+     intentionally composed column instead. The >=880px rule below widens
+     this again to make room for the back-button gutter beside the card. */
+  width: min(680px, 100%);
   margin-inline: auto;
   padding-top: 54px;
 }
@@ -3466,23 +3470,43 @@ h1 {
     max-width: 420px;
   }
 
-  /* PKG-08: at this width the preview card is vertically centered in a much
-     taller, shorter-content viewport than mobile, so the top-pinned back
-     button (still `position: absolute; top: 0; left: 0` at narrower widths)
-     ended up orphaned ~190px above the card with no compositional
-     relationship to it. Folding it into the same flex column as the card -
-     both sharing the card's own max-width and left edge - ties it to the
-     card instead of the viewport corner. */
+  /* PKG-08 (finished by PV-1): at this width the preview card is vertically
+     centered in a much taller, shorter-content viewport than mobile, so the
+     top-pinned back button (still `position: absolute; top: 0; left: 0` at
+     narrower widths) used to sit ~190px above the card with no compositional
+     relationship to it. PKG-08 folded it into the same flex column as the
+     card (closer, but still its own stacked row above the card, and the
+     760px card itself sprawled at wide viewports). PV-1 finishes the job:
+     the card is capped at a tighter, more intentional 680px (base rule
+     above), and the back button moves into a gutter column beside the card
+     instead of a row above it - explicit `1fr auto 1fr` rows keep the
+     button+card pair centered as one block in the tall viewport while
+     `align-items: start` on the shared content row pins the button flush
+     with the card's own top edge (not the card's vertical midpoint, which
+     is what a plain single-row `align-items: center` would give here). */
   .pre-race-preview {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: auto min(680px, 100%);
+    grid-template-rows: 1fr auto 1fr;
+    column-gap: 16px;
+    width: min(760px, 100%);
     justify-content: center;
-    gap: 14px;
+    justify-items: stretch;
+    align-items: start;
+    padding-top: 0;
   }
 
   .pre-race-back {
     position: static;
+    grid-row: 2;
+    /* Matches `.pre-race-copy`'s own top padding (clamp(20px, 4vw, 42px))
+       so the arrow lines up with the card's first line of content (the
+       daily badge/kicker row), not the bare top border. */
+    margin-top: clamp(20px, 4vw, 42px);
+  }
+
+  .pre-race-copy {
+    grid-row: 2;
   }
 }
 

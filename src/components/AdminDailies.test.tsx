@@ -144,7 +144,9 @@ describe("AdminDailies", () => {
     const row = await screen.findByRole("article", { name: "Nomination Challenge #101 Mercury to Solar System" });
     expect(gateway.getArticle).not.toHaveBeenCalled();
     await userEvent.click(within(row).getByRole("button", { name: "Preview target Solar System" }));
-    expect(await within(row).findByText("Solar System is useful context.")).toBeVisible();
+    expect(await within(row).findByText(
+      "Solar System is a useful and notable subject with plenty of interesting context to explore.",
+    )).toBeVisible();
     expect(gateway.getArticle).toHaveBeenCalledWith(
       "Solar System",
       expect.objectContaining({ ruleset: "ranked_classic", signal: expect.any(AbortSignal) }),
@@ -342,6 +344,6 @@ function article(title: string): Article {
     attributionUrl: `https://en.wikipedia.org/w/index.php?title=${title}&oldid=3`,
     attribution: "Wikipedia revision 3",
     links: [],
-    sanitizedHtml: `<p>${title} is useful context.</p>` as SanitizedWikipediaHtml,
+    sanitizedHtml: `<p>${title} is a useful and notable subject with plenty of interesting context to explore.</p>` as SanitizedWikipediaHtml,
   };
 }
