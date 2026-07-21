@@ -2003,7 +2003,12 @@ describe("VWiki Race app", () => {
     const history = screen.getByRole("region", { name: /your history/i });
     const disclosure = within(history).getByText(/view winning path/i);
     await user.click(disclosure);
-    expect((await screen.findAllByText(/apple → fruit/i)).length).toBeGreaterThan(0);
+    // Single-chain rendering (owner feedback 2026-07-20): the start article
+    // plain, then the target on its own line prefixed with the arrow - scoped
+    // to "Your history" so this can't coincidentally match the unrelated
+    // "Apple → Fruit" route-header title, which shares the same text.
+    expect(await within(history).findByText("Apple")).toBeVisible();
+    expect(within(history).getByText(/→ Fruit/)).toBeVisible();
     await user.click(disclosure);
     await user.click(disclosure);
     expect(runPathCalls(fetchImpl, "run-ranked")).toBe(1);
@@ -2141,7 +2146,11 @@ describe("VWiki Race app", () => {
     expect(ariRow).not.toBeNull();
     expect(runPathCalls(fetchImpl, "run-ranked")).toBe(0);
     await user.click(within(ariRow as HTMLElement).getByText("View winning path"));
-    expect((await within(ariRow as HTMLElement).findAllByText(/apple → fruit/i)).length).toBeGreaterThan(0);
+    // Single-chain rendering (owner feedback 2026-07-20): the start article
+    // plain, then the target on its own line prefixed with the arrow -
+    // "Apple → Fruit" is no longer one combined text node.
+    expect(await within(ariRow as HTMLElement).findByText("Apple")).toBeVisible();
+    expect(within(ariRow as HTMLElement).getByText(/→ Fruit/)).toBeVisible();
     expect(runPathCalls(fetchImpl, "run-ranked")).toBe(1);
 
     // Ari never shows up in "Your history" - that strip is the viewer's own
@@ -5588,7 +5597,11 @@ describe("Boards v1: Today/Yesterday daily views (Increment 3)", () => {
     expect(ariRow).not.toBeNull();
     expect(runPathCalls(fetchImpl, "run-ranked")).toBe(0);
     await user.click(within(ariRow as HTMLElement).getByText("View winning path"));
-    expect((await within(ariRow as HTMLElement).findAllByText(/apple → fruit/i)).length).toBeGreaterThan(0);
+    // Single-chain rendering (owner feedback 2026-07-20): the start article
+    // plain, then the target on its own line prefixed with the arrow -
+    // "Apple → Fruit" is no longer one combined text node.
+    expect(await within(ariRow as HTMLElement).findByText("Apple")).toBeVisible();
+    expect(within(ariRow as HTMLElement).getByText(/→ Fruit/)).toBeVisible();
     expect(runPathCalls(fetchImpl, "run-ranked")).toBe(1);
   });
 

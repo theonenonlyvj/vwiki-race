@@ -5,6 +5,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import WinningPathChain from "../components/WinningPathChain";
 import {
   dailyDateForChallenge,
   previousCentralDate,
@@ -12,6 +13,7 @@ import {
 } from "../domain/challengeSelection";
 import { dailyFlavorBadgeText } from "../domain/dailyEditorial";
 import { formatTimeAndClicks } from "../domain/formatting";
+import { pathStepsToChain } from "../domain/winningPath";
 import type { AllPlayersRosterEntry, Challenge, ServerPathStep } from "../domain/types";
 import type {
   BoardsTrendRankedEntry,
@@ -124,17 +126,23 @@ function isTrendSegment(segment: BoardsSegment): segment is TrendSegment {
  * below is `Boolean(ownPlacement)` - the viewer's own placement row on
  * THIS board, i.e. a completed run on the currently-shown daily; a DNF alone
  * never unlocks it (invariant 2 - only a completion counts as "played").
- * Deliberately duplicates `LeaderboardList`'s row markup/CSS classes
- * (`.path-disclosure`/`.winning-path`) here rather than importing that
- * component, matching this file's pre-existing precedent of keeping its own
- * inline `.board-snippet`/`.board-dnf-section` markup in lockstep with
- * Detail's by hand (see that component's own doc comment) rather than a
- * shared abstraction. DNF rows never get the affordance - `ChallengeBoardDnfRow`
- * carries no `runId` to disclose, so the absence is structural, not a
- * separate check. The actual disclosure request now runs through the
- * server's own viewer-finished guard (`getPublicRunPath`, extended this
- * same package) - client-side `pathsUnlocked` is UX gating, not the real
- * access boundary.
+ * Still deliberately duplicates `LeaderboardList`'s row markup/CSS classes
+ * (`.path-disclosure`) here rather than importing that component, matching
+ * this file's pre-existing precedent of keeping its own inline
+ * `.board-snippet`/`.board-dnf-section` markup in lockstep with Detail's by
+ * hand (see that component's own doc comment) rather than a shared row
+ * abstraction. The disclosed PATH itself is the one piece pulled out of that
+ * precedent (owner feedback 2026-07-20 on Detail's "View winning path": the
+ * old hand-duplicated `<ol className="winning-path">` in each of the three
+ * call sites rendered hop pairs, printing every interim article twice) - all
+ * three now share `WinningPathChain` (`../components/WinningPathChain`) off
+ * the same `pathStepsToChain` conversion, so the rendered chain itself can't
+ * drift per surface even though the surrounding row markup still does. DNF
+ * rows never get the affordance - `ChallengeBoardDnfRow` carries no `runId`
+ * to disclose, so the absence is structural, not a separate check. The
+ * actual disclosure request now runs through the server's own
+ * viewer-finished guard (`getPublicRunPath`, extended this same package) -
+ * client-side `pathsUnlocked` is UX gating, not the real access boundary.
  *
  * The trend drill-down (tapping your own ranked row) is the one place the
  * spec's "placement + time · clicks" (invariant 1) suffices on its own,
@@ -704,11 +712,7 @@ export default function Boards({
                         >
                           <summary>View winning path</summary>
                           {runPaths[row.runId] ? (
-                            <ol className="winning-path">
-                              {runPaths[row.runId].map((step) => (
-                                <li key={step.stepNumber}>{step.sourceTitle} {"→"} {step.destinationTitle}</li>
-                              ))}
-                            </ol>
+                            <WinningPathChain titles={pathStepsToChain(runPaths[row.runId])} />
                           ) : <p>Loading path...</p>}
                         </details>
                       ) : null}

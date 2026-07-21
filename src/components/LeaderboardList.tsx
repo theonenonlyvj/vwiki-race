@@ -1,4 +1,6 @@
+import WinningPathChain from "./WinningPathChain";
 import { formatTimeAndClicks } from "../domain/formatting";
+import { pathStepsToChain } from "../domain/winningPath";
 import type { ChallengeBoardDnfRow, ChallengeBoardPlacement, ServerPathStep } from "../domain/types";
 
 /**
@@ -70,11 +72,7 @@ export default function LeaderboardList({
                     >
                       <summary>View winning path</summary>
                       {runPaths[row.runId] ? (
-                        <ol className="winning-path">
-                          {runPaths[row.runId].map((step) => (
-                            <li key={step.stepNumber}>{step.sourceTitle} {"→"} {step.destinationTitle}</li>
-                          ))}
-                        </ol>
+                        <WinningPathChain titles={pathStepsToChain(runPaths[row.runId])} />
                       ) : <p>Loading path...</p>}
                     </details>
                   ) : null}

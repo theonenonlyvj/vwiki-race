@@ -9,6 +9,7 @@ import {
   type RefObject,
 } from "react";
 import BoardSnippet from "../components/BoardSnippet";
+import WinningPathChain from "../components/WinningPathChain";
 import { boardSnippetRowsForResult, dedupedRankForJustFinished } from "../domain/boardSnippet";
 import PlayAnotherCard from "../components/PlayAnotherCard";
 import { isDailyToday as isChallengeDailyToday } from "../domain/challengeSelection";
@@ -458,6 +459,10 @@ function PathRecap({ session }: { session: GameSession }) {
     ...session.path.map((entry) => entry.resolvedDestination.canonicalTitle),
   ];
   const lastTitle = pathTitles.at(-1) ?? "";
+  // The summary line's own compressed teaser text - shared with the live
+  // in-race PathStrip HUD (RaceMode.tsx) and untouched by the owner's
+  // 2026-07-20 "each interim appears twice" feedback, which was about the
+  // disclosed list below, not this one-line preview.
   const compressed = compressPathForStrip(pathTitles, lastTitle);
 
   return (
@@ -468,11 +473,7 @@ function PathRecap({ session }: { session: GameSession }) {
         </span>
         <span className="link-affordance">see path ›</span>
       </summary>
-      <ol className="winning-path">
-        {pathTitles.map((title, index) => (
-          <li key={`${title}-${index}`}>{title}</li>
-        ))}
-      </ol>
+      <WinningPathChain titles={pathTitles} />
     </details>
   );
 }

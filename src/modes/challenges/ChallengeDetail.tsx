@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import LeaderboardList from "../../components/LeaderboardList";
+import WinningPathChain from "../../components/WinningPathChain";
 import { dailyBadgeLabel } from "../../domain/challengeSelection";
 import { formatTimeAndClicks } from "../../domain/formatting";
+import { pathStepsToChain } from "../../domain/winningPath";
 import type { Challenge, RankedLeaderboardRow, ServerPathStep } from "../../domain/types";
 import type { ChallengeBoardResponse } from "../../server/contracts";
 import type { VWikiRaceApiClient } from "../../services/vwikiRaceApiClient";
@@ -177,11 +179,7 @@ export default function ChallengeDetail({
                       {row.status === "abandoned" ? "View path" : "View winning path"}
                     </summary>
                     {runPaths[row.runId] ? (
-                      <ol className="winning-path">
-                        {runPaths[row.runId].map((step) => (
-                          <li key={step.stepNumber}>{step.sourceTitle} {"→"} {step.destinationTitle}</li>
-                        ))}
-                      </ol>
+                      <WinningPathChain titles={pathStepsToChain(runPaths[row.runId])} />
                     ) : <p>Loading path...</p>}
                   </details>
                 ) : null}
