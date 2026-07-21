@@ -385,3 +385,7 @@ Ship in this order; each is independently mergeable and safe to pause after.
 Resolved during council review (2026-07-18): streak-break behavior (missing
 a day) — silent reset, no grace period, simplest version. See Data
 requirements · Streaks.
+
+## Ratified invariant addendum (2026-07-21, owner)
+
+**DNF finality:** an abandoned run (End Run or expiry) is terminal — it can never be resumed or continued. "Try again" always starts a fresh run with a fresh clock. Rationale: a continuable DNF is a pause button that freezes the competitive clock. The only continuation that exists is resuming a still-ACTIVE run after leaving the page (same attempt, clock still counting). Owner re-confirmed 2026-07-21: "i like that rule."
