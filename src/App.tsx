@@ -1076,6 +1076,22 @@ export default function App({
       // short-circuit below (reusing `nextIdentitySession = identitySession`)
       // is exactly the behavior this must bypass.
       const forceNameEntry = prompt.type === "switch" && prompt.freshName;
+      // AC-1 fix: Cancel on the fresh-entry guard (confirmGhostGuardStartFreshAnyway
+      // was never called) only closes the guard dialog, not the sheet
+      // underneath (§2.3 layering) - without re-checking here, a typed name
+      // + submit would orphan the old ghost's stakes anyway, making Cancel
+      // and "Start fresh anyway" behaviorally identical. Re-interpose the
+      // SAME guard at the actual point of replacement, mirroring login()'s
+      // submit-time interception, so "Start fresh anyway" stays the only
+      // way through.
+      if (
+        forceNameEntry &&
+        ghostGuardRequired(identitySession, accountStats) &&
+        !ghostGuardWaivedFor.has("fresh")
+      ) {
+        setGhostGuard({ entry: "fresh" });
+        return;
+      }
       let nextIdentitySession = identitySession;
       if (!nextIdentitySession || forceNameEntry) {
         const displayName = displayNameDraft.trim();

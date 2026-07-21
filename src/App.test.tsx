@@ -3983,6 +3983,43 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       await userA.click(await screen.findByRole("button", { name: "You" }));
       expect(screen.queryByRole("button", { name: /play as someone else/i })).toBeNull();
     });
+
+    // AC-1 regression: Cancel on the fresh-entry guard only dismisses the
+    // dialog, not the sheet underneath - it must NOT be equivalent to
+    // "Start fresh anyway". Typing a name and submitting afterward has to
+    // re-hit the same guard (continueAsGuest's own check), not silently
+    // orphan the old ghost's stakes.
+    it("'Cancel' does not waive the guard - typing a name and submitting afterward re-fires it instead of orphaning the old ghost", async () => {
+      const user = userEvent.setup();
+      const fetchImpl = createFetchMock({ accountAttempts: 3 });
+      const storage = ghostStorage("Nimbus");
+      render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
+
+      await user.click(await screen.findByRole("button", { name: /^you\b/i }));
+      await screen.findByText("3");
+      const claimCta = screen.getByRole("region", { name: /claim your stats/i });
+      await user.click(within(claimCta).getByRole("button", { name: /^play as someone else$/i }));
+
+      const guard = await screen.findByRole("dialog", { name: /leave nimbus behind\?/i });
+      await user.click(within(guard).getByRole("button", { name: /^cancel$/i }));
+      expect(screen.queryByRole("dialog", { name: /leave nimbus behind\?/i })).toBeNull();
+
+      const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      await user.type(within(sheet).getByLabelText(/display name/i), "Fresh Name");
+      await user.click(within(sheet).getByRole("button", { name: /continue as guest/i }));
+
+      // Cancel + resubmit must re-interpose the SAME guard (mirrors the
+      // login entry, App.test.tsx ~3800), not slip through un-gated.
+      expect(await screen.findByRole("dialog", { name: /leave nimbus behind\?/i })).toBeVisible();
+      // The old ghost's session must still be intact - no orphaning happened.
+      expect(JSON.parse(storage.getItem("vwiki-race:vgames-session") ?? "{}").displayName).toBe("Nimbus");
+
+      // And "Start fresh anyway" from here still completes the swap.
+      await user.click(within(screen.getByRole("dialog", { name: /leave nimbus behind\?/i })).getByRole("button", { name: /^start fresh anyway$/i }));
+      const sheet2 = await screen.findByRole("dialog", { name: /save your stats/i });
+      await user.click(within(sheet2).getByRole("button", { name: /continue as guest/i }));
+      expect(await screen.findByRole("button", { name: "Fresh Name, guest - tap to manage" })).toBeVisible();
+    });
   });
 
   describe("Switch account (§2.4)", () => {
