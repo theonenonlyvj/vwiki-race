@@ -5893,6 +5893,208 @@ describe("Owner-approved URL policy (2026-07-21): ?challenge= is Detail's addres
   });
 });
 
+describe("Owner-approved Back ladder (item 8, addendum 2026-07-21): Detail -> Browse -> Home -> exit", () => {
+  beforeEach(() => {
+    window.history.pushState({}, "", "/");
+  });
+
+  it("Back from Stats returns to Home instead of leaving the site", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock({ challenges: twoChallenges() })}
+        storage={claimedStorage()}
+      />,
+    );
+
+    const nav = await screen.findByRole("navigation", { name: /vwiki race views/i });
+    await user.click(within(nav).getByRole("button", { name: "Stats" }));
+    expect(within(nav).getByRole("button", { name: "Stats" })).toHaveAttribute("aria-pressed", "true");
+
+    // Simulates the browser's own Back step - the bottom-nav tap above
+    // pushed exactly one in-app marker entry (markInAppMode), so this one
+    // physical Back press pops it and fires popstate while staying on-site.
+    window.history.pushState({}, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
+    expect(within(nav).getByRole("button", { name: "Home" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("Back from Home is untouched - the popstate handler writes no history once mode is already Home (no back-trapping)", async () => {
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock({ challenges: twoChallenges() })}
+        storage={claimedStorage()}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
+
+    // Simulates the browser's own Back step landing back on the bare "/"
+    // baseline entry - spies are installed AFTER this simulated navigation
+    // so they only see what the APP does in reaction to the popstate below,
+    // not the manual pushState standing in for the browser's own step.
+    window.history.pushState({}, "", "/");
+    const pushSpy = vi.spyOn(window.history, "pushState");
+    const replaceSpy = vi.spyOn(window.history, "replaceState");
+    try {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      expect(pushSpy).not.toHaveBeenCalled();
+      expect(replaceSpy).not.toHaveBeenCalled();
+    } finally {
+      pushSpy.mockRestore();
+      replaceSpy.mockRestore();
+    }
+  });
+
+  it("Stats<->You round trips reuse the same in-app history entry - never grows the stack", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock({ challenges: twoChallenges() })}
+        storage={claimedStorage()}
+      />,
+    );
+    await screen.findByRole("button", { name: /▶ race/i });
+
+    const pushSpy = vi.spyOn(window.history, "pushState");
+    try {
+      const nav = screen.getByRole("navigation", { name: /vwiki race views/i });
+      await user.click(within(nav).getByRole("button", { name: "Stats" }));
+      await user.click(within(nav).getByRole("button", { name: "You" }));
+      await user.click(within(nav).getByRole("button", { name: "Stats" }));
+      // Bouncing back through Home via a direct nav tap (not physical Back)
+      // must not reset the guard either - the marker stays on the one entry
+      // already pushed.
+      await user.click(within(nav).getByRole("button", { name: "Home" }));
+      await user.click(within(nav).getByRole("button", { name: "You" }));
+
+      // Five departures/re-departures from Home, only the very FIRST ever
+      // pushes a new history entry - every later one (including the Home
+      // bounce in the middle) reuses it via replaceState.
+      expect(pushSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      pushSpy.mockRestore();
+    }
+  });
+
+  it("the ladder is Detail -> Browse -> Home, one demotion per physical Back press", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock({ challenges: twoChallenges() })}
+        storage={claimedStorage()}
+      />,
+    );
+
+    const nav = await screen.findByRole("navigation", { name: /vwiki race views/i });
+    await user.click(within(nav).getByRole("button", { name: "Challenges" }));
+    await user.click(await screen.findByRole("button", { name: /challenge #2/i }));
+    await screen.findByRole("region", { name: /challenge detail/i });
+
+    // Press 1: Detail -> Browse (item 4's popstate fix).
+    window.history.pushState({}, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: /challenge detail/i })).toBeNull();
+    });
+    expect(await screen.findByRole("button", { name: /challenge #2/i })).toBeVisible();
+    expect(within(nav).getByRole("button", { name: "Challenges" })).toHaveAttribute("aria-pressed", "true");
+
+    // Press 2: Browse -> Home (item 8's new ladder rung).
+    window.history.pushState({}, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
+    expect(within(nav).getByRole("button", { name: "Home" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("mid-race Back stays exactly as-is - the locked-race URL pin, not the Home ladder, owns popstate while raced", async () => {
+    const storage = claimedStorage();
+    const fetchImpl = createFetchMock({ challenges: twoChallenges() });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
+
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
+
+    window.history.pushState({}, "", "/?challenge=challenge-0002");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    // Unchanged: the locked-race branch force-replaces the URL right back
+    // to the raced challenge - the Home ladder never runs while a run is
+    // locked, and the takeover stays fully engaged (no bottom nav).
+    await waitFor(() => expect(window.location.search).toBe("?challenge=challenge-0001"));
+    expect(screen.getByRole("heading", { name: "Apple" })).toBeVisible();
+    expect(screen.queryByRole("navigation", { name: /vwiki race views/i })).toBeNull();
+  });
+
+  it("regression: an expired-share-link Home landing never poisons the marker - the next Home -> Stats tap still pushes a fresh entry", async () => {
+    // clearChallengeUrl's expired-param branch (item 2) must land on Home
+    // WITHOUT the in-app marker, or this exact push below would wrongly
+    // read "already away from Home" and replace instead of push, leaving
+    // nothing for a later Back press to land on.
+    window.history.pushState({}, "", "/?challenge=challenge-9999");
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock({ challenges: twoChallenges() })}
+        storage={claimedStorage()}
+      />,
+    );
+    await screen.findByRole("button", { name: /▶ race/i });
+    await waitFor(() => expect(window.location.search).toBe(""));
+
+    const pushSpy = vi.spyOn(window.history, "pushState");
+    try {
+      const nav = screen.getByRole("navigation", { name: /vwiki race views/i });
+      await user.click(within(nav).getByRole("button", { name: "Stats" }));
+      expect(pushSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      pushSpy.mockRestore();
+    }
+
+    // ...and Back from there returns to Home in exactly one press, not zero.
+    window.history.pushState({}, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
+  });
+
+  it("regression: tapping Stats directly from Detail (skipping the close link) replaces the existing entry in place - no extra push", async () => {
+    // Interaction the addendum flagged explicitly: item 3's nav-tap param
+    // clearing must compose with the push/replace discipline, never adding
+    // a spurious history entry on top of Detail's own push.
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock({ challenges: twoChallenges() })}
+        storage={claimedStorage()}
+      />,
+    );
+
+    const nav = await screen.findByRole("navigation", { name: /vwiki race views/i });
+    await user.click(within(nav).getByRole("button", { name: "Challenges" })); // push #1: Browse
+    await user.click(await screen.findByRole("button", { name: /challenge #2/i })); // push #2: Detail
+    await screen.findByRole("region", { name: /challenge detail/i });
+
+    const pushSpy = vi.spyOn(window.history, "pushState");
+    try {
+      await user.click(within(nav).getByRole("button", { name: "Stats" }));
+      expect(pushSpy).not.toHaveBeenCalled();
+    } finally {
+      pushSpy.mockRestore();
+    }
+    expect(window.location.search).toBe("");
+    expect(await screen.findByRole("heading", { name: "Stats" })).toBeVisible();
+  });
+});
+
 describe("Increment 5: Play-another suggestion + create-random (Browse full card spec)", () => {
   beforeEach(() => {
     window.history.pushState({}, "", "/");

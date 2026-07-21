@@ -43,6 +43,7 @@ import {
   clearChallengeUrl,
   exitAdminDailiesUrl,
   isAdminDailiesRoute,
+  markInAppMode,
   readChallengeIdFromUrl,
   syncChallengeUrl,
 } from "./services/urlRouting";
@@ -672,7 +673,19 @@ export default function App({
         // step landing on a URL with no resolvable challenge id is Back OUT
         // of Detail - close it so the view visibly follows the URL instead
         // of silently no-opping and leaving Detail stranded on screen.
-        if (challengesView === "detail") setChallengesView("browse");
+        //
+        // Owner-approved Back ladder (item 8): exactly one demotion per
+        // physical Back press - close Detail first if it's open (above);
+        // only demote mode to Home on a LATER press, once Detail is already
+        // closed, so "Detail -> Browse -> Home" costs two presses, not one.
+        // Home itself is never touched here (mode === "home" already means
+        // there's nothing left for this handler to do - Back from Home is
+        // untouched/no-op on our end, matching "no back-trapping").
+        if (challengesView === "detail") {
+          setChallengesView("browse");
+        } else if (mode !== "home") {
+          setMode("home");
+        }
         return;
       }
       race.resetCompleted();
@@ -688,7 +701,7 @@ export default function App({
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [challengeIsLocked, challenges, challengesView, race.challenge, race.recoveryRun, selectedChallengeId]);
+  }, [challengeIsLocked, challenges, challengesView, mode, race.challenge, race.recoveryRun, selectedChallengeId]);
 
   // Account stats are fetched proactively for ANY identified session - not
   // gated on "You" being open - because the app-shell teaching gate
@@ -821,6 +834,12 @@ export default function App({
   // any shared challenge-selection state the old v0 selector used.
   function goToBoardsFor() {
     setBoardsInitialSegment("yesterday");
+    // Owner-approved Back ladder (item 8): this is a second Home ->
+    // non-Home entry point (bypasses the bottom nav) - it needs the exact
+    // same in-app history marker selectMode's own nextMode!=="home" branch
+    // sets, or Back from here would leave the site directly instead of
+    // landing on Home first.
+    markInAppMode();
     setMode("boards");
   }
 
@@ -833,8 +852,28 @@ export default function App({
     // pre-deploy self-synced id. Skipped while a race is locked - the
     // locked-race pin (App.tsx's own effect + popstate branch) owns the URL
     // for the duration, same as everywhere else in this file.
+    //
+    // Owner-approved Back ladder (item 8): exactly ONE history write per
+    // call, in either branch - never both - so a nav tap away from Detail
+    // never adds a spurious extra entry on top of its own replace. When
+    // there's a param to clear, that single replaceState is ALSO where the
+    // in-app marker gets decided (markInApp: nextMode !== "home") - Detail
+    // -> another non-Home mode stays marked (still away from Home, one
+    // replace, no growth); Detail -> Home tap leaves it unmarked (this IS
+    // Home now). Only the no-param branch defers to markInAppMode's own
+    // push-or-replace guard, for a plain mode-to-mode switch that never
+    // touched the challenge param at all (e.g. Home -> Stats, Stats -> You).
     if (!challengeLockRef.current && readChallengeIdFromUrl()) {
-      clearChallengeUrl("replace");
+      clearChallengeUrl("replace", { markInApp: nextMode !== "home" });
+      // Item 8 interaction fix: a tap AWAY from Detail (to a mode other
+      // than Challenges) must also close the Detail view itself, not just
+      // clear the URL - otherwise `challengesView` keeps lying "detail"
+      // after the tap, and the popstate ladder below (which checks this
+      // flag first) would silently eat a later Back press closing a Detail
+      // that isn't even on screen anymore instead of promoting to Home.
+      setChallengesView("browse");
+    } else if (nextMode !== "home") {
+      markInAppMode();
     }
     setMode(nextMode);
     // Tapping the Challenges nav item always returns to its root (Browse) -
@@ -847,7 +886,12 @@ export default function App({
 
   function closeChallengeDetail() {
     setChallengesView("browse");
-    clearChallengeUrl();
+    // markInApp: true - the "← Challenges" close stays in Browse, still one
+    // level away from Home (item 8's Back ladder) - matches the pre-
+    // existing "push for deliberate Detail entry and its paired close (a
+    // clean one-level Back round trip)" policy, just with the marker now
+    // riding along on the very same push.
+    clearChallengeUrl("push", { markInApp: true });
   }
 
   function exitAdmin() {
