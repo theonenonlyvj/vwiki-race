@@ -5949,7 +5949,19 @@ describe("Owner-approved Back ladder (item 8, addendum 2026-07-21): Detail -> Br
     }
   });
 
-  it("Stats<->You round trips reuse the same in-app history entry - never grows the stack", async () => {
+  it("Stats<->You round trips reuse the same in-app history entry, but a Home landing resets the ladder so the NEXT departure pushes fresh (depth model, adversarial-review fix 2026-07-21)", async () => {
+    // Pre-fix, this test asserted `pushSpy` called exactly once across the
+    // whole sequence below, including the Home bounce in the middle - that
+    // locked in the flawed boolean-marker invariant (finding 1): landing on
+    // Home via a plain nav tap left the marker stamped, so the departure
+    // AFTER it wrongly replaced instead of pushed, leaving nothing on the
+    // stack for that departure's own Back press to land on. Under the
+    // depth model, landing on Home now normalizes the ladder back to depth
+    // 0 in place (a replaceState, not a no-op), so each of the TWO genuine
+    // Home departures below (the first Stats tap, and the You tap after
+    // bouncing back through Home) pushes its own fresh rung, while the two
+    // same-depth bounces (You after Stats, Stats after You) and the Home
+    // landing itself all replace in place.
     const user = userEvent.setup();
     render(
       <App
@@ -5961,23 +5973,20 @@ describe("Owner-approved Back ladder (item 8, addendum 2026-07-21): Detail -> Br
     await screen.findByRole("button", { name: /▶ race/i });
 
     const pushSpy = vi.spyOn(window.history, "pushState");
+    const replaceSpy = vi.spyOn(window.history, "replaceState");
     try {
       const nav = screen.getByRole("navigation", { name: /vwiki race views/i });
-      await user.click(within(nav).getByRole("button", { name: "Stats" }));
-      await user.click(within(nav).getByRole("button", { name: "You" }));
-      await user.click(within(nav).getByRole("button", { name: "Stats" }));
-      // Bouncing back through Home via a direct nav tap (not physical Back)
-      // must not reset the guard either - the marker stays on the one entry
-      // already pushed.
-      await user.click(within(nav).getByRole("button", { name: "Home" }));
-      await user.click(within(nav).getByRole("button", { name: "You" }));
+      await user.click(within(nav).getByRole("button", { name: "Stats" })); // push: depth 0 -> 1
+      await user.click(within(nav).getByRole("button", { name: "You" })); // replace: depth 1 -> 1
+      await user.click(within(nav).getByRole("button", { name: "Stats" })); // replace: depth 1 -> 1
+      await user.click(within(nav).getByRole("button", { name: "Home" })); // replace: normalizes depth 1 -> 0
+      await user.click(within(nav).getByRole("button", { name: "You" })); // push: depth 0 -> 1 (fresh rung)
 
-      // Five departures/re-departures from Home, only the very FIRST ever
-      // pushes a new history entry - every later one (including the Home
-      // bounce in the middle) reuses it via replaceState.
-      expect(pushSpy).toHaveBeenCalledTimes(1);
+      expect(pushSpy).toHaveBeenCalledTimes(2);
+      expect(replaceSpy).toHaveBeenCalledTimes(3);
     } finally {
       pushSpy.mockRestore();
+      replaceSpy.mockRestore();
     }
   });
 
@@ -6092,6 +6101,98 @@ describe("Owner-approved Back ladder (item 8, addendum 2026-07-21): Detail -> Br
     }
     expect(window.location.search).toBe("");
     expect(await screen.findByRole("heading", { name: "Stats" })).toBeVisible();
+  });
+
+  it("regression (finding 1, 2026-07-21 adversarial review): closing Detail then switching modes leaves no dead ?challenge= entry - a later Back does not reopen it", async () => {
+    // The exact confirmed repro: Home -> Challenges -> open Detail ->
+    // "<- Challenges" -> tap Stats -> Back used to reopen Challenge Detail,
+    // because closeChallengeDetail PUSHED a fresh bare entry on top of
+    // Detail's own `?challenge=` entry instead of collapsing it - the
+    // pushed-on-top entry got replaced in place by the Stats tap, but the
+    // `?challenge=` entry underneath was never popped, so a single Back
+    // press landed right on it.
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock({ challenges: twoChallenges() })}
+        storage={claimedStorage()}
+      />,
+    );
+
+    const nav = await screen.findByRole("navigation", { name: /vwiki race views/i });
+    await user.click(within(nav).getByRole("button", { name: "Challenges" })); // push: Browse (depth 1)
+    await user.click(await screen.findByRole("button", { name: /challenge #2/i })); // push: Detail (depth 2)
+    await screen.findByRole("region", { name: /challenge detail/i });
+
+    // Structural proof of the fix: closing Detail and switching to Stats
+    // must not push at all - under the fix both write via replaceState, so
+    // the dead `?challenge=` entry this bug depends on is never created.
+    const pushSpy = vi.spyOn(window.history, "pushState");
+    try {
+      await user.click(await screen.findByRole("button", { name: /^← challenges$/i }));
+      await user.click(within(nav).getByRole("button", { name: "Stats" }));
+      expect(pushSpy).not.toHaveBeenCalled();
+    } finally {
+      pushSpy.mockRestore();
+    }
+    expect(window.location.search).toBe("");
+    expect(await screen.findByRole("heading", { name: "Stats" })).toBeVisible();
+
+    // Behavioral proof: one physical Back press now lands on the entry
+    // closeChallengeDetail replaced (bare, no `?challenge=`, still depth 1)
+    // - simulated the same way every other test in this file simulates a
+    // physical Back step.
+    window.history.pushState({ vwrDepth: 1 }, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    expect(screen.queryByRole("region", { name: /challenge detail/i })).toBeNull();
+    expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
+    expect(within(nav).getByRole("button", { name: "Home" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("regression (finding 2, 2026-07-21 adversarial review): Back collapses a leftover ladder rung from a finished Detail visit so ONE more Back exits", async () => {
+    // Before this fix, every Detail open/close cycle left an extra bare
+    // ladder entry behind (the original entry pushed on first leaving
+    // Home for Challenges, separate from the one closeChallengeDetail's
+    // own entry collapses down to) - each one cost the player a SILENT
+    // Back press (no visible change) before they could actually leave the
+    // site, worse than having no ladder at all. The popstate terminal-case
+    // chain below eats that leftover rung programmatically in response to
+    // a single physical press.
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock({ challenges: twoChallenges() })}
+        storage={claimedStorage()}
+      />,
+    );
+
+    const nav = await screen.findByRole("navigation", { name: /vwiki race views/i });
+    await user.click(within(nav).getByRole("button", { name: "Challenges" })); // push: Browse (depth 1)
+    await user.click(await screen.findByRole("button", { name: /challenge #2/i })); // push: Detail (depth 2)
+    await screen.findByRole("region", { name: /challenge detail/i });
+    await user.click(await screen.findByRole("button", { name: /^← challenges$/i })); // replace: depth 1
+    await user.click(within(nav).getByRole("button", { name: "Stats" })); // replace: depth 1
+
+    // Simulate the first physical Back press landing on the original
+    // "tap Challenges" rung - still marked (depth 1), since nothing above
+    // ever popped it, only replaced entries further up the stack in place.
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    try {
+      window.history.pushState({ vwrDepth: 1 }, "", "/");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+
+      expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
+      // The terminal-case chain fires exactly once - it recognizes the
+      // landed-on entry as still one of our own marked rungs (not yet the
+      // true Home floor) and eats it programmatically, so the player's
+      // VERY NEXT physical Back press exits for real.
+      expect(backSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      backSpy.mockRestore();
+    }
   });
 });
 

@@ -43,6 +43,8 @@ import {
   clearChallengeUrl,
   exitAdminDailiesUrl,
   isAdminDailiesRoute,
+  isInAppHistoryState,
+  markHomeHistoryState,
   markInAppMode,
   readChallengeIdFromUrl,
   syncChallengeUrl,
@@ -681,10 +683,32 @@ export default function App({
         // Home itself is never touched here (mode === "home" already means
         // there's nothing left for this handler to do - Back from Home is
         // untouched/no-op on our end, matching "no back-trapping").
-        if (challengesView === "detail") {
+        const wasDetail = challengesView === "detail";
+        const wasHome = mode === "home";
+        if (wasDetail) {
           setChallengesView("browse");
-        } else if (mode !== "home") {
-          setMode("home");
+        } else {
+          if (!wasHome) setMode("home");
+          // Adversarial-review fix (2026-07-21, finding 2): this branch is
+          // the ladder's terminal rung - after it runs, the player is at
+          // Home (whether this press just got them there, or they were
+          // already there and this was the "browser-default, no back-
+          // trapping" no-op press). A Detail open/close cycle earlier in
+          // the session can still leave an extra depth-1 rung sitting
+          // directly beneath wherever the player was, separate from the
+          // one that just got replaced in place - each such leftover rung
+          // used to cost the player one more SILENT Back press (no visible
+          // change) before they could actually exit, worse than having no
+          // ladder at all. If the entry we just landed on is still one of
+          // OUR marked rungs (never the true Home floor, which is
+          // unmarked, and never a share-link's own single entry - see the
+          // "accepted as-is" note on markInAppMode), chain one more
+          // programmatic Back to collapse it immediately, so this single
+          // physical press eats every leftover rung in one go and the
+          // NEXT physical Back press genuinely exits.
+          if (isInAppHistoryState()) {
+            window.history.back();
+          }
         }
         return;
       }
@@ -857,14 +881,15 @@ export default function App({
     // call, in either branch - never both - so a nav tap away from Detail
     // never adds a spurious extra entry on top of its own replace. When
     // there's a param to clear, that single replaceState is ALSO where the
-    // in-app marker gets decided (markInApp: nextMode !== "home") - Detail
-    // -> another non-Home mode stays marked (still away from Home, one
-    // replace, no growth); Detail -> Home tap leaves it unmarked (this IS
-    // Home now). Only the no-param branch defers to markInAppMode's own
-    // push-or-replace guard, for a plain mode-to-mode switch that never
-    // touched the challenge param at all (e.g. Home -> Stats, Stats -> You).
+    // resulting ladder depth gets decided (depth: nextMode !== "home" ? 1 :
+    // 0) - Detail -> another non-Home mode stays at depth 1 (still away
+    // from Home, one replace, no growth); Detail -> Home tap collapses to
+    // depth 0 (this IS Home now). Only the no-param branch defers to
+    // markInAppMode/markHomeHistoryState's own push-or-replace guards, for
+    // a plain mode-to-mode switch that never touched the challenge param at
+    // all (e.g. Home -> Stats, Stats -> You).
     if (!challengeLockRef.current && readChallengeIdFromUrl()) {
-      clearChallengeUrl("replace", { markInApp: nextMode !== "home" });
+      clearChallengeUrl("replace", { depth: nextMode !== "home" ? 1 : 0 });
       // Item 8 interaction fix: a tap AWAY from Detail (to a mode other
       // than Challenges) must also close the Detail view itself, not just
       // clear the URL - otherwise `challengesView` keeps lying "detail"
@@ -874,6 +899,17 @@ export default function App({
       setChallengesView("browse");
     } else if (nextMode !== "home") {
       markInAppMode();
+    } else {
+      // Adversarial-review fix (2026-07-21, finding 1): landing on Home
+      // through a plain nav tap (no challenge param involved at all) must
+      // ALSO normalize away any stale depth left on the current entry from
+      // a prior non-Home replace (Stats<->You bounces, etc.) - this branch
+      // used to be a total no-op, so the marker silently survived the
+      // Home landing and poisoned the very next departure's push-vs-
+      // replace guard (markInAppMode would see "already away from Home"
+      // and replace instead of push, leaving that departure's own Back
+      // press nothing to land on).
+      markHomeHistoryState();
     }
     setMode(nextMode);
     // Tapping the Challenges nav item always returns to its root (Browse) -
@@ -886,12 +922,19 @@ export default function App({
 
   function closeChallengeDetail() {
     setChallengesView("browse");
-    // markInApp: true - the "← Challenges" close stays in Browse, still one
-    // level away from Home (item 8's Back ladder) - matches the pre-
-    // existing "push for deliberate Detail entry and its paired close (a
-    // clean one-level Back round trip)" policy, just with the marker now
-    // riding along on the very same push.
-    clearChallengeUrl("push", { markInApp: true });
+    // Adversarial-review fix (2026-07-21, finding 1): REPLACE Detail's own
+    // entry in place (depth 1 - still one level away from Home) rather
+    // than pushing a new bare entry on top of it. The original design
+    // pushed here for a "clean paired push/push round trip" (Detail's open
+    // push, undone by this push), but once the Back ladder's replace-reuse
+    // guard (markInAppMode) started reusing whatever entry sits on top of
+    // this one for every later same-depth mode switch, that push became a
+    // permanently buried `?challenge=` entry no subsequent replaceState
+    // could ever reach back to pop - a single Back press after switching
+    // to another mode would land right on it and silently reopen Detail.
+    // Replacing collapses Detail's entry directly into the depth-1 bare
+    // entry that was already there, so there is nothing left to bury.
+    clearChallengeUrl("replace", { depth: 1 });
   }
 
   function exitAdmin() {
