@@ -47,6 +47,7 @@ export default function RaceFlow({
   session,
   article,
   elapsedMs,
+  redirectedFrom,
   pendingNavigationTitle,
   pendingRetry,
   leaderboardContext,
@@ -98,6 +99,9 @@ export default function RaceFlow({
   session: GameSession | null;
   article: Article | null;
   elapsedMs: number;
+  // LK-1: threaded straight from useRaceController's own field of the same
+  // name - see its doc comment there.
+  redirectedFrom: string | null;
   pendingNavigationTitle: string | null;
   pendingRetry: { title: string; anchorText: string } | null;
   leaderboardContext: LeaderboardContext | null;
@@ -162,6 +166,7 @@ export default function RaceFlow({
         article={article}
         session={session}
         elapsedMs={elapsedMs}
+        redirectedFrom={redirectedFrom}
         pendingNavigationTitle={pendingNavigationTitle}
         pendingRetry={pendingRetry}
         onRetryPending={onRetryPending}

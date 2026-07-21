@@ -1830,6 +1830,19 @@ h1 {
   outline-offset: 4px;
 }
 
+/* LK-1: same PKG-02 contrast trap this file already documents on
+   `.article-heading span` - `.article-heading` sits on the light Wikipedia-
+   card background (#fff), where the app's usual `--muted` (#9fb8bd) fails
+   WCAG AA (~2.1:1). Reuses the same light-card-appropriate Wikipedia-gray
+   (#54595d, matching `.article-heading span`/`.attribution`) instead of
+   `.muted`, which is dark-surface-only. */
+.article-redirect-note {
+  margin-top: 4px;
+  color: #54595d;
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
 .article-content {
   display: flow-root;
   max-width: 100%;

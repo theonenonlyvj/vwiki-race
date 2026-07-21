@@ -68,6 +68,14 @@ interface RaceState {
   run: ActiveRunRecord | null;
   session: GameSession | null;
   article: Article | null;
+  // LK-1: the anchor's pre-redirect title whenever the just-accepted click's
+  // requestedTitle resolved to a DIFFERENT canonical article (a Wikipedia
+  // redirect) - null otherwise. Scoped to the current article only: every
+  // commitState that changes `article` also (re)computes this, so it never
+  // survives past the next navigation. Display-only - never fed back into
+  // the click protocol, path steps, or server records (those stay
+  // canonical, unaffected by this field).
+  redirectedFrom: string | null;
   pendingNavigationTitle: string | null;
   pendingClick: PendingClick | null;
   error: string | null;
@@ -81,6 +89,7 @@ const initialState: RaceState = {
   run: null,
   session: null,
   article: null,
+  redirectedFrom: null,
   pendingNavigationTitle: null,
   pendingClick: null,
   error: null,
@@ -215,10 +224,15 @@ export function useRaceController(options: RaceControllerOptions) {
         },
         timestamp: now(),
       });
+      const redirectedFrom = computeRedirectedFrom(
+        pending.body.requestedTitle,
+        pending.destination.canonicalTitle,
+      );
       commitState({
         ...source,
         phase: completed ? "completed" : "active",
         article: pending.destination,
+        redirectedFrom,
         session: {
           ...session,
           clicks: response.transition.clickCount,
@@ -309,6 +323,11 @@ export function useRaceController(options: RaceControllerOptions) {
         ...snapshot,
         phase: "syncing",
         article: destination,
+        // Keeps the optimistic "syncing" reveal (article set ahead of
+        // server acceptance, per the test above) consistent with the
+        // redirect line acceptClick computes on success - both flip
+        // together instead of the heading updating a beat before the line.
+        redirectedFrom: computeRedirectedFrom(title, destination.canonicalTitle),
         pendingClick: pending,
         pendingNavigationTitle: anchorText || title,
         error: null,
@@ -545,6 +564,15 @@ function isCurrent(
   return mounted.current &&
     !operation.controller.signal.aborted &&
     operation.generation === current.current;
+}
+
+// LK-1: normalizeTitle collapses underscore/space/case differences (the
+// same comparison matchesChallengeStart/sameAcceptedPage use below), so a
+// plain formatting mismatch like "Foo_bar" -> "Foo bar" never reports a
+// redirect - only a genuine Wikipedia redirect to a DIFFERENT title
+// (requested !== canonical once both are normalized) does.
+function computeRedirectedFrom(requestedTitle: string, canonicalTitle: string): string | null {
+  return normalizeTitle(requestedTitle) === normalizeTitle(canonicalTitle) ? null : requestedTitle;
 }
 
 function acceptedLastPage(run: ActiveRunRecord, path: ServerPathStep[]) {

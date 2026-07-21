@@ -107,6 +107,52 @@ describe("useRaceController", () => {
     expect(result.current.phase).toBe("completed");
   });
 
+  // LK-1: a clicked anchor carries its PRE-redirect title (rewriteArticleLinks
+  // sets data-vwiki-race-title from the raw href), but the gateway fetch
+  // follows redirects and returns the canonical article under a different
+  // title - followLink/acceptClick must surface that mismatch as
+  // redirectedFrom so RaceMode can render "(redirected from X)" instead of
+  // silently swapping titles.
+  it("surfaces redirectedFrom when a followed link's canonical destination differs from the requested title, and clears it on the next hop", async () => {
+    const epoch = article("Epoch (astronomy)", 4);
+    const water = article("Water", 5);
+    const recordClick = vi.fn()
+      .mockResolvedValueOnce({ transition: { runId: "run-1", clickCount: 1, runStatus: "active" as const } })
+      .mockResolvedValueOnce({ transition: { runId: "run-1", clickCount: 2, runStatus: "active" as const } });
+    const api = apiClient({ recordClick });
+    const gateway = wikiGateway({ Apple: apple, J2000: epoch, Water: water });
+    const { result } = renderHook(() => useRaceController({ apiClient: api, gateway }));
+    await act(async () => { await result.current.start(challenge, "token"); });
+
+    await act(async () => { await result.current.followLink("J2000", "J2000", "token"); });
+    expect(result.current.article?.canonicalTitle).toBe("Epoch (astronomy)");
+    expect(result.current.redirectedFrom).toBe("J2000");
+
+    await act(async () => { await result.current.followLink("Water", "water", "token"); });
+    expect(result.current.article?.canonicalTitle).toBe("Water");
+    expect(result.current.redirectedFrom).toBeNull();
+  });
+
+  // LK-1: normalizeTitle already collapses underscore/space/case
+  // differences everywhere else in this file (matchesChallengeStart,
+  // sameAcceptedPage) - the redirect line must use the same comparison, so
+  // a plain formatting difference like "Wet_Season" -> "Wet Season" is NOT
+  // reported as a redirect (only a genuinely different canonical title is).
+  it("does not surface redirectedFrom for a normalization-only title difference (underscore/case)", async () => {
+    const wetSeason = article("Wet Season", 6);
+    const recordClick = vi.fn(async () => ({
+      transition: { runId: "run-1", clickCount: 1, runStatus: "active" as const },
+    }));
+    const api = apiClient({ recordClick });
+    const gateway = wikiGateway({ Apple: apple, Wet_Season: wetSeason });
+    const { result } = renderHook(() => useRaceController({ apiClient: api, gateway }));
+    await act(async () => { await result.current.start(challenge, "token"); });
+
+    await act(async () => { await result.current.followLink("Wet_Season", "wet season", "token"); });
+    expect(result.current.article?.canonicalTitle).toBe("Wet Season");
+    expect(result.current.redirectedFrom).toBeNull();
+  });
+
   it("prewarms one indicated playable link without changing race state", async () => {
     const gateway = wikiGateway({ Apple: apple, Fruit: fruit });
     const { result } = renderHook(() => useRaceController({

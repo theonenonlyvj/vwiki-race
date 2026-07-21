@@ -25,6 +25,7 @@ export default function RaceMode({
   article,
   session,
   elapsedMs,
+  redirectedFrom,
   pendingNavigationTitle,
   pendingRetry,
   onRetryPending,
@@ -38,6 +39,12 @@ export default function RaceMode({
   article: Article | null;
   session: GameSession | null;
   elapsedMs: number;
+  // LK-1: the anchor's pre-redirect title when the current article was
+  // reached via a Wikipedia redirect (server followed redirects=1 and
+  // returned a different canonical title than the one the player clicked) -
+  // null otherwise. Display-only, current article only; see
+  // useRaceController's own doc comment on the field.
+  redirectedFrom: string | null;
   pendingNavigationTitle: string | null;
   pendingRetry: { title: string; anchorText: string } | null;
   onRetryPending: () => void;
@@ -134,6 +141,7 @@ export default function RaceMode({
             ""
           }
           acceptedPageId={session?.currentPage.pageId}
+          redirectedFrom={redirectedFrom}
           onClick={stableArticleClick}
           onFocus={stableArticleFocus}
           onPointerDown={stableArticlePointerDown}
@@ -152,6 +160,10 @@ export const WikipediaArticlePanel = memo(function WikipediaArticlePanel({
   article,
   acceptedPageId,
   challengeLabel,
+  // LK-1: optional (defaults to no line) - RaceResults' own frozen-article
+  // render of this same component is out of scope (retrospective summary,
+  // not an active navigation decision), so it never passes this prop.
+  redirectedFrom = null,
   onClick,
   onFocus,
   onPointerDown,
@@ -160,6 +172,7 @@ export const WikipediaArticlePanel = memo(function WikipediaArticlePanel({
   article: Article;
   acceptedPageId: number | undefined;
   challengeLabel: string;
+  redirectedFrom?: string | null;
   onClick: (event: MouseEvent<HTMLElement>) => void;
   onFocus: (event: FocusEvent<HTMLElement>) => void;
   onPointerDown: (event: PointerEvent<HTMLElement>) => void;
@@ -189,6 +202,15 @@ export const WikipediaArticlePanel = memo(function WikipediaArticlePanel({
       <div aria-live="polite" className="article-heading">
         <span>{challengeLabel}</span>
         <h2 ref={articleHeadingRef} tabIndex={-1}>{article.canonicalTitle}</h2>
+        {redirectedFrom ? (
+          // LK-1: mirrors Wikipedia's own "(Redirected from X)" convention
+          // (same register, lowercase "redirected") so a player who clicked
+          // one title and landed on another sees why, instead of concluding
+          // links are cross-wired. Lives here (under the heading), not the
+          // path strip - the strip stays canonical/compact - and not a
+          // toast, per the brief.
+          <p className="article-redirect-note">(redirected from {redirectedFrom})</p>
+        ) : null}
       </div>
       <div
         aria-label="Wikipedia article"

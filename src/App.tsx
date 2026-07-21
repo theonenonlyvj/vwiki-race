@@ -1637,6 +1637,7 @@ export default function App({
           session={session}
           article={article}
           elapsedMs={elapsedMs}
+          redirectedFrom={race.redirectedFrom}
           pendingNavigationTitle={pendingNavigationTitle}
           pendingRetry={race.pendingRetry}
           leaderboardContext={race.leaderboardContext}
