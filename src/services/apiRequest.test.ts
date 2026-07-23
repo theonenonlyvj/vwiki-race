@@ -278,6 +278,178 @@ describe("requestJson", () => {
     }
   });
 
+  it("LR-2: runs a full 3-attempt ladder with widening timeouts, a stable idempotency key, and 1-based retry ordinals", async () => {
+    vi.useFakeTimers();
+    try {
+      const aborted: number[] = [];
+      const fetchImpl = vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((resolve, reject) => {
+            const attempt = fetchImpl.mock.calls.length;
+            init?.signal?.addEventListener("abort", () => {
+              aborted.push(attempt);
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+            if (attempt === 3) {
+              resolve(Response.json({ challenges: [{ id: "challenge-1" }] }));
+            }
+          }),
+      );
+      const onRetry = vi.fn();
+
+      const request = requestJson(fetchImpl, requestUrl, {
+        ...requestOptions,
+        timeoutMs: 999_999, // unused when the ladder is armed - every attempt uses attemptTimeoutsMs
+        attemptTimeoutsMs: [4_000, 8_000, 15_000],
+        retry: "idempotent-once",
+        idempotencyKey: "op-1",
+        onRetry,
+      });
+      const assertion = expect(request).resolves.toEqual({
+        challenges: [{ id: "challenge-1" }],
+      });
+
+      // Attempt 1 aborts at 4s (not the 15s legacy default) and reports the
+      // upcoming retry as ordinal 1.
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(aborted).toEqual([1]);
+      expect(onRetry).toHaveBeenNthCalledWith(1, 1);
+      // Jittered gap (350-650ms) before attempt 2 fires.
+      await vi.advanceTimersByTimeAsync(650);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+      // Attempt 2 aborts at 8s and reports ordinal 2.
+      await vi.advanceTimersByTimeAsync(8_000);
+      expect(aborted).toEqual([1, 2]);
+      expect(onRetry).toHaveBeenNthCalledWith(2, 2);
+      await vi.advanceTimersByTimeAsync(650);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+
+      // Same idempotency key across all three attempts - one logical
+      // operation, however many attempts it takes.
+      const keys = fetchImpl.mock.calls.map(
+        ([, init]) => (init?.headers as Record<string, string>)["Idempotency-Key"],
+      );
+      expect(new Set(keys)).toEqual(new Set(["op-1"]));
+
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("LR-2: keeps the final ladder attempt's full timeout and throws the mapped error once exhausted", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError")),
+            );
+          }),
+      );
+      const onRetry = vi.fn();
+
+      const request = requestJson(fetchImpl, requestUrl, {
+        ...requestOptions,
+        timeoutMs: 999_999,
+        attemptTimeoutsMs: [4_000, 8_000, 15_000],
+        retry: "idempotent-once",
+        idempotencyKey: "op-1",
+        onRetry,
+      });
+      const assertion = expect(request).rejects.toMatchObject({
+        code: "timeout",
+        status: 504,
+      });
+
+      await vi.advanceTimersByTimeAsync(4_650); // attempt 1 (4s) + jittered gap
+      await vi.advanceTimersByTimeAsync(8_650); // attempt 2 (8s) + jittered gap
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(onRetry).toHaveBeenCalledTimes(2);
+      // Final (3rd) attempt keeps its own 15s entry rather than being cut
+      // short - no further retry is armed once it also fails.
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      await assertion;
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(onRetry).toHaveBeenCalledTimes(2); // never called for the final, non-retried failure
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("LR-2: a ladder attempt succeeding mid-ladder stops further attempts", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((resolve, reject) => {
+            const attempt = fetchImpl.mock.calls.length;
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError")),
+            );
+            if (attempt === 1) {
+              // First attempt answers with a real (non-retryable-class)
+              // failure - the ladder must not keep burning attempts on it.
+              resolve(
+                Response.json(
+                  { error: { code: "invalid_credentials", message: "nope" } },
+                  { status: 401 },
+                ),
+              );
+            }
+          }),
+      );
+
+      await expect(
+        requestJson(fetchImpl, requestUrl, {
+          ...requestOptions,
+          timeoutMs: 999_999,
+          attemptTimeoutsMs: [4_000, 8_000, 15_000],
+          retry: "idempotent-once",
+          idempotencyKey: "op-1",
+        }),
+      ).rejects.toMatchObject({ code: "invalid_credentials", status: 401 });
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("LR-2: ignores attemptTimeoutsMs entirely when no retry is armed", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError")),
+            );
+          }),
+      );
+
+      const request = requestJson(fetchImpl, requestUrl, {
+        ...requestOptions,
+        timeoutMs: 10_000,
+        attemptTimeoutsMs: [4_000, 8_000, 15_000],
+        retry: "never",
+      });
+      const assertion = expect(request).rejects.toMatchObject({ code: "timeout" });
+
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(fetchImpl).toHaveBeenCalledTimes(1); // still mid-flight - the lone attempt keeps the full 10s
+      await vi.advanceTimersByTimeAsync(6_000);
+
+      await assertion;
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects a relative API URL before calling fetch", async () => {
     const fetchImpl = vi.fn();
 

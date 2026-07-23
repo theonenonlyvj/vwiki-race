@@ -3,6 +3,10 @@ export type ErrorSource = "window" | "unhandledrejection" | "error-boundary" | "
 export interface ErrorReportContext {
   /** React's componentStack, when the error was caught by ErrorBoundary. */
   componentStack?: string;
+  /** LR-2: extra structured detail appended to the reported stack - e.g.
+   *  identity retry-ladder attempt timings - so a stall names itself in
+   *  Workers Logs without widening the wire payload's schema. */
+  detail?: string;
 }
 
 export interface ErrorReporter {
@@ -99,7 +103,7 @@ function describeThrowable(
   context: ErrorReportContext | undefined,
 ): { name: string; message: string; stack?: string } {
   const base = baseDescription(error);
-  return { ...base, stack: appendComponentStack(base.stack, context) };
+  return { ...base, stack: appendContextDetails(base.stack, context) };
 }
 
 function baseDescription(error: unknown): { name: string; message: string; stack?: string } {
@@ -129,16 +133,22 @@ function safeStringify(value: unknown): string {
   return stringified || FALLBACK_MESSAGE;
 }
 
-function appendComponentStack(
+function appendContextDetails(
   stack: string | undefined,
   context: ErrorReportContext | undefined,
 ): string | undefined {
-  if (!context?.componentStack) {
+  const extras: string[] = [];
+  if (context?.componentStack) {
+    extras.push(`Component stack:${context.componentStack}`);
+  }
+  if (context?.detail) {
+    extras.push(context.detail);
+  }
+  if (extras.length === 0) {
     return stack;
   }
-  return stack
-    ? `${stack}\n\nComponent stack:${context.componentStack}`
-    : `Component stack:${context.componentStack}`;
+  const joined = extras.join("\n\n");
+  return stack ? `${stack}\n\n${joined}` : joined;
 }
 
 function readUrl(): string | undefined {

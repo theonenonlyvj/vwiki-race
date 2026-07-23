@@ -30,6 +30,22 @@ export type VGamesIntrospection =
     }
   | { valid: false };
 
+// LR-2: ONE internal retry for the vwikirace-api -> VGAMES_IDENTITY
+// service-binding hop, on binding failure or a stall - the owner's live
+// evidence showed this hop fails in BURSTS server-side, so a client that
+// retries against a proxy that never retries itself just burns its own
+// ladder attempts on the same still-recovering upstream. 40%/50% of the
+// configured `requestTimeoutMs` (4s/5s of the default 10s) keeps the
+// worst-case total under the existing single-shot cutoff with headroom,
+// and scales correctly if `requestTimeoutMs` is ever reconfigured -
+// including in tests, which inject much smaller values for determinism.
+function proxyRetryAttemptTimeoutsMs(requestTimeoutMs: number): number[] {
+  return [
+    Math.max(1, Math.round(requestTimeoutMs * 0.4)),
+    Math.max(1, Math.round(requestTimeoutMs * 0.5)),
+  ];
+}
+
 export function createVGamesIdentityClient(options: {
   baseUrl: string;
   fetchImpl?: typeof fetch;
@@ -39,13 +55,14 @@ export function createVGamesIdentityClient(options: {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
   const requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
 
-  const request = async (
+  const requestOnce = async (
     path: string,
     body: unknown,
-    init: { token?: string } = {},
+    init: { token?: string },
+    timeoutMs: number,
   ): Promise<unknown> => {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetchImpl(`${baseUrl}${path}`, {
         method: "POST",
@@ -90,13 +107,58 @@ export function createVGamesIdentityClient(options: {
     }
   };
 
+  const request = async (
+    path: string,
+    body: unknown,
+    init: { token?: string; retryable?: boolean } = {},
+  ): Promise<unknown> => {
+    const attemptTimeoutsMs = init.retryable
+      ? proxyRetryAttemptTimeoutsMs(requestTimeoutMs)
+      : [requestTimeoutMs];
+
+    let lastFailure: unknown;
+    for (let attempt = 0; attempt < attemptTimeoutsMs.length; attempt += 1) {
+      const attemptStartedAt = Date.now();
+      try {
+        const result = await requestOnce(path, body, init, attemptTimeoutsMs[attempt]);
+        logIdentityCall({
+          route: path,
+          attempt: attempt + 1,
+          upstreamMs: Date.now() - attemptStartedAt,
+          outcome: "ok",
+        });
+        return result;
+      } catch (caught) {
+        lastFailure = caught;
+        logIdentityCall({
+          route: path,
+          attempt: attempt + 1,
+          upstreamMs: Date.now() - attemptStartedAt,
+          outcome: identityCallOutcome(caught),
+        });
+        const isLastAttempt = attempt === attemptTimeoutsMs.length - 1;
+        if (isLastAttempt || !isProxyRetryable(caught)) {
+          throw caught;
+        }
+      }
+    }
+
+    throw lastFailure;
+  };
+
   return {
     async quick(input) {
-      const payload = await request("/auth/quick", {
-        deviceCredential: input.deviceCredential,
-        displayName: input.displayName,
-        game: "vwiki-race",
-      });
+      const payload = await request(
+        "/auth/quick",
+        {
+          deviceCredential: input.deviceCredential,
+          displayName: input.displayName,
+          game: "vwiki-race",
+        },
+        // Naturally idempotent (get-or-create keyed by deviceCredential) -
+        // safe for the proxy's own internal retry.
+        { retryable: true },
+      );
       const auth = readAuthPayload(payload);
       return {
         accountId: auth.accountId,
@@ -106,6 +168,12 @@ export function createVGamesIdentityClient(options: {
       };
     },
 
+    // NOT retryable (LR-2 non-goal, verified): `/auth/set-credentials`
+    // mutates a unique username/password claim - a retry on a stall can't
+    // tell "never reached viota" from "succeeded but the response was
+    // lost," and replaying it could surface a false failure for an
+    // already-secured guest. The `login()` call just below IS retryable
+    // (reused as-is), so secure()'s second step still benefits.
     async secure(input) {
       await request(
         "/auth/set-credentials",
@@ -124,11 +192,15 @@ export function createVGamesIdentityClient(options: {
     },
 
     async login(input) {
-      const payload = await request("/auth/login", {
-        username: input.username,
-        password: input.password,
-        deviceCredential: input.deviceCredential,
-      });
+      const payload = await request(
+        "/auth/login",
+        {
+          username: input.username,
+          password: input.password,
+          deviceCredential: input.deviceCredential,
+        },
+        { retryable: true },
+      );
       const auth = readAuthPayload(payload);
       return {
         accountId: auth.accountId,
@@ -139,10 +211,36 @@ export function createVGamesIdentityClient(options: {
     },
 
     async introspect(token) {
-      const payload = await request("/auth/introspect", { token });
+      const payload = await request("/auth/introspect", { token }, { retryable: true });
       return readIntrospectionPayload(payload);
     },
   };
+}
+
+/** LR-2: only binding failures/stalls are worth ONE proxy-side retry - a
+ *  real upstream answer (bad credentials, a taken username, a malformed
+ *  payload) is not, and retrying it would just waste the remaining ladder
+ *  budget on a request that will fail the same way again. */
+function isProxyRetryable(caught: unknown): boolean {
+  return caught instanceof ApiError &&
+    (caught.code === "vgames_identity_timeout" || caught.code === "vgames_identity_unavailable");
+}
+
+function identityCallOutcome(caught: unknown): string {
+  return caught instanceof ApiError ? caught.code : "unknown_error";
+}
+
+/** LR-2 telemetry: a structured, greppable line per identity-service-binding
+ *  attempt (route/attempt/upstreamMs/outcome) - cheap in Workers Logs, and
+ *  the ONLY way a stall gets diagnosed without an owner screenshot next
+ *  time the burst-failure pattern recurs. */
+function logIdentityCall(fields: {
+  route: string;
+  attempt: number;
+  upstreamMs: number;
+  outcome: string;
+}): void {
+  console.info("vgames_identity_call", JSON.stringify(fields));
 }
 
 function readIntrospectionPayload(payload: unknown): VGamesIntrospection {

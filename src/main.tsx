@@ -25,7 +25,10 @@ if (!root) {
 createRoot(root).render(
   <StrictMode>
     <ErrorBoundary reporter={errorReporter}>
-      <App />
+      {/* LR-2: reuses the SAME reporter instance as ErrorBoundary above,
+          rather than App standing up a second one, so identity retry-ladder
+          exhaustion telemetry lands in the same beacon stream. */}
+      <App errorReporter={errorReporter} />
     </ErrorBoundary>
   </StrictMode>,
 );

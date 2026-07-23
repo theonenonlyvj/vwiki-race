@@ -20,11 +20,29 @@ export type ApiRequestOptions<T> = {
    *  is almost certainly stalled (cold upstream, dead pooled connection) -
    *  failing over to the retry quickly beats burning the whole `timeoutMs`
    *  budget on it. Ignored when no retry is armed, so a lone attempt always
-   *  keeps the full window. */
+   *  keeps the full window. Ignored when `attemptTimeoutsMs` is set (the
+   *  ladder's own per-attempt timeouts take over). */
   firstAttemptTimeoutMs?: number;
-  /** Notified when an automatic retry is about to start - lets the caller
-   *  surface honest progress copy instead of an unchanging spinner. */
-  onRetry?: () => void;
+  /** LR-2: ordered per-attempt timeouts driving a full multi-attempt retry
+   *  LADDER instead of the single-retry default above. The array's length
+   *  sets the attempt count; index 0 is the first attempt's timeout, the
+   *  last entry is the final attempt's. Only takes effect when a retry is
+   *  armed (`retry` is "read-once", or "idempotent-once" with an
+   *  `idempotencyKey`) - a lone attempt always uses `timeoutMs`. Takes
+   *  precedence over `firstAttemptTimeoutMs`/the legacy 2-attempt default,
+   *  so existing single-retry callers (e.g. MB-1's click leash) are a strict
+   *  subset, unaffected unless they opt in. Ladder retries also use a
+   *  jittered gap (see `jitteredLadderRetryDelayMs`) instead of the legacy
+   *  fixed `DEFAULT_RETRY_DELAY_MS`, so a burst of clients hitting the same
+   *  stall don't all retry in lockstep. */
+  attemptTimeoutsMs?: number[];
+  /** Notified just before each automatic retry starts, with `attempt` set
+   *  to the 1-based ordinal of the retry about to fire (1 = the second
+   *  attempt overall, 2 = the third, ...) - lets the caller stage honest
+   *  progress copy per rung instead of a single undifferentiated "retrying"
+   *  flag. Existing callers that only need a boolean can ignore the
+   *  argument. */
+  onRetry?: (attempt: number) => void;
   retry: "read-once" | "idempotent-once" | "never";
   idempotencyKey?: string;
   validate(value: unknown): value is T;
@@ -32,6 +50,14 @@ export type ApiRequestOptions<T> = {
 
 const DEFAULT_RETRY_DELAY_MS = 250;
 const MAX_AUTOMATIC_RETRY_DELAY_MS = 2_000;
+// LR-2 ladder retries: a wider, jittered gap than the legacy single-retry's
+// fixed 250ms. A burst of clients that all stalled on the same recovering
+// upstream at once (the owner's live "fails in bursts" evidence) would
+// otherwise all retry at the exact same instant if the gap were fixed -
+// jitter spreads that load out. Still comfortably under
+// MAX_AUTOMATIC_RETRY_DELAY_MS.
+const LADDER_RETRY_BASE_DELAY_MS = 500;
+const LADDER_RETRY_JITTER_MS = 150;
 export const ABSOLUTE_API_URL_MARKER = "VWIKI_ABSOLUTE_API_URL_REQUIRED";
 
 export const defaultApiFetch: typeof fetch = (input, init) =>
@@ -43,11 +69,16 @@ export async function requestJson<T>(
   options: ApiRequestOptions<T>,
 ): Promise<T> {
   assertAbsoluteApiUrl(url);
-  const attempts = shouldRetry(options) ? 2 : 1;
+  const retryArmed = shouldRetry(options);
+  const ladder = retryArmed && options.attemptTimeoutsMs && options.attemptTimeoutsMs.length > 0
+    ? options.attemptTimeoutsMs
+    : undefined;
+  const attempts = ladder ? ladder.length : retryArmed ? 2 : 1;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const attemptTimeoutMs =
-      attempt === 0 && attempts > 1 && options.firstAttemptTimeoutMs !== undefined
+    const attemptTimeoutMs = ladder
+      ? ladder[attempt]
+      : attempt === 0 && attempts > 1 && options.firstAttemptTimeoutMs !== undefined
         ? options.firstAttemptTimeoutMs
         : options.timeoutMs;
     try {
@@ -57,16 +88,22 @@ export async function requestJson<T>(
       if (attempt + 1 >= attempts || !isRetryable(error, options)) {
         throw error;
       }
-      const retryDelayMs = error.retryAfterMs ?? DEFAULT_RETRY_DELAY_MS;
+      const retryDelayMs = error.retryAfterMs ??
+        (ladder ? jitteredLadderRetryDelayMs() : DEFAULT_RETRY_DELAY_MS);
       if (retryDelayMs > MAX_AUTOMATIC_RETRY_DELAY_MS) {
         throw error;
       }
-      options.onRetry?.();
+      options.onRetry?.(attempt + 1);
       await delay(retryDelayMs);
     }
   }
 
   throw new ApiRequestError("request_failed", "API request failed.", 503);
+}
+
+function jitteredLadderRetryDelayMs(): number {
+  const spread = (Math.random() * 2 - 1) * LADDER_RETRY_JITTER_MS;
+  return Math.round(LADDER_RETRY_BASE_DELAY_MS + spread);
 }
 
 function assertAbsoluteApiUrl(value: string): void {

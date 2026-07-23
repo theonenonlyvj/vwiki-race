@@ -364,4 +364,172 @@ describe("server VGames identity client", () => {
       status: 503,
     });
   });
+
+  describe("LR-2: proxy-side retry", () => {
+    it("retries login once on a binding failure and succeeds", async () => {
+      const fetchImpl = vi
+        .fn()
+        .mockRejectedValueOnce(new TypeError("binding unavailable"))
+        .mockResolvedValueOnce(Response.json({ accountId: "acc-claimed", token: "jwt-claimed" }));
+      const client = createVGamesIdentityClient({ baseUrl: "https://vgames.example", fetchImpl });
+
+      await expect(client.login({
+        deviceCredential: "cred-123456789012",
+        username: "vijay",
+        password: "secret-pass",
+      })).resolves.toMatchObject({ accountId: "acc-claimed", status: "claimed" });
+
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(fetchImpl).toHaveBeenNthCalledWith(
+        1,
+        "https://vgames.example/auth/login",
+        expect.anything(),
+      );
+      expect(fetchImpl).toHaveBeenNthCalledWith(
+        2,
+        "https://vgames.example/auth/login",
+        expect.anything(),
+      );
+    });
+
+    it("retries guest (quick) and introspect once on a stall", async () => {
+      const stallThenSucceed = () => {
+        let call = 0;
+        return vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+          call += 1;
+          if (call === 1) {
+            return new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () =>
+                reject(new DOMException("Aborted", "AbortError")),
+              );
+            });
+          }
+          return Promise.resolve(Response.json({ accountId: "acc-guest", token: "jwt-guest" }));
+        });
+      };
+
+      vi.useFakeTimers();
+      try {
+        const quickFetch = stallThenSucceed();
+        const quickClient = createVGamesIdentityClient({
+          baseUrl: "https://vgames.example",
+          fetchImpl: quickFetch,
+        });
+        const quick = quickClient.quick({
+          deviceCredential: "cred-123456789012",
+          displayName: "Casey",
+        });
+        await vi.runAllTimersAsync();
+        await expect(quick).resolves.toMatchObject({ accountId: "acc-guest" });
+        expect(quickFetch).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+
+      vi.useFakeTimers();
+      try {
+        const introspectFetch = vi
+          .fn()
+          .mockRejectedValueOnce(new TypeError("binding unavailable"))
+          .mockResolvedValueOnce(Response.json({ valid: true, accountId: "acc-1", status: "ghost" }));
+        const introspectClient = createVGamesIdentityClient({
+          baseUrl: "https://vgames.example",
+          fetchImpl: introspectFetch,
+        });
+        await expect(introspectClient.introspect("jwt-1")).resolves.toMatchObject({
+          valid: true,
+          accountId: "acc-1",
+        });
+        expect(introspectFetch).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("never retries a real upstream answer (e.g. invalid credentials)", async () => {
+      const fetchImpl = vi.fn(async () =>
+        Response.json({ error: "invalid_credentials" }, { status: 401 }),
+      );
+      const client = createVGamesIdentityClient({ baseUrl: "https://vgames.example", fetchImpl });
+
+      await expect(client.login({
+        deviceCredential: "cred-123456789012",
+        username: "vijay",
+        password: "wrong",
+      })).rejects.toMatchObject({ code: "invalid_credentials", status: 401 });
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it("maps upstream failures to the existing error copy once both attempts are exhausted (no new strings)", async () => {
+      const fetchImpl = vi.fn(async () => {
+        throw new TypeError("binding unavailable");
+      });
+      const client = createVGamesIdentityClient({ baseUrl: "https://vgames.example", fetchImpl });
+
+      await expect(client.login({
+        deviceCredential: "cred-123456789012",
+        username: "vijay",
+        password: "secret-pass",
+      })).rejects.toMatchObject({
+        code: "vgames_identity_unavailable",
+        message: "VGames identity is temporarily unavailable.",
+        status: 503,
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it("NOT retried (verified non-idempotent): a set-credentials binding failure fails secure() after exactly one attempt", async () => {
+      const fetchImpl = vi.fn(async () => {
+        throw new TypeError("binding unavailable");
+      });
+      const client = createVGamesIdentityClient({ baseUrl: "https://vgames.example", fetchImpl });
+
+      await expect(client.secure({
+        deviceCredential: "cred-123456789012",
+        token: "jwt-guest",
+        username: "vijay",
+        password: "secret-pass",
+      })).rejects.toMatchObject({ code: "vgames_identity_unavailable", status: 503 });
+
+      // Exactly one call to set-credentials, no retry, and login() (the
+      // second step) is never reached once the first step fails.
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(fetchImpl).toHaveBeenCalledWith(
+        "https://vgames.example/auth/set-credentials",
+        expect.anything(),
+      );
+    });
+
+    it("logs a structured, greppable line per attempt with route/attempt/upstreamMs/outcome", async () => {
+      const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+      try {
+        const fetchImpl = vi
+          .fn()
+          .mockRejectedValueOnce(new TypeError("binding unavailable"))
+          .mockResolvedValueOnce(Response.json({ accountId: "acc-claimed", token: "jwt-claimed" }));
+        const client = createVGamesIdentityClient({ baseUrl: "https://vgames.example", fetchImpl });
+
+        await client.login({
+          deviceCredential: "cred-123456789012",
+          username: "vijay",
+          password: "secret-pass",
+        });
+
+        const identityLogCalls = infoSpy.mock.calls.filter(([tag]) => tag === "vgames_identity_call");
+        expect(identityLogCalls).toHaveLength(2);
+        const first = JSON.parse(identityLogCalls[0]![1] as string);
+        const second = JSON.parse(identityLogCalls[1]![1] as string);
+        expect(first).toMatchObject({
+          route: "/auth/login",
+          attempt: 1,
+          outcome: "vgames_identity_unavailable",
+        });
+        expect(typeof first.upstreamMs).toBe("number");
+        expect(second).toMatchObject({ route: "/auth/login", attempt: 2, outcome: "ok" });
+      } finally {
+        infoSpy.mockRestore();
+      }
+    });
+  });
 });

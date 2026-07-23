@@ -9,6 +9,7 @@ import type {
 } from "./domain/dailyEditorial";
 import type { Challenge, ServerPathStep } from "./domain/types";
 import type { VGamesIdentityRepository, VGamesIdentitySession } from "./services/vgamesIdentity";
+import { ApiRequestError } from "./services/apiRequest";
 import { appleParseResponse, fruitParseResponse } from "./test/fixtures";
 
 const apiOrigin = "http://localhost:8787";
@@ -824,7 +825,7 @@ describe("VWiki Race app", () => {
     expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
   });
 
-  it("switches to honest 'Still connecting...' copy when the login retry kicks in", async () => {
+  it("LR-2: stages honest 'Still connecting...' / 'Almost there - retrying...' copy across the login ladder", async () => {
     const loginSession: VGamesIdentitySession = {
       accountId: "acc-claimed",
       displayName: "vijay",
@@ -832,11 +833,11 @@ describe("VWiki Race app", () => {
       status: "claimed",
     };
     const loginDeferred = deferredValue<VGamesIdentitySession>();
-    let reportRetry: (() => void) | undefined;
+    let reportRetry: ((attempt: number) => void) | undefined;
     const identityClient = {
       playAsGuest: vi.fn(async () => loginSession),
       secureGuest: vi.fn(async () => loginSession),
-      login: vi.fn((_input: unknown, hooks?: { onRetry?: () => void }) => {
+      login: vi.fn((_input: unknown, hooks?: { onRetry?: (attempt: number) => void }) => {
         reportRetry = hooks?.onRetry;
         return loginDeferred.promise;
       }),
@@ -862,16 +863,120 @@ describe("VWiki Race app", () => {
 
     expect(await screen.findByRole("button", { name: /logging in/i })).toBeDisabled();
 
-    // The identity client reports its single automatic retry - the button
-    // copy turns honest instead of spinning silently.
-    act(() => reportRetry?.());
-    const retryButton = await screen.findByRole("button", { name: /still connecting/i });
-    expect(retryButton).toBeDisabled();
+    // Ladder rung 1: the identity client reports the first automatic retry
+    // (ordinal 1) - the button copy turns honest instead of spinning
+    // silently.
+    act(() => reportRetry?.(1));
+    const stillConnecting = await screen.findByRole("button", { name: /still connecting/i });
+    expect(stillConnecting).toBeDisabled();
     expect(screen.queryByRole("button", { name: /logging in/i })).toBeNull();
 
-    // The retry succeeding still lands the login normally.
+    // Ladder rung 2: the second and final retry (ordinal 2) - a distinct
+    // stage, not a repeat of "Still connecting...".
+    act(() => reportRetry?.(2));
+    const almostThere = await screen.findByRole("button", { name: /almost there.*retrying/i });
+    expect(almostThere).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /still connecting/i })).toBeNull();
+
+    // The final attempt succeeding still lands the login normally.
     act(() => loginDeferred.resolve(loginSession));
     expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
+  });
+
+  it("LR-2: shows one honest error and beacons the stall once the login ladder exhausts", async () => {
+    const loginDeferred = deferredValue<VGamesIdentitySession>();
+    let reportRetry: ((attempt: number) => void) | undefined;
+    const identityClient = {
+      playAsGuest: vi.fn(),
+      secureGuest: vi.fn(),
+      login: vi.fn((_input: unknown, hooks?: { onRetry?: (attempt: number) => void }) => {
+        reportRetry = hooks?.onRetry;
+        return loginDeferred.promise;
+      }),
+    };
+    const reportedErrors: unknown[] = [];
+    const errorReporter = {
+      report: vi.fn((_source: string, error: unknown, _context?: { detail?: string }) => {
+        reportedErrors.push(error);
+      }),
+    };
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock()}
+        storage={memoryStorage()}
+        identityClient={identityClient}
+        errorReporter={errorReporter}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(screen.getByRole("button", { name: /^log in$/i }));
+    await user.type(screen.getByLabelText(/^username$/i), "vijay");
+    await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
+    fireEvent.submit(
+      screen.getByLabelText(/^password$/i).closest("form") as HTMLFormElement,
+    );
+
+    await screen.findByRole("button", { name: /logging in/i });
+    act(() => reportRetry?.(1));
+    await screen.findByRole("button", { name: /still connecting/i });
+    act(() => reportRetry?.(2));
+    await screen.findByRole("button", { name: /almost there.*retrying/i });
+
+    // The ladder exhausts on a connectivity-class failure - one honest
+    // message, not the raw upstream string, and the stall beacons through
+    // the existing /api/client-error reporter.
+    const timeoutError = new ApiRequestError("timeout", "API request timed out.", 504);
+    act(() => loginDeferred.reject(timeoutError));
+
+    expect(
+      await screen.findByText("VGames identity is having a moment — try once more."),
+    ).toBeVisible();
+    expect(screen.queryByText("API request timed out.")).toBeNull();
+    expect(errorReporter.report).toHaveBeenCalledTimes(1);
+    expect(reportedErrors).toEqual([timeoutError]);
+    const reportCall = errorReporter.report.mock.calls[0]!;
+    expect(reportCall[0]).toBe("manual");
+    expect(reportCall[2]?.detail).toContain("flow=login");
+    expect(reportCall[2]?.detail).toContain("attempts=3");
+  });
+
+  it("LR-2: does not beacon a real credential failure (not a connectivity stall)", async () => {
+    const identityClient = {
+      playAsGuest: vi.fn(),
+      secureGuest: vi.fn(),
+      login: vi.fn(async () => {
+        throw new ApiRequestError("invalid_credentials", "invalid_credentials", 401);
+      }),
+    };
+    const errorReporter = { report: vi.fn() };
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock()}
+        storage={memoryStorage()}
+        identityClient={identityClient}
+        errorReporter={errorReporter}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(screen.getByRole("button", { name: /^log in$/i }));
+    await user.type(screen.getByLabelText(/^username$/i), "vijay");
+    await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
+    fireEvent.submit(
+      screen.getByLabelText(/^password$/i).closest("form") as HTMLFormElement,
+    );
+
+    expect(
+      await screen.findByText("That VGames username or password is incorrect."),
+    ).toBeVisible();
+    expect(errorReporter.report).not.toHaveBeenCalled();
   });
 
   // QF-07: continueAsGuest/createVGamesAccount had no synchronous guard of
@@ -951,6 +1056,109 @@ describe("VWiki Race app", () => {
 
     pendingGuest.resolve();
     expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
+  });
+
+  it("LR-2: stages honest retry copy on the continue-as-guest ladder too", async () => {
+    const guestSession: VGamesIdentitySession = {
+      accountId: "acc-guest-1",
+      displayName: "Vijay",
+      token: "jwt-guest-1",
+      status: "ghost",
+    };
+    const guestDeferred = deferredValue<VGamesIdentitySession>();
+    let reportRetry: ((attempt: number) => void) | undefined;
+    const identityClient = {
+      playAsGuest: vi.fn((_input: unknown, hooks?: { onRetry?: (attempt: number) => void }) => {
+        reportRetry = hooks?.onRetry;
+        return guestDeferred.promise;
+      }),
+      secureGuest: vi.fn(),
+      login: vi.fn(),
+    };
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock()}
+        storage={memoryStorage()}
+        identityClient={identityClient}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(screen.getByRole("button", { name: /^guest$/i }));
+    await user.type(screen.getByLabelText(/display name/i), "Vijay");
+    const form = screen.getByLabelText(/display name/i).closest("form") as HTMLFormElement;
+    fireEvent.submit(form);
+
+    expect(await screen.findByRole("button", { name: /continue as guest/i })).toBeDisabled();
+
+    // playAsGuest's own ladder (naturally idempotent - keyed by
+    // deviceCredential) stages the SAME honest copy as login's.
+    act(() => reportRetry?.(1));
+    await screen.findByRole("button", { name: /still connecting/i });
+    act(() => reportRetry?.(2));
+    await screen.findByRole("button", { name: /almost there.*retrying/i });
+
+    act(() => guestDeferred.resolve(guestSession));
+    expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
+  });
+
+  it("LR-2: stages honest retry copy on create-account's guest-bootstrap sub-step, but never on secureGuest itself", async () => {
+    const claimedSession: VGamesIdentitySession = {
+      accountId: "acc-guest-2",
+      displayName: "vijay",
+      token: "jwt-claimed-2",
+      status: "claimed",
+    };
+    const guestDeferred = deferredValue<VGamesIdentitySession>();
+    let reportRetry: ((attempt: number) => void) | undefined;
+    const identityClient = {
+      playAsGuest: vi.fn((_input: unknown, hooks?: { onRetry?: (attempt: number) => void }) => {
+        reportRetry = hooks?.onRetry;
+        return guestDeferred.promise;
+      }),
+      // Never given an onRetry hook by App - secureGuest's own two-step
+      // server-side mutation (set-credentials then login) is NOT laddered
+      // (see the non-goal comment in vgamesIdentity.ts).
+      secureGuest: vi.fn(async () => claimedSession),
+      login: vi.fn(),
+    };
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock()}
+        storage={memoryStorage()}
+        identityClient={identityClient}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(screen.getByRole("button", { name: /^create account$/i }));
+    await user.type(screen.getByLabelText(/vgames username/i), "vijay");
+    await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
+    await user.type(screen.getByLabelText(/confirm password/i), "secret-pass");
+    const form = screen.getByLabelText(/vgames username/i).closest("form") as HTMLFormElement;
+    fireEvent.submit(form);
+
+    expect(createAccountSubmitButton()).toBeDisabled();
+
+    act(() => reportRetry?.(1));
+    await screen.findByRole("button", { name: /still connecting/i });
+    act(() => reportRetry?.(2));
+    await screen.findByRole("button", { name: /almost there.*retrying/i });
+
+    act(() => guestDeferred.resolve({
+      accountId: "acc-guest-2",
+      displayName: "vijay",
+      token: "jwt-guest-2",
+      status: "ghost",
+    }));
+    expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
+    expect(identityClient.secureGuest).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a successful login in memory when browser storage rejects the write", async () => {
@@ -7956,6 +8164,15 @@ function createDeferredResponse(body: unknown): {
 
 function deferredValue<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((doneResolve, doneReject) => {
+    resolve = doneResolve;
+    reject = doneReject;
+  });
+  // Fake timers + an unresolved deferred rejects at teardown otherwise -
+  // exhaustion tests below reject it deliberately, but every OTHER caller
+  // resolves it, so a no-op catch here is harmless and keeps this shared
+  // helper safe by default.
+  promise.catch(() => {});
+  return { promise, resolve, reject };
 }

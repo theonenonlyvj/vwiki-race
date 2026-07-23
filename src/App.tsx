@@ -26,6 +26,7 @@ import type {
 import {
   createVGamesIdentityClient,
   createVGamesIdentityRepository,
+  isIdentityConnectivityFailure,
   vgamesIdentityErrorMessage,
   type VGamesIdentityClient,
   type VGamesIdentityRepository,
@@ -36,6 +37,8 @@ import {
   createVWikiRaceApiClient,
   type VWikiRaceApiClient,
 } from "./services/vwikiRaceApiClient";
+import { resolveApiOrigin } from "./services/apiOrigin";
+import { createErrorReporter, type ErrorReporter } from "./services/errorReporting";
 // FB-7 (owner ruling, 2026-07-19): shared with the server's DNF eligibility
 // threshold - see MIN_COUNTED_DNF_CLICKS's doc comment in runProtocol.ts.
 import { MIN_COUNTED_DNF_CLICKS } from "./server/runProtocol";
@@ -67,6 +70,12 @@ interface AppProps {
   apiClient?: VWikiRaceApiClient;
   identityClient?: VGamesIdentityClient;
   identityRepository?: VGamesIdentityRepository;
+  // LR-2: reused for the identity retry ladder's exhaustion telemetry (see
+  // reportIdentityStall below) - defaults to a real beacon reporter so
+  // production always names its own stalls; main.tsx injects the SAME
+  // instance it already built for ErrorBoundary rather than standing up a
+  // second one.
+  errorReporter?: Pick<ErrorReporter, "report">;
 }
 
 type AuthMode = "guest" | "create" | "login";
@@ -121,6 +130,54 @@ const unavailableBrowserStorage: StorageLike = {
   setItem: () => undefined,
   removeItem: () => undefined,
 };
+// LR-2: mirrors the other services' own default-origin resolution
+// (vgamesIdentity.ts/vwikiRaceApiClient.ts) - only exercised when a caller
+// doesn't inject its own errorReporter (main.tsx always does, reusing the
+// one instance it already built for ErrorBoundary).
+const DEFAULT_API_ORIGIN = resolveApiOrigin(import.meta.env.VITE_VWIKI_RACE_API_URL, {
+  production: import.meta.env.PROD,
+});
+
+// LR-2: 0 = no retry yet (idle/first-attempt busy copy), 1 = the ladder's
+// first retry is in flight ("Still connecting..."), 2 = its second and
+// final retry is in flight ("Almost there - retrying..."). Shared by every
+// identity flow's button copy (login/guest/create) so a stall reads the
+// same way wherever it happens. Plain `number` (not a 0|1|2 literal union)
+// so it can be set directly from an IdentityRetryHooks.onRetry callback's
+// `attempt` ordinal without a cast.
+type IdentityRetryStage = number;
+
+function identityRetryStageLabel(stage: IdentityRetryStage, idleBusyLabel: string): string {
+  if (stage === 1) return "Still connecting...";
+  if (stage === 2) return "Almost there — retrying...";
+  return idleBusyLabel;
+}
+
+/**
+ * LR-2 telemetry ("so the next stall names itself"): when an identity
+ * flow's retry ladder exhausts on a connectivity-class failure (never a
+ * real answer like bad credentials or a taken username - see
+ * isIdentityConnectivityFailure), beacon it through the EXISTING
+ * /api/client-error reporter with the ladder's own attempt timings, so a
+ * live burst shows up in Workers Logs instead of requiring another owner
+ * screenshot. A no-op for any other kind of failure.
+ */
+function reportIdentityStall(
+  errorReporter: Pick<ErrorReporter, "report">,
+  flow: "login" | "guest" | "create",
+  caught: unknown,
+  retryAtMs: number[],
+  totalMs: number,
+): void {
+  if (!isIdentityConnectivityFailure(caught)) {
+    return;
+  }
+  errorReporter.report("manual", caught, {
+    detail:
+      `identity-retry-ladder flow=${flow} attempts=${retryAtMs.length + 1} ` +
+      `retryAtMs=[${retryAtMs.join(",")}] totalMs=${Math.round(totalMs)}`,
+  });
+}
 
 function readBrowserStorage(): StorageLike {
   try {
@@ -194,6 +251,7 @@ export default function App({
   apiClient: injectedApiClient,
   identityClient: injectedIdentityClient,
   identityRepository: injectedIdentityRepository,
+  errorReporter: injectedErrorReporter,
 }: AppProps) {
   // Bottom-nav mode shell (Increment 2 - see src/modes/AppShell.tsx). The
   // `/admin/dailies` bypass reads window.location directly inside AppShell
@@ -208,10 +266,14 @@ export default function App({
   const [authPrompt, setAuthPrompt] = useState<AuthPromptIntent | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>("create");
   const [authBusy, setAuthBusy] = useState(false);
-  // True while the login request's single automatic retry is in flight -
-  // drives the honest "Still connecting..." button copy so a slow first
-  // attempt doesn't read as a silent hang.
-  const [authRetrying, setAuthRetrying] = useState(false);
+  // LR-2: which rung of the login retry ladder is in flight (0 = none) -
+  // drives the honest "Still connecting..."/"Almost there - retrying..."
+  // button copy so a slow first attempt never reads as a silent hang.
+  const [authRetryAttempt, setAuthRetryAttempt] = useState<IdentityRetryStage>(0);
+  // Same idea for continueAsGuest's and createVGamesAccount's own (fully or
+  // partially laddered - see vgamesIdentity.ts) identity calls.
+  const [guestRetryAttempt, setGuestRetryAttempt] = useState<IdentityRetryStage>(0);
+  const [createRetryAttempt, setCreateRetryAttempt] = useState<IdentityRetryStage>(0);
   // "Honest You" (spec §2.2/§2.3): non-null while the ghost-loss guard
   // dialog is showing INSTEAD of the identity sheet (§8 "Dialog layering" -
   // `authPrompt && ghostGuard` renders the guard, never both at once).
@@ -341,6 +403,12 @@ export default function App({
   const identityClient = useMemo(
     () => injectedIdentityClient ?? createVGamesIdentityClient(fetchImpl, { apiOrigin }),
     [apiOrigin, fetchImpl, injectedIdentityClient],
+  );
+  const errorReporter = useMemo(
+    () =>
+      injectedErrorReporter ??
+      createErrorReporter({ apiOrigin: apiOrigin ?? DEFAULT_API_ORIGIN, fetchImpl }),
+    [apiOrigin, fetchImpl, injectedErrorReporter],
   );
   const identityStorage = useMemo(
     () => withStorageBlockedDetection(
@@ -1225,11 +1293,25 @@ export default function App({
         }
 
         setAuthBusy(true);
+        setGuestRetryAttempt(0);
+        // LR-2: playAsGuest is safe to ladder in full (get-or-create keyed
+        // by deviceCredential - see vgamesIdentity.ts) - track attempt
+        // timings so an exhausted ladder can beacon itself below.
+        const guestCallStartedAt = now();
+        const guestRetryAtMs: number[] = [];
         try {
-          nextIdentitySession = await identityClient.playAsGuest({
-            deviceCredential: identityRepository.getDeviceCredential(),
-            displayName,
-          });
+          nextIdentitySession = await identityClient.playAsGuest(
+            {
+              deviceCredential: identityRepository.getDeviceCredential(),
+              displayName,
+            },
+            {
+              onRetry: (attempt) => {
+                guestRetryAtMs.push(now() - guestCallStartedAt);
+                setGuestRetryAttempt(attempt);
+              },
+            },
+          );
           persistIdentitySession(nextIdentitySession);
           if (forceNameEntry) {
             // Per-tab DNF memory belongs to the account that raced (§2.1) -
@@ -1237,9 +1319,18 @@ export default function App({
             setSessionDnfChallengeIds(new Set());
           }
         } catch (caught) {
+          reportIdentityStall(
+            errorReporter,
+            "guest",
+            caught,
+            guestRetryAtMs,
+            now() - guestCallStartedAt,
+          );
           setError(vgamesIdentityErrorMessage(caught, "Could not start a guest session."));
           setAuthBusy(false);
           return;
+        } finally {
+          setGuestRetryAttempt(0);
         }
       }
 
@@ -1284,13 +1375,30 @@ export default function App({
 
     createVGamesAccountLock.current = true;
     setAuthBusy(true);
+    setCreateRetryAttempt(0);
+    const createCallStartedAt = now();
+    const createRetryAtMs: number[] = [];
     try {
       let guestSession = identitySession;
       if (!guestSession) {
-        guestSession = await identityClient.playAsGuest({
-          deviceCredential: identityRepository.getDeviceCredential(),
-          displayName: username,
-        });
+        // LR-2: the only timeout-safe part of create-account to ladder -
+        // this anonymous guest bootstrap is naturally idempotent (see
+        // vgamesIdentity.ts's playAsGuest). The secureGuest call just below
+        // is NOT laddered: it fans out to a two-step server-side mutation
+        // (set-credentials then login) that a client-observed timeout can't
+        // safely replay - see the non-goal comment on secureGuest itself.
+        guestSession = await identityClient.playAsGuest(
+          {
+            deviceCredential: identityRepository.getDeviceCredential(),
+            displayName: username,
+          },
+          {
+            onRetry: (attempt) => {
+              createRetryAtMs.push(now() - createCallStartedAt);
+              setCreateRetryAttempt(attempt);
+            },
+          },
+        );
       }
 
       const claimedSession = await identityClient.secureGuest({
@@ -1303,10 +1411,18 @@ export default function App({
       closeAuthPrompt();
       await resumeAfterIdentity(prompt, claimedSession);
     } catch (caught) {
+      reportIdentityStall(
+        errorReporter,
+        "create",
+        caught,
+        createRetryAtMs,
+        now() - createCallStartedAt,
+      );
       setError(vgamesIdentityErrorMessage(caught, "Could not create that VGames account."));
     } finally {
       createVGamesAccountLock.current = false;
       setAuthBusy(false);
+      setCreateRetryAttempt(0);
     }
   }
 
@@ -1342,7 +1458,12 @@ export default function App({
 
     loginRequestLock.current = true;
     setAuthBusy(true);
-    setAuthRetrying(false);
+    setAuthRetryAttempt(0);
+    // LR-2: the full 3-attempt ladder (4s/8s/15s) replaces 6d54452's single
+    // retry - track attempt timings so an exhausted ladder can beacon
+    // itself below ("the next stall names itself").
+    const loginCallStartedAt = now();
+    const loginRetryAtMs: number[] = [];
     try {
       const loggedInSession = await identityClient.login(
         {
@@ -1350,7 +1471,12 @@ export default function App({
           username,
           password,
         },
-        { onRetry: () => setAuthRetrying(true) },
+        {
+          onRetry: (attempt) => {
+            loginRetryAtMs.push(now() - loginCallStartedAt);
+            setAuthRetryAttempt(attempt);
+          },
+        },
       );
       persistIdentitySession(loggedInSession);
       // Every login replaces the active account - a later session must
@@ -1359,6 +1485,13 @@ export default function App({
       closeAuthPrompt();
       await resumeAfterIdentity(prompt, loggedInSession);
     } catch (caught) {
+      reportIdentityStall(
+        errorReporter,
+        "login",
+        caught,
+        loginRetryAtMs,
+        now() - loginCallStartedAt,
+      );
       setError(vgamesIdentityErrorMessage(caught, "Could not log in."));
       // Login FAILURE (§2.2): the sheet re-opens on the Log in tab with
       // this error - `authPrompt` was never cleared, so it's already
@@ -1370,7 +1503,7 @@ export default function App({
     } finally {
       loginRequestLock.current = false;
       setAuthBusy(false);
-      setAuthRetrying(false);
+      setAuthRetryAttempt(0);
     }
   }
 
@@ -1879,7 +2012,9 @@ export default function App({
       ) : authPrompt ? (
         <IdentityPrompt
           authBusy={authBusy}
-          authRetrying={authRetrying}
+          authRetryAttempt={authRetryAttempt}
+          guestRetryAttempt={guestRetryAttempt}
+          createRetryAttempt={createRetryAttempt}
           authMode={authMode}
           confirmPasswordDraft={confirmPasswordDraft}
           displayNameDraft={displayNameDraft}
@@ -1946,7 +2081,9 @@ export default function App({
 
 function IdentityPrompt({
   authBusy,
-  authRetrying,
+  authRetryAttempt,
+  guestRetryAttempt,
+  createRetryAttempt,
   authMode,
   confirmPasswordDraft,
   displayNameDraft,
@@ -1968,8 +2105,11 @@ function IdentityPrompt({
   usernameDraft,
 }: {
   authBusy: boolean;
-  // The login request's automatic retry is in flight (see performLogin).
-  authRetrying: boolean;
+  // LR-2: which rung of each identity flow's own retry ladder is in flight
+  // (0 = none) - see performLogin/continueAsGuest/createVGamesAccount.
+  authRetryAttempt: IdentityRetryStage;
+  guestRetryAttempt: IdentityRetryStage;
+  createRetryAttempt: IdentityRetryStage;
   authMode: AuthMode;
   confirmPasswordDraft: string;
   displayNameDraft: string;
@@ -2115,7 +2255,7 @@ function IdentityPrompt({
               disabled={authBusy || ((!identitySession || forceNameEntry) && !displayNameIsReady)}
               type="submit"
             >
-              Continue as guest
+              {identityRetryStageLabel(guestRetryAttempt, "Continue as guest")}
             </button>
             {/* "Honest You" (spec §2.6): always rendered, regardless of
                 forceNameEntry - closes the federated-player hole (a
@@ -2189,7 +2329,7 @@ function IdentityPrompt({
               />
             </label>
             <button disabled={authBusy} type="submit">
-              Create account
+              {identityRetryStageLabel(createRetryAttempt, "Create account")}
             </button>
           </form>
         ) : null}
@@ -2234,11 +2374,7 @@ function IdentityPrompt({
               />
             </label>
             <button disabled={authBusy} type="submit">
-              {authBusy
-                ? authRetrying
-                  ? "Still connecting..."
-                  : "Logging in..."
-                : "Log in"}
+              {authBusy ? identityRetryStageLabel(authRetryAttempt, "Logging in...") : "Log in"}
             </button>
           </form>
         ) : null}

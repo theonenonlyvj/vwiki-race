@@ -280,7 +280,7 @@ describe("VGames identity client", () => {
     expect(secondHeaders["Idempotency-Key"]).toBe(firstHeaders["Idempotency-Key"]);
   });
 
-  it("fails a stalled first login attempt over to the retry at 4s and reports the retry", async () => {
+  it("LR-2: logs in via a 3-attempt ladder (4s/8s/15s), reporting each retry ordinal, on the same operation key", async () => {
     vi.useFakeTimers();
     try {
       const session = {
@@ -296,7 +296,7 @@ describe("VGames identity client", () => {
             init?.signal?.addEventListener("abort", () =>
               reject(new DOMException("Aborted", "AbortError")),
             );
-            if (attempt === 2) {
+            if (attempt === 3) {
               resolve(Response.json(session));
             }
           }),
@@ -317,19 +317,108 @@ describe("VGames identity client", () => {
         status: "claimed",
       });
 
-      // The stalled first attempt is cut at the 4s leash (not 15s) and the
-      // caller hears about the retry so it can show honest progress copy.
+      // Attempt 1 is cut at the 4s leash (not 15s) and reports retry
+      // ordinal 1.
       await vi.advanceTimersByTimeAsync(4_000);
-      expect(onRetry).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(250);
+      expect(onRetry).toHaveBeenNthCalledWith(1, 1);
+      await vi.advanceTimersByTimeAsync(650); // jittered gap
       expect(fetchImpl).toHaveBeenCalledTimes(2);
 
-      // Same idempotency key on both attempts - one login, not two.
+      // Attempt 2 is cut at 8s and reports retry ordinal 2.
+      await vi.advanceTimersByTimeAsync(8_000);
+      expect(onRetry).toHaveBeenNthCalledWith(2, 2);
+      await vi.advanceTimersByTimeAsync(650);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+
+      // Same idempotency key on all three attempts - one login, however
+      // many attempts it takes.
+      const keys = fetchImpl.mock.calls.map(
+        ([, init]) => (init?.headers as Record<string, string>)["Idempotency-Key"],
+      );
+      expect(new Set(keys).size).toBe(1);
+      expect(keys[0]).toMatch(/\S/);
+
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("LR-2: ladders playAsGuest identically, on its own idempotency key", async () => {
+    vi.useFakeTimers();
+    try {
+      const session = {
+        accountId: "acc-guest",
+        displayName: "Casey",
+        token: "jwt-guest",
+        status: "ghost",
+      };
+      const fetchImpl = vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((resolve, reject) => {
+            const attempt = fetchImpl.mock.calls.length;
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError")),
+            );
+            if (attempt === 2) {
+              resolve(Response.json(session));
+            }
+          }),
+      );
+      const onRetry = vi.fn();
+      const client = createVGamesIdentityClient(fetchImpl, { apiOrigin });
+
+      const guest = client.playAsGuest(
+        { deviceCredential: "cred-123456789012", displayName: "Casey" },
+        { onRetry },
+      );
+      const assertion = expect(guest).resolves.toMatchObject({ accountId: "acc-guest" });
+
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(onRetry).toHaveBeenNthCalledWith(1, 1);
+      await vi.advanceTimersByTimeAsync(650);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+
       const firstHeaders = fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>;
       const secondHeaders = fetchImpl.mock.calls[1]?.[1]?.headers as Record<string, string>;
       expect(secondHeaders["Idempotency-Key"]).toBe(firstHeaders["Idempotency-Key"]);
 
       await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("LR-2 (verified non-idempotent): secureGuest keeps a single full-budget attempt with no automatic retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn(
+        (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("Aborted", "AbortError")),
+            );
+          }),
+      );
+      const client = createVGamesIdentityClient(fetchImpl, { apiOrigin });
+
+      const secure = client.secureGuest({
+        deviceCredential: "cred-123456789012",
+        token: "jwt-guest",
+        username: "casey",
+        password: "secret-pass",
+      });
+      const assertion = expect(secure).rejects.toMatchObject({ code: "timeout" });
+
+      // Keeps the full 15s budget on its one attempt (no 4s/8s ladder leash)
+      // - set-credentials+login is a two-step server-side mutation that
+      // can't be safely replayed on a client-observed timeout.
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await assertion;
+      expect(fetchImpl).toHaveBeenCalledTimes(1); // no retry, ever
     } finally {
       vi.useRealTimers();
     }
@@ -379,5 +468,35 @@ describe("VGames identity error copy", () => {
         "fallback",
       ),
     ).toMatch(/belongs to an existing VGames account/i);
+  });
+
+  // LR-2: connectivity-class failures (client-side timeout/network error, or
+  // the proxy's own upstream-timeout/-unavailable mapping) used to fall
+  // through to the raw pass-through below and surface strings like "VGames
+  // identity timed out." verbatim - confusing, developer-facing copy that
+  // is exactly what the owner saw in the field. One honest message for all
+  // of them now, regardless of which identity flow (login/guest/create)
+  // hit it or how many ladder attempts preceded it.
+  it.each([
+    ["timeout", "API request timed out."],
+    ["network_error", "API request could not be completed."],
+    ["vgames_identity_timeout", "VGames identity timed out."],
+    ["vgames_identity_unavailable", "VGames identity is temporarily unavailable."],
+  ])(
+    "maps the connectivity-class code %s to one honest message instead of the raw upstream string",
+    (code, rawMessage) => {
+      expect(
+        vgamesIdentityErrorMessage(new ApiRequestError(code, rawMessage, 503), "fallback"),
+      ).toBe("VGames identity is having a moment — try once more.");
+    },
+  );
+
+  it("still surfaces the fallback for an unrecognized failed-identity code with no message", () => {
+    expect(
+      vgamesIdentityErrorMessage(
+        new ApiRequestError("vgames_identity_failed", "vgames_identity_failed", 500),
+        "fallback",
+      ),
+    ).toBe("fallback");
   });
 });

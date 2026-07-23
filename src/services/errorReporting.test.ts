@@ -182,6 +182,34 @@ describe("createErrorReporter", () => {
       expect(body.stack.length).toBeLessThanOrEqual(4096);
     });
 
+    it("LR-2: appends context.detail to the stack, alongside a component stack when both are present", async () => {
+      const fetchImpl = fetchMock();
+      const reporter = createErrorReporter({ apiOrigin, fetchImpl });
+
+      const error = new Error("stalled login");
+      error.stack = "at requestJson";
+      reporter.report("manual", error, {
+        detail: "identity-retry-ladder flow=login attempts=3 retryAtMs=[4010,12630] totalMs=27510",
+      });
+      await Promise.resolve();
+
+      const body = jsonBody(fetchImpl);
+      expect(body.stack).toContain("at requestJson");
+      expect(body.stack).toContain("identity-retry-ladder flow=login attempts=3");
+
+      const fetchImpl2 = fetchMock();
+      const reporter2 = createErrorReporter({ apiOrigin, fetchImpl: fetchImpl2 });
+      reporter2.report("error-boundary", new Error("boom"), {
+        componentStack: "\n    in App",
+        detail: "identity-retry-ladder flow=guest attempts=1 retryAtMs=[] totalMs=90",
+      });
+      await Promise.resolve();
+
+      const body2 = jsonBody(fetchImpl2);
+      expect(body2.stack).toContain("Component stack:");
+      expect(body2.stack).toContain("identity-retry-ladder flow=guest");
+    });
+
     it("truncates url and userAgent to 512 chars", async () => {
       const fetchImpl = fetchMock();
       const reporter = createErrorReporter({ apiOrigin, fetchImpl });

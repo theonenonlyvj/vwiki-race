@@ -38,24 +38,55 @@ export interface LoginInput {
   password: string;
 }
 
-export interface LoginHooks {
-  /** Fired when the client's single automatic retry kicks in, so the UI can
-   *  switch to honest "Still connecting" copy instead of an unchanging
-   *  spinner. */
-  onRetry?: () => void;
+export interface IdentityRetryHooks {
+  /** Fired just before each rung of the automatic retry ladder fires, with
+   *  `attempt` set to the 1-based ordinal of the retry about to start (1 =
+   *  second attempt overall, 2 = third) - lets the UI stage honest progress
+   *  copy per rung instead of a single undifferentiated "retrying" flag. */
+  onRetry?: (attempt: number) => void;
 }
 
 export interface VGamesIdentityClient {
-  playAsGuest(input: GuestIdentityInput): Promise<VGamesIdentitySession>;
+  playAsGuest(input: GuestIdentityInput, hooks?: IdentityRetryHooks): Promise<VGamesIdentitySession>;
   secureGuest(input: SecureGuestInput): Promise<VGamesIdentitySession>;
-  login(input: LoginInput, hooks?: LoginHooks): Promise<VGamesIdentitySession>;
+  login(input: LoginInput, hooks?: IdentityRetryHooks): Promise<VGamesIdentitySession>;
 }
 
 export interface VGamesIdentityClientOptions {
   apiOrigin?: string;
 }
 
+// LR-2: codes that mean "we never got a real answer" - a client-side
+// timeout/network error, or the proxy's own upstream-timeout/-unavailable
+// mapping (src/server/vgamesIdentityClient.ts) - as opposed to a genuine
+// response from the identity service (bad credentials, a taken username, a
+// malformed payload). These previously fell through to the raw
+// pass-through below and surfaced strings like "VGames identity timed
+// out." verbatim, which read as a developer error in the field (owner
+// screenshots, live burst-failure incident). One honest message instead.
+const CONNECTIVITY_FAILURE_CODES = new Set([
+  "timeout",
+  "network_error",
+  "vgames_identity_timeout",
+  "vgames_identity_unavailable",
+]);
+
+export function isIdentityConnectivityFailure(caught: unknown): boolean {
+  const code = caught !== null && typeof caught === "object" && "code" in caught &&
+      typeof caught.code === "string"
+    ? caught.code
+    : null;
+  return code !== null && CONNECTIVITY_FAILURE_CODES.has(code);
+}
+
+export const IDENTITY_CONNECTIVITY_FAILURE_MESSAGE =
+  "VGames identity is having a moment — try once more.";
+
 export function vgamesIdentityErrorMessage(caught: unknown, fallback: string): string {
+  if (isIdentityConnectivityFailure(caught)) {
+    return IDENTITY_CONNECTIVITY_FAILURE_MESSAGE;
+  }
+
   const code = caught !== null && typeof caught === "object" && "code" in caught &&
       typeof caught.code === "string"
     ? caught.code
@@ -194,15 +225,53 @@ const DEFAULT_API_ORIGIN = resolveApiOrigin(import.meta.env.VITE_VWIKI_RACE_API_
   production: import.meta.env.PROD,
 });
 
+// LR-2: live evidence 2026-07-22 (owner hit the hang LIVE, 4 screenshots,
+// worked on the 5th manual attempt) showed the identity hop fails in
+// BURSTS spanning more than one stalled request - a single retry (6d54452)
+// wasn't always enough. Three widening attempts instead: 4s (same stalled-
+// cold-connection leash as 6d54452) -> 8s -> 15s (the original full
+// budget, kept last so a genuinely slow-but-alive upstream still gets its
+// full window before the ladder gives up). Worst-case time-to-error is
+// ~27s (4+8+15, plus two ~500ms jittered gaps) vs. the single-retry's
+// ~19s (4+15) - a small worst-case cost for covering a burst that spans
+// two stalls, which the live incident showed actually happens.
+export const IDENTITY_ATTEMPT_TIMEOUTS_MS = [4_000, 8_000, 15_000];
+
 export function createVGamesIdentityClient(
   fetchImpl: typeof fetch = defaultApiFetch,
   options: VGamesIdentityClientOptions = {},
 ): VGamesIdentityClient {
   const apiOrigin = options.apiOrigin ?? DEFAULT_API_ORIGIN;
   return {
-    playAsGuest(input) {
-      return identityRequest(fetchImpl, `${apiOrigin}/api/v2/identity/guest`, input);
+    playAsGuest(input, hooks) {
+      return identityRequest(fetchImpl, `${apiOrigin}/api/v2/identity/guest`, input, {
+        idempotencyKey: crypto.randomUUID(),
+        retry: "idempotent-once",
+        // Naturally idempotent regardless of the Idempotency-Key header:
+        // guest creation is a get-or-create keyed by `deviceCredential`
+        // server-side ("device_credentials maps the device credential hash
+        // to the ghost account", docs/superpowers/specs/
+        // 2026-07-14-vgames-identity-v0-design.md) - retrying the SAME
+        // deviceCredential+displayName can only ever return the SAME
+        // ghost, never mint a second one. Safe to ladder in full (LR-2).
+        attemptTimeoutsMs: IDENTITY_ATTEMPT_TIMEOUTS_MS,
+        onRetry: hooks?.onRetry,
+      });
     },
+    // NOT laddered (LR-2 non-goal, verified): this single client call fans
+    // out to TWO viota mutations server-side (server/vgamesIdentityClient.ts
+    // `secure()`: `/auth/set-credentials` THEN `/auth/login`). A client-
+    // observed timeout can't distinguish "never reached the server" from
+    // "set-credentials already succeeded but the response was lost" - a
+    // retry in the latter case would replay `/auth/set-credentials` for an
+    // ALREADY-secured guest, which could surface a false failure (or worse,
+    // a misleading "username taken") even though the account was created
+    // fine the first time. Unlike `playAsGuest`/`login`, there is no stable
+    // natural key here that makes a replay a safe no-op, so this call keeps
+    // its original single, full-budget attempt. The create-account flow's
+    // OTHER timeout-safe part - bootstrapping an anonymous guest via
+    // `playAsGuest` above, when the caller has no session yet - already
+    // gets the full ladder.
     secureGuest(input) {
       return identityRequest(fetchImpl, `${apiOrigin}/api/v2/identity/secure`, input);
     },
@@ -214,22 +283,16 @@ export function createVGamesIdentityClient(
         {
           idempotencyKey: crypto.randomUUID(),
           retry: "idempotent-once",
-          // Fail a stalled first attempt over to the idempotent retry fast:
-          // the warm login chain answers in well under a second (measured
-          // 2026-07-22: 247-566ms p100 across fresh contexts, ghost-fold
-          // included), so a first attempt silent past 4s is a stalled
-          // request, not a slow one. The retry keeps the full 15s window -
-          // it must outlive the API worker's own 10s upstream identity
-          // timeout so a genuine 504 still reaches error copy.
-          firstAttemptTimeoutMs: LOGIN_FIRST_ATTEMPT_TIMEOUT_MS,
+          // LR-2: full 3-attempt ladder replaces 6d54452's single 4s-leash
+          // retry - same Idempotency-Key on every attempt, one login
+          // however many attempts it takes.
+          attemptTimeoutsMs: IDENTITY_ATTEMPT_TIMEOUTS_MS,
           onRetry: hooks?.onRetry,
         },
       );
     },
   };
 }
-
-export const LOGIN_FIRST_ATTEMPT_TIMEOUT_MS = 4_000;
 
 async function identityRequest(
   fetchImpl: typeof fetch,
@@ -239,7 +302,8 @@ async function identityRequest(
     idempotencyKey?: string;
     retry?: "idempotent-once" | "never";
     firstAttemptTimeoutMs?: number;
-    onRetry?: () => void;
+    attemptTimeoutsMs?: number[];
+    onRetry?: (attempt: number) => void;
   } = {},
 ): Promise<VGamesIdentitySession> {
   return requestJson(fetchImpl, path, {
@@ -247,6 +311,7 @@ async function identityRequest(
     body,
     timeoutMs: 15_000,
     firstAttemptTimeoutMs: options.firstAttemptTimeoutMs,
+    attemptTimeoutsMs: options.attemptTimeoutsMs,
     onRetry: options.onRetry,
     retry: options.retry ?? "never",
     idempotencyKey: options.idempotencyKey,
