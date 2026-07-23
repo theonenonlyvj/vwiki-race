@@ -17,10 +17,21 @@ import type { TargetPreviewState } from "../hooks/useTargetPreview";
 
 /**
  * Beat 2 of the race flow: the active-race takeover. Slim HUD (timer +
- * clicks always visible, End Run prominent) above a muted path breadcrumb
+ * clicks always visible, target one tap away) above a muted path breadcrumb
  * above the existing (unmodified) article surface. Rendered whenever
  * race.phase is preparing/active/syncing/abandoning and there is no
  * recoveryRun in play (RaceFlow routes recovery to its own notice).
+ *
+ * HD-1 (owner report, two phone screenshots): the sticky `.race-hud` used to
+ * be two rows (a status/End-Run row above a Run+Target metrics row) - a tall
+ * dead area above the actual timer on a phone. End Run's own prominence
+ * never needed the HUD specifically; it just needed to always be reachable
+ * during an active run. Moved onto the path-strip row instead (still always
+ * rendered whenever `session` is set, i.e. whenever a run is genuinely
+ * active - see PathStrip below), leaving `.race-hud` a single row: the Run
+ * chip flush left, the Target chip flush right (`.race-hud-metrics`'s
+ * `justify-content: space-between`, RaceMode.tsx's only structural change
+ * here - the chips are still the same flex siblings RC-1 made them).
  */
 export default function RaceMode({
   article,
@@ -123,7 +134,10 @@ export default function RaceMode({
           // scroll-margin-top regression guard below depends on race-hud
           // never growing a second row at any width. PKG-02's original
           // single "Run" chip is untouched (App.test.tsx keys off
-          // `getByLabelText(/current run/i)` unmodified).
+          // `getByLabelText(/current run/i)` unmodified). HD-1: this row's
+          // own `justify-content: space-between` (styles.css) is what now
+          // pins Run flush left / Target flush right in the single-row HUD -
+          // no DOM change from RC-1, CSS only.
           <div className="race-hud-metrics">
             <dl className="run-metrics" aria-label="Current run">
               <div>
@@ -144,14 +158,6 @@ export default function RaceMode({
             </button>
           </div>
         ) : null}
-        <button
-          className="end-run-button"
-          disabled={endRunDisabled}
-          type="button"
-          onClick={onRequestEndRun}
-        >
-          End Run
-        </button>
 
         {session && isTargetOpen ? (
           // RC-1: a plain child of `.race-hud` (not a wrapping sibling div)
@@ -176,7 +182,16 @@ export default function RaceMode({
         ) : null}
       </header>
 
-      {session ? <PathStrip titles={visiblePath} /> : null}
+      {session ? (
+        // HD-1: End Run now renders here, not in `.race-hud` - see PathStrip's
+        // own HD-1 comment below for why this is still "always reachable
+        // during an active run" despite living in a plain (non-sticky) strip.
+        <PathStrip
+          titles={visiblePath}
+          endRunDisabled={endRunDisabled}
+          onRequestEndRun={onRequestEndRun}
+        />
+      ) : null}
 
       {pendingRetry ? (
         <aside className="sync-retry-panel" role="status">
@@ -309,9 +324,31 @@ export const WikipediaArticlePanel = memo(function WikipediaArticlePanel({
 // drove HOW it moved). Owner wants ONE obvious place for the target, not two
 // - so rather than duplicate it here too, this strip goes back to exactly
 // what it already computed as "visited": `titles` minus its trailing target
-// entry, purely a path trail. `visitedTitles`/rendering below is otherwise
-// unchanged from before this pass.
-export function PathStrip({ titles }: { titles: string[] }) {
+// entry, purely a path trail.
+//
+// HD-1 (owner report): End Run now renders here too, right-aligned against
+// the breadcrumb ("the end run can be in the line with the path?") - the
+// same `.end-run-button` coral hook as before, just visually compact
+// (styles.css `.path-strip .end-run-button`) to fit this shorter row, still
+// >=44px tall. Both props are required (not optional): RaceMode's only
+// caller always passes them whenever `session` is set (i.e. whenever a run
+// is genuinely active - PathStrip only ever mounts under that same gate), so
+// there is no live code path where a run is active and this strip renders
+// without an End Run affordance. It scrolls away with the rest of the strip
+// - INTENTIONAL, owner-accepted: the player can always scroll back up to
+// reach it; the always-visible sticky `.race-hud` above deliberately does
+// NOT duplicate it (owner: "just the timer, click count and the [target]
+// peek"). RaceRecoveryInterstitial's own "End Old Run" is a separate,
+// untouched control for the pre-active recovery gate, not this strip.
+export function PathStrip({
+  titles,
+  endRunDisabled,
+  onRequestEndRun,
+}: {
+  titles: string[];
+  endRunDisabled: boolean;
+  onRequestEndRun: (event: MouseEvent<HTMLElement>) => void;
+}) {
   const visitedTitles = titles.slice(0, -1);
   return (
     <nav className="path-strip" aria-label="Run path">
@@ -325,6 +362,14 @@ export function PathStrip({ titles }: { titles: string[] }) {
           </span>
         ))}
       </div>
+      <button
+        className="end-run-button"
+        disabled={endRunDisabled}
+        type="button"
+        onClick={onRequestEndRun}
+      >
+        End Run
+      </button>
     </nav>
   );
 }

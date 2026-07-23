@@ -774,17 +774,43 @@ h1 {
 }
 
 /* RC-1: was a 2-column grid (`.path-history` + the target disclosure cell
-   that's now `.target-chip` in `.race-hud` instead) - a single implicit
-   column now that `.path-history` is its only child. `display: grid` is
-   kept (rather than switched to block) since it's still a 1-line diff and
-   nothing here depends on grid specifically. */
+   that's now `.target-chip` in `.race-hud` instead) - briefly a single
+   implicit column while `.path-history` was its only child.
+   HD-1 (owner report - "the end run can be in the line with the path?"):
+   End Run moved here from `.race-hud`, as a second child alongside
+   `.path-history` - switched to `display: flex` + `justify-content:
+   space-between` (breadcrumb left, End Run right) rather than reintroducing
+   a 2-column grid, matching `.race-hud-metrics`'s identical Run/Target
+   pattern above.
+   `position: sticky`/`top` below are currently inert in the only place this
+   class renders: `.race-mode .path-strip` (below) forces `position: static;
+   top: auto;` so the strip scrolls away with the page - INTENTIONAL, owner-
+   accepted (see RaceMode.tsx's PathStrip HD-1 comment). The ghost-HUD family
+   (race-hud's sticky top:0 visually colliding with this strip once scrolled)
+   is guarded entirely by `.article-heading h2`'s `scroll-margin-top` instead
+   - see raceHudScrollMargin.test.ts's doc comment for that live-DOM
+   measurement method. Left here, unchanged, only in case this class is ever
+   reused outside `.race-mode` again. */
 .path-strip {
   position: sticky;
   top: 96px;
   z-index: 15;
-  display: grid;
+  display: flex;
   gap: 8px;
   align-items: center;
+  justify-content: space-between;
+  /* HD-1 (live-DOM caught): the new `.end-run-button` child (flex: 0 0 auto,
+     never shrinks) raised this element's own max-content contribution
+     enough that `.race-mode`'s columnless grid (see `.race-hud`'s own
+     `min-width: 0` comment above) sized its implicit column to fit it -
+     pushing the whole row past 390px and opening a horizontal scrollbar for
+     a realistic (not even worst-case) 2-3-title breadcrumb, before
+     `.path-history`'s own shrink/ellipsis machinery (QF-07) ever got a
+     chance to engage. `min-width: 0` opts this element out of that
+     automatic sizing so the grid track honors `.race-mode`'s actual
+     `width: min(1320px, 100%)` instead, and the breadcrumb shrinks as
+     designed. */
+  min-width: 0;
   overflow: visible;
   border: 1px solid var(--line);
   border-top: 0;
@@ -792,6 +818,18 @@ h1 {
   padding: 8px 10px;
   backdrop-filter: blur(12px);
   font-family: var(--viota-ui-font);
+}
+
+/* HD-1: same `.end-run-button` coral/border/weight hook as everywhere else
+   (QF-04 depends on it for the confirm-dialog color pairing) - just visibly
+   compact to fit this shorter row instead of the old HUD's roomier one.
+   `min-height: 44px` is NOT relaxed (tap-target floor, non-negotiable per
+   the brief) - only the padding/font-size shrink. */
+.path-strip .end-run-button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 6px 12px;
+  font-size: 0.86rem;
 }
 
 .path-history {
@@ -899,13 +937,18 @@ h1 {
 .target-preview-popover {
   position: absolute;
   top: calc(100% + 9px);
-  left: 0;
+  /* HD-1 (owner report): was `left: 0` - fine when the target chip sat
+     hugged-left in the metrics row (RC-1), but HD-1's `justify-content:
+     space-between` now pins that chip flush right, so a left-anchored
+     popover on a wide viewport opened far from the trigger that opened it.
+     `right: 0` anchors it to `.race-hud`'s own right padding edge (its
+     containing block, being the nearest positioned ancestor) instead,
+     lining up under the Target chip. `width: min(420px, 100%)` still caps
+     it at the padding box's own width, so growing leftward from the right
+     edge can't push past the LEFT edge either - verified no overflow at
+     320/390px (hd1-after-*.png). */
+  right: 0;
   z-index: 30;
-  /* `.race-hud` (this element's containing block, being the nearest
-     positioned ancestor) already insets its padding box by its own 9px
-     14px padding - `100%` here is that padding box's width, so this
-     lines up flush with race-hud's own content (the Run/Target chips)
-     with no extra offset math needed. */
   width: min(420px, 100%);
   border: 1px solid var(--line-strong);
   background: #0b1a1f;
@@ -1544,26 +1587,56 @@ h1 {
     max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
 }
 
-/* Bug C fix: `.race-hud` used to be a wrapping flex row, so End Run sat
-   next to the status text until `.run-metrics` mounted (session ready) and
-   no longer fit on one line - at that instant the button jumped down onto
-   its own wrapped line, landing right on top of the breadcrumb's target
-   chip for a frame before settling. A grid with named areas pins End Run
-   to a fixed top-right cell from first paint: it never moves, whether or
-   not `.run-metrics` (or the status text) is present - only the metrics
-   row's height appears/disappears underneath it, which is an ordinary
-   height change, not a reposition. */
+/* HD-1 (owner report, two phone screenshots - "the end run can be at the
+   top and not always visible, just the timer, click count and the [target]
+   peek"): End Run moved out of `.race-hud` entirely, into the path-strip row
+   below (`.path-strip .end-run-button`) - the old "Bug C fix" grid (named
+   areas pinning End Run to a fixed top-right cell so it couldn't jump when
+   `.run-metrics` mounted) no longer has an End Run cell to protect, so it's
+   gone too. Plain block stacking now: `.race-hud-status` (collapses to zero
+   height via `:not(:empty)` below whenever there's no pending navigation -
+   it carries no button anymore to force a minimum row height) sits above
+   `.race-hud-metrics` (Run chip flush left, Target chip flush right - see
+   that rule's own comment). One row in the common case (no pending nav) is
+   the height budget the ghost-HUD scroll-margin regression guard depends on
+   - see raceHudScrollMargin.test.ts.
+   `min-width: 0` (HD-1, live-DOM caught): `.race-mode` (this element's
+   grid-container parent) declares no `grid-template-columns`, so its one
+   implicit column sizes off each item's own "automatic minimum size" -
+   which, left at the `auto` default, is the item's own min-content/
+   max-content contribution, NOT the container's actual available inline
+   size. `.path-strip` hit this first when HD-1 gave it a second,
+   non-shrinking child (its own `min-width: 0` below has the same job) - a
+   sufficiently long-but-realistic breadcrumb pushed the whole `.race-mode`
+   column past the viewport width at 390px, opening a horizontal scrollbar.
+   Same defensive `min-width: 0` here even though race-hud's own content
+   (Run/Target chips, both already capped) doesn't currently trigger it. */
 .race-hud {
   position: sticky;
   top: 0;
-  z-index: 5;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "status endrun"
-    "metrics metrics";
-  gap: 10px 16px;
-  align-items: center;
+  /* HD-1 (live-DOM caught, pre-existing since RC-1): was z-index: 5, LOWER
+     than `.path-strip`'s z-index: 15 below. `.path-strip` is a CSS Grid
+     ITEM of `.race-mode` (display: grid) - the spec carve-out that lets
+     z-index apply to grid/flex items even at `position: static` (see
+     `.race-mode .path-strip`'s own static override above) means its
+     z-index: 15 was ALWAYS being honored, ALWAYS outranking this element's
+     old z-index: 5, regardless of DOM order. The practical effect: RC-1's
+     `.target-preview-popover` (an absolutely-positioned CHILD of
+     `.race-hud`, confined to race-hud's own, lower-ranked stacking context)
+     has been rendering PARTIALLY hidden behind `.path-strip` since RC-1
+     shipped - masked until now because path-strip's old (shorter, no End
+     Run) row let the popover's bottom edge peek out past it. HD-1's taller
+     End-Run row happens to cover the popover's full height, making a
+     latent bug fully invisible - caught only via live Playwright
+     screenshots (jsdom can't see z-index paint order), not any unit test.
+     20 (comfortably clear of path-strip's 15, still well under
+     `.race-takeover`'s own 40 and `.modal-backdrop`'s 80) puts this back
+     above path-strip, restoring the popover's visibility - this z-index is
+     only ever compared against `.race-hud`'s OWN siblings inside
+     `.race-takeover`, so it can't reach far enough to interfere with
+     either of those. */
+  z-index: 20;
+  min-width: 0;
   padding: 9px 14px;
   font-family: var(--viota-ui-font);
 }
@@ -1576,8 +1649,8 @@ h1 {
    to visible), so leaving it on `.race-hud` directly would silently clip
    the popover away. z-index: -1 keeps this pseudo-element behind
    `.race-hud`'s real (non-positioned, normal-flow) children within the
-   stacking context race-hud's own `z-index: 5` already establishes - it
-   reads as `.race-hud`'s background either way.
+   stacking context race-hud's own z-index (HD-1: 20, was 5) already
+   establishes - it reads as `.race-hud`'s background either way.
    An earlier version instead wrapped `.race-hud` in its own new parent div
    so the popover could sit outside race-hud as a sibling - don't reintroduce
    that: a wrapper sized to exactly race-hud's own height gives
@@ -1598,24 +1671,26 @@ h1 {
   clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
 }
 
-.race-hud-status {
-  grid-area: status;
-  min-width: 0;
+/* HD-1: no min-height source left in this row (End Run - the old grid's
+   `endrun` cell - is gone), so an empty status div (no pending navigation)
+   collapses to zero height instead of holding the row open. `:not(:empty)`
+   only adds clearance from the metrics row below when the pending-nav
+   `<strong>` (RaceMode.tsx) actually renders. */
+.race-hud-status:not(:empty) {
+  margin-bottom: 6px;
 }
 
 /* RC-1: `.run-metrics` (Run chip) and `.target-chip` (Target chip) are flex
-   siblings sharing this one grid area/row - see RaceMode.tsx's RC-1 comment
-   on why they must never wrap to a second line. */
+   siblings sharing this one row - see RaceMode.tsx's RC-1 comment on why
+   they must never wrap to a second line. HD-1: `justify-content:
+   space-between` is the only change here - Run pins flush left, Target
+   flush right (owner report), same two DOM children as before. */
 .race-hud-metrics {
-  grid-area: metrics;
   display: flex;
   min-width: 0;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-}
-
-.race-hud .end-run-button {
-  grid-area: endrun;
 }
 
 .race-mode,
@@ -1908,20 +1983,31 @@ h1 {
      every article - including the first. `.race-hud` is `position: sticky`
      and `.path-strip` is plain static flow right below it, so scrollIntoView
      has to leave enough clearance above this h2 for BOTH of them (plus the
-     two 14px `.race-mode` grid gaps and this card's own top padding) or the
-     sticky race-hud ends up pinned on TOP of path-strip once scrolled -
-     `.run-metrics`'s "always visible" timer/clicks row (PKG-02) then only
-     shows as a barely-visible ghost bleeding through path-strip's
-     translucent/blurred surface, which is what shipped in 56023ef/dd0b2f4
-     (those tuned this value against an older, shorter race-hud and never
-     re-measured it after PKG-02 added the run-metrics row + dd0b2f4's grid
-     rework). 132px only cleared race-hud alone. Live-measured clearance
-     needed here is race-hud height (126px) + gap + path-strip height (61px
-     desktop / 57px mobile - verified constant across a 320-1440px width
-     range and a long wrapped target title) + gap + this padding/margin,
-     rounded up with slack. If race-hud or path-strip grow again, re-measure
-     and bump this (and the <=640px override below) rather than guessing. */
-  scroll-margin-top: 280px;
+     two 14px `.race-mode` grid gaps, `.race-takeover`'s own 14px top
+     padding, and this card's own top padding) or the sticky race-hud ends
+     up pinned on TOP of path-strip once scrolled - `.run-metrics`'s
+     "always visible" timer/clicks row (PKG-02) then only shows as a
+     barely-visible ghost bleeding through path-strip's translucent/blurred
+     surface, which is what shipped in 56023ef/dd0b2f4 (those tuned this
+     value against an older, shorter race-hud and never re-measured it after
+     PKG-02 added the run-metrics row + dd0b2f4's grid rework). 132px only
+     cleared race-hud alone.
+     HD-1 (owner report, two phone screenshots - "tall dead area above
+     RUN"): the old 280px value was tuned for the pre-HD-1 two-row race-hud
+     (~126px tall) - after HD-1 shrank it to one row (~70px), that same
+     280px left a big dead gap above the article on first paint, the exact
+     complaint. Re-measured live-DOM (Playwright, `.race-takeover` as the
+     real scroll container - not window/body - at 320-1440px): race-hud is
+     70px, path-strip 57px (mobile) / 61px (desktop), and the true knife-edge
+     minimum before race-hud visually overlaps path-strip is ~190px mobile /
+     ~196px desktop (binary-searched by actually firing scrollIntoView and
+     checking rect overlap, not just arithmetic). 210px keeps race-hud's own
+     ~14px slack margin over that true minimum. If race-hud or path-strip
+     grow again, re-measure with the same live scrollIntoView + rect-overlap
+     method (don't just guess arithmetically - `.race-takeover`'s own
+     padding is easy to forget) and bump this (and the <=640px override
+     below) rather than guessing. */
+  scroll-margin-top: 210px;
   font-weight: 400;
   line-height: 1.15;
 }
@@ -3369,8 +3455,10 @@ h1 {
 
   .article-heading h2 {
     /* See the base rule's comment above - same fix, re-measured for the
-       <=640px `.race-hud`/`.path-strip` heights (both a hair shorter here). */
-    scroll-margin-top: 260px;
+       <=640px `.race-hud`/`.path-strip` heights (both a hair shorter here) -
+       true knife-edge minimum here is ~190px, this keeps ~10px slack. HD-1:
+       was 260px, tuned for the old two-row race-hud. */
+    scroll-margin-top: 200px;
   }
 
   .article-content {

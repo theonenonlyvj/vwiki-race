@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 // Ambient types for the two Node builtins above: see ./node-builtins.d.ts.
 
 /**
- * Ghost-HUD hotfix regression guard (2026-07-19).
+ * Ghost-HUD hotfix regression guard (2026-07-19, floors re-tuned HD-1).
  *
  * jsdom doesn't run real layout, so nothing in App.test.tsx can see that
  * `.race-hud` (position: sticky) was visually pinned on top of
@@ -23,11 +23,22 @@ import { describe, expect, it } from "vitest";
  * 132px/176px only cleared race-hud alone, not race-hud + path-strip + the
  * two 14px `.race-mode` grid gaps between them.
  *
+ * HD-1 (owner report - "tall dead area above RUN" on a phone): the 280/260px
+ * fix above was correct for the OLD two-row race-hud (~126px), but HD-1
+ * shrank race-hud to one row (~70px, End Run moved to the path-strip row
+ * instead) without shrinking this value, leaving exactly that dead gap on
+ * first paint. Re-measured live-DOM the same way (Playwright, 320-1440px,
+ * `.race-takeover` as the real scroll container - not window/body, it has
+ * its own 14px top padding that's easy to miss): the true knife-edge
+ * minimum before race-hud visually overlaps path-strip is now ~190px
+ * (mobile) / ~196px (desktop) - anything below that reopens the overlap,
+ * anything at/above the new 200/210px fix clears it with slack.
+ *
  * This can't assert real pixel layout, but it CAN assert the fix doesn't
- * silently regress back toward those undersized values - live-measured
- * (Playwright, 320-1440px width, incl. a wrapped long target title) the
- * real clearance needed is ~246px (mobile) / ~266px (desktop); anything
- * below that reopens the overlap.
+ * silently regress back toward undersized values - these floors sit below
+ * the new fix (room for minor legitimate tuning) but should track DOWN
+ * together with race-hud/path-strip any time either shrinks further, per
+ * the doc comment on the CSS rules themselves.
  */
 describe("race HUD scroll-margin-top (ghost-HUD regression guard)", () => {
   // Comments in styles.css (including the doc-comment on this very rule)
@@ -36,8 +47,8 @@ describe("race HUD scroll-margin-top (ghost-HUD regression guard)", () => {
   const css = readFileSync(join(__dirname, "..", "styles.css"), "utf-8")
     .replace(/\/\*[\s\S]*?\*\//g, "");
 
-  const MIN_SAFE_BASE = 246; // headroom under the live-verified 280px fix
-  const MIN_SAFE_MOBILE = 230; // headroom under the live-verified 260px fix
+  const MIN_SAFE_BASE = 180; // headroom under the live-verified 210px fix (HD-1)
+  const MIN_SAFE_MOBILE = 175; // headroom under the live-verified 200px fix (HD-1)
 
   function scrollMarginTopIn(source: string): number {
     const match = source.match(/scroll-margin-top:\s*(\d+)px/);

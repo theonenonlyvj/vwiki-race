@@ -178,7 +178,13 @@ describe("RaceMode", () => {
 
 describe("PathStrip (RC-1: purely a path trail, no target cell)", () => {
   it("renders only the visited titles, dropping the trailing target from the breadcrumb", () => {
-    render(<PathStrip titles={["J2000", "Epoch (astronomy)", "Fruit"]} />);
+    render(
+      <PathStrip
+        titles={["J2000", "Epoch (astronomy)", "Fruit"]}
+        endRunDisabled={false}
+        onRequestEndRun={() => {}}
+      />,
+    );
 
     const strip = screen.getByRole("navigation", { name: /run path/i });
     expect(within(strip).getByText("J2000")).toBeVisible();
@@ -186,5 +192,75 @@ describe("PathStrip (RC-1: purely a path trail, no target cell)", () => {
     expect(within(strip).queryByText("Fruit")).toBeNull();
     expect(screen.queryByRole("button", { name: /target/i })).toBeNull();
     expect(screen.queryByRole("group", { name: /target/i })).toBeNull();
+  });
+});
+
+// HD-1 (owner report): End Run moved out of the sticky race-hud and into
+// this strip's own row, right-aligned against the breadcrumb - "the end run
+// can be in the line with the path?". Both props are required on PathStrip
+// now (see its own HD-1 comment): RaceMode's only caller always supplies
+// them whenever a run is active, so there is no path where this strip
+// renders without an End Run affordance.
+describe("PathStrip (HD-1: End Run lives in the strip row)", () => {
+  it("renders an enabled End Run button inside the strip that fires onRequestEndRun on click", async () => {
+    const user = userEvent.setup();
+    const onRequestEndRun = vi.fn();
+    render(
+      <PathStrip
+        titles={["J2000", "Fruit"]}
+        endRunDisabled={false}
+        onRequestEndRun={onRequestEndRun}
+      />,
+    );
+
+    const strip = screen.getByRole("navigation", { name: /run path/i });
+    const endRun = within(strip).getByRole("button", { name: /^end run$/i });
+    expect(endRun).toHaveClass("end-run-button");
+    expect(endRun).toBeEnabled();
+
+    await user.click(endRun);
+    expect(onRequestEndRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables End Run in the strip when endRunDisabled is true", () => {
+    render(
+      <PathStrip
+        titles={["J2000", "Fruit"]}
+        endRunDisabled={true}
+        onRequestEndRun={() => {}}
+      />,
+    );
+
+    const strip = screen.getByRole("navigation", { name: /run path/i });
+    expect(within(strip).getByRole("button", { name: /^end run$/i })).toBeDisabled();
+  });
+});
+
+// HD-1: locks in the new one-row HUD shape (owner: "just the timer, click
+// count and the [target] peek") - End Run is gone from `.race-hud` entirely,
+// living only in the path strip below it now (see the PathStrip describe
+// blocks above/below).
+describe("RaceMode (HD-1: one-row sticky HUD, End Run lives with the path)", () => {
+  it("keeps End Run out of the sticky race-hud but present in the path strip beneath it", () => {
+    renderRaceMode(null);
+
+    const hud = document.querySelector(".race-hud");
+    expect(hud).not.toBeNull();
+    expect(within(hud as HTMLElement).queryByRole("button", { name: /^end run$/i })).toBeNull();
+
+    const strip = screen.getByRole("navigation", { name: /run path/i });
+    const endRun = within(strip).getByRole("button", { name: /^end run$/i });
+    expect(endRun).toBeVisible();
+    expect(endRun).toHaveClass("end-run-button");
+  });
+
+  it("keeps the Run chip and Target chip as the sole race-hud-metrics content, still on one line", () => {
+    renderRaceMode(null);
+
+    const hud = document.querySelector(".race-hud") as HTMLElement;
+    const metrics = within(hud).getByLabelText(/current run/i);
+    const targetChip = within(hud).getByRole("button", { name: /^target:/i });
+    expect(metrics.closest(".race-hud-metrics")).not.toBeNull();
+    expect(targetChip.closest(".race-hud-metrics")).toBe(metrics.closest(".race-hud-metrics"));
   });
 });

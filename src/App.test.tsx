@@ -1534,11 +1534,15 @@ describe("VWiki Race app", () => {
     // Locks in the dedicated styling hook so the control reads as an obvious,
     // actionable "end / give up" affordance rather than a bare header button.
     expect(endRun).toHaveClass("end-run-button");
-    // Zero global chrome during an active race: End Run lives in the slim
-    // race HUD inside the full-screen takeover, not the old app header/
-    // tabbar (which no longer render at all while engaged - see (a) below).
+    // Zero global chrome during an active race: End Run lives in the
+    // full-screen takeover's path-strip row, not the old app header/tabbar
+    // (which no longer render at all while engaged - see (a) below). HD-1:
+    // moved out of the sticky `.race-hud` itself (owner report) into the
+    // path-strip row alongside the breadcrumb - `.race-hud` now carries only
+    // the Run/Target chips.
     expect(endRun.closest(".race-takeover")).not.toBeNull();
-    expect(endRun.closest(".race-hud")).not.toBeNull();
+    expect(endRun.closest(".path-strip")).not.toBeNull();
+    expect(endRun.closest(".race-hud")).toBeNull();
     expect(screen.queryByRole("navigation", { name: /vwiki race views/i })).toBeNull();
 
     await user.click(endRun);
