@@ -2,5 +2,17 @@ name = "vwikirace"
 pages_build_output_dir = "./dist"
 compatibility_date = "2026-07-08"
 
+# Retained by the legacy per-route proxies and as the catch-all's fallback
+# target when the service binding is unavailable.
 [vars]
 VWIKI_RACE_API_URL = "https://vwikirace-api.theonenonlyvj.workers.dev"
+
+# Same-origin /api routing (2026-07-23): functions/api/[[path]].ts forwards
+# every /api/* request to the canonical Worker over this service binding -
+# Cloudflare-internal, no public workers.dev hop on the client path. For
+# Pages projects, top-level config (unlike Workers) is inherited by BOTH
+# production and preview deployments, so previews get the binding too.
+# `wrangler pages deploy` applies this binding to the deployment it creates.
+[[services]]
+binding = "VWIKI_API"
+service = "vwikirace-api"

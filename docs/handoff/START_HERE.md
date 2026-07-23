@@ -346,6 +346,18 @@ Browser
   `bbd89b81-078a-47e0-9db4-5d170a3f78b4`.
 - Retained `functions/api/*` handlers are compatibility proxies for old
   `/api/*` clients. They do not bind D1 or own authorization/game logic.
+- Same-origin API routing (2026-07-23): production clients call `/api/*` on
+  their OWN origin. `functions/api/[[path]].ts` catches everything the
+  retained legacy routes do not claim and forwards it to the Worker over the
+  `VWIKI_API` service binding declared in the root `wrangler.toml`
+  (Cloudflare-internal - no public `workers.dev` hop on the client path;
+  that hostname intermittently stalls from some ISPs). The client resolves
+  its API origin at RUNTIME: explicit `VITE_VWIKI_RACE_API_URL` override >
+  own origin on any `*.pages.dev` host > legacy
+  `https://vwikirace-api.theonenonlyvj.workers.dev` fallback
+  (`src/services/apiOrigin.ts`). Build production with the variable UNSET;
+  setting it pins every client to that origin and bypasses the same-origin
+  path (that is the rollback lever, not the default).
 - VGames owns credentials, uniqueness, ghost accounts, sessions, and account
   merging. VWiki Race stores only canonical IDs/aliases needed to own game
   history.
@@ -452,10 +464,17 @@ Normal release gates:
 ```bash
 npm test
 npm run test:worker
-VITE_VWIKI_RACE_API_URL=https://vwikirace-api.theonenonlyvj.workers.dev npm run build
+npm run build
 npm audit --omit=dev
 npx wrangler deploy --dry-run --config wrangler.api.toml
 ```
+
+Since 2026-07-23 the production build runs with NO `VITE_VWIKI_RACE_API_URL`
+(same-origin runtime resolution; `verify:bundle` checks both runtime
+branches shipped). Prefixing the build with
+`VITE_VWIKI_RACE_API_URL=https://vwikirace-api.theonenonlyvj.workers.dev`
+pins clients to the public Worker origin - use only as a deliberate
+rollback of same-origin routing.
 
 Current verified totals for runtime `7bb6199` were 664/664 client tests and
 187/187 Worker/D1 tests, `tsc --noEmit` clean, and zero production

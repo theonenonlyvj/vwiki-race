@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as catchAll from "./[[path]]";
 import * as challenges from "./challenges";
 import * as leaderboard from "./challenges/[challengeId]/leaderboard";
 import * as guest from "./identity/guest";
@@ -161,6 +162,92 @@ describe("retained Pages API proxy", () => {
       new Request("https://pages.example/api/challenges"),
       {},
     ));
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "canonical_api_unconfigured" },
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("same-origin catch-all /api proxy", () => {
+  it("forwards a POST verbatim over the service binding and returns the response untouched", async () => {
+    const upstream = Response.json(
+      { runId: "run-9" },
+      { status: 201, headers: { "X-Request-Id": "req-42", "Retry-After": "3" } },
+    );
+    const binding = { fetch: vi.fn(async () => upstream) };
+    const globalFetch = vi.fn();
+    vi.stubGlobal("fetch", globalFetch);
+    const body = JSON.stringify({ challengeId: "challenge-0001" });
+    const request = new Request(
+      "https://vwikirace.pages.dev/api/v2/runs/start?attempt=2",
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer session-token",
+          "Content-Type": "application/json",
+          "Idempotency-Key": "idem-1",
+          // The Worker's rate limiters key on the edge-stamped client IP;
+          // the catch-all must not strip it.
+          "CF-Connecting-IP": "203.0.113.9",
+        },
+        body,
+      },
+    );
+
+    const response = await catchAll.onRequest(context(request, {
+      VWIKI_API: binding,
+      VWIKI_RACE_API_URL: canonicalOrigin,
+    }));
+
+    expect(response).toBe(upstream);
+    const forwarded = binding.fetch.mock.calls[0]?.[0] as Request;
+    // The URL passes through UNCHANGED (the Worker routes on pathname only).
+    expect(forwarded.url).toBe("https://vwikirace.pages.dev/api/v2/runs/start?attempt=2");
+    expect(forwarded.method).toBe("POST");
+    expect(forwarded.headers.get("Authorization")).toBe("Bearer session-token");
+    expect(forwarded.headers.get("Idempotency-Key")).toBe("idem-1");
+    expect(forwarded.headers.get("CF-Connecting-IP")).toBe("203.0.113.9");
+    await expect(forwarded.text()).resolves.toBe(body);
+    expect(globalFetch).not.toHaveBeenCalled();
+  });
+
+  it("forwards every method through the single onRequest handler", async () => {
+    for (const method of ["GET", "DELETE", "OPTIONS"] as const) {
+      const binding = { fetch: vi.fn(async () => new Response(null, { status: 204 })) };
+      const response = await catchAll.onRequest(context(
+        new Request("https://vwikirace.pages.dev/api/v2/admin/daily-queue/q-1", { method }),
+        { VWIKI_API: binding },
+      ));
+      expect(response.status, method).toBe(204);
+      const forwarded = binding.fetch.mock.calls[0]?.[0] as Request;
+      expect(forwarded.method, method).toBe(method);
+    }
+  });
+
+  it("falls back to the public canonical proxy when the binding is absent", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ challenges: [] }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await catchAll.onRequest(context(
+      new Request("https://vwikirace.pages.dev/api/v2/challenges?limit=5"),
+    ));
+
+    expect(response.status).toBe(200);
+    const forwarded = fetchImpl.mock.calls[0]?.[0] as Request;
+    expect(forwarded.url).toBe(`${canonicalOrigin}/api/v2/challenges?limit=5`);
+  });
+
+  it("fails closed when neither the binding nor the canonical origin is configured", async () => {
+    const fetchImpl = vi.fn();
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const response = await catchAll.onRequest(context(
+      new Request("https://vwikirace.pages.dev/api/v2/challenges"),
+      {},
+    ));
+
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "canonical_api_unconfigured" },

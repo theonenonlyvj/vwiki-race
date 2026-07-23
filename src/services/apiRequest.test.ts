@@ -29,10 +29,10 @@ describe("API origin", () => {
     );
   });
 
-  it("requires a configured HTTPS Worker origin for production", () => {
-    expect(() => resolveApiOrigin("", { production: true })).toThrow(
-      "VITE_VWIKI_RACE_API_URL",
-    );
+  it("requires an explicit production origin to be a canonical HTTPS Worker origin", () => {
+    // An EMPTY production origin no longer throws - it resolves same-origin
+    // on *.pages.dev hosts or the legacy Worker fallback elsewhere (see
+    // apiOrigin.test.ts for the full resolution matrix).
     expect(() => resolveApiOrigin("http://localhost:8787", { production: true }))
       .toThrow("VITE_VWIKI_RACE_API_URL");
   });

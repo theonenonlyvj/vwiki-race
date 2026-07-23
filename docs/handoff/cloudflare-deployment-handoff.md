@@ -106,12 +106,20 @@ CLIENT_ERROR_RATE_LIMITER -> configured rate-limit namespace
 Pages production environment:
 
 ```txt
-VITE_VWIKI_RACE_API_URL=https://<canonical-worker-origin>
-VWIKI_RACE_API_URL=https://<canonical-worker-origin>
+VWIKI_RACE_API_URL=https://<canonical-worker-origin>   # legacy proxies + catch-all fallback
+VWIKI_API -> service binding to vwikirace-api          # declared in root wrangler.toml
 ```
 
-The frontend production build rejects a missing, noncanonical, or non-HTTPS API
-origin. Loopback HTTP is allowed only for local development.
+Same-origin routing (2026-07-23): the production client build is made with
+NO `VITE_VWIKI_RACE_API_URL`. At runtime the client resolves: explicit
+override > its own origin on any `*.pages.dev` host (served by
+`functions/api/[[path]].ts` over the `VWIKI_API` service binding) > the
+legacy public Worker origin. An EXPLICIT `VITE_VWIKI_RACE_API_URL` must
+still be a canonical HTTPS origin (loopback HTTP allowed only for local
+development) and pins every client to it - the deliberate rollback lever.
+`wrangler pages deploy` applies the `[[services]]` binding from the root
+`wrangler.toml` to the deployment; top-level Pages config is inherited by
+both production and preview deployments.
 
 Pages build settings:
 
@@ -253,15 +261,17 @@ From `/Users/vijayram/Cursor/vwiki-race`:
 ```bash
 npm test
 npm run test:worker
-VITE_VWIKI_RACE_API_URL=https://vwikirace-api.example.workers.dev npm run build
+npm run build
 npm run verify:bundle
 npm audit --omit=dev
 git diff --check
 npx wrangler deploy --config wrangler.api.toml --dry-run
 ```
 
-The placeholder HTTPS origin is for build validation only. A real deploy must
-use the actual canonical Worker URL.
+Build with NO `VITE_VWIKI_RACE_API_URL` (same-origin runtime resolution is
+the 2026-07-23 default; `verify:bundle` asserts the bundle ships both the
+`*.pages.dev` same-origin branch and the legacy Worker fallback). Setting
+the variable produces a build pinned to that origin - rollback lever only.
 
 ## V2 Routes
 
