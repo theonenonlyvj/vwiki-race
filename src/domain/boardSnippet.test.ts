@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { boardSnippetRowsForResult, boardSnippetRowsFromBoard } from "./boardSnippet";
+import {
+  boardSnippetRowsForResult,
+  boardSnippetRowsFromBoard,
+  windowBoardRows,
+  type BoardSnippetRow,
+} from "./boardSnippet";
 
 const placement = (accountId: string, place: number, displayName: string | null = accountId) => ({
   accountId,
@@ -162,5 +167,112 @@ describe("boardSnippetRowsForResult", () => {
       null,
     );
     expect(rows.map((row) => row.rankLabel)).toEqual(["#1"]);
+  });
+});
+
+/**
+ * BD-1 ("windowed board snippet: top 2 + your neighborhood + inline
+ * expanders"): the pure windowing function BoardSnippet.tsx composes with
+ * its own pre-existing `maxRows` cap (see that file's own precedence
+ * comment). `WINDOW_OPTIONS` mirrors the brief's own literal call shape.
+ */
+const WINDOW_OPTIONS = { topCount: 2, radius: 2, showAllAt: 7 };
+
+function windowRows(count: number, youRank: number | null): BoardSnippetRow[] {
+  return Array.from({ length: count }, (_, index) => {
+    const rank = index + 1;
+    return {
+      key: `row-${rank}`,
+      rankLabel: `#${rank}`,
+      rank,
+      displayName: rank === youRank ? "Vijay" : `Player${rank}`,
+      elapsedMs: rank * 10_000,
+      clickCount: rank,
+      isYou: rank === youRank,
+    };
+  });
+}
+
+function ranks(segments: ReturnType<typeof windowBoardRows>): (number | null)[][] {
+  return (segments ?? []).map((segment) => segment.rows.map((row) => row.rank));
+}
+
+describe("windowBoardRows (BD-1)", () => {
+  it("rule 1: shows every row as one segment when total <= showAllAt, viewer or no viewer", () => {
+    expect(windowBoardRows(windowRows(7, 7), "acc-you", WINDOW_OPTIONS)).toEqual([
+      { type: "rows", rows: windowRows(7, 7) },
+    ]);
+    // Unconditional - a viewer-less board this short still shows in full,
+    // never null (that's reserved for the ">showAllAt AND no viewer" case).
+    expect(windowBoardRows(windowRows(7, null), null, WINDOW_OPTIONS)).toEqual([
+      { type: "rows", rows: windowRows(7, null) },
+    ]);
+  });
+
+  it("boundary: exactly 8 rows windows (a trailing gap appears) where 7 didn't", () => {
+    const sevenSegments = windowBoardRows(windowRows(7, 1), "acc-you", WINDOW_OPTIONS);
+    expect(sevenSegments).toHaveLength(1);
+    expect(sevenSegments?.[0]).toMatchObject({ type: "rows" });
+
+    const eightSegments = windowBoardRows(windowRows(8, 1), "acc-you", WINDOW_OPTIONS);
+    expect(eightSegments?.map((segment) => segment.type)).toEqual(["rows", "gap"]);
+    expect(ranks(eightSegments)).toEqual([[1, 2, 3], [4, 5, 6, 7, 8]]);
+    expect(eightSegments?.[1]).toMatchObject({ type: "gap", count: 5 });
+  });
+
+  it("viewer #1: merges top+neighborhood into ranks 1-3, trailing gap for the rest", () => {
+    const segments = windowBoardRows(windowRows(10, 1), "acc-you", WINDOW_OPTIONS);
+    expect(segments?.map((segment) => segment.type)).toEqual(["rows", "gap"]);
+    expect(ranks(segments)).toEqual([[1, 2, 3], [4, 5, 6, 7, 8, 9, 10]]);
+    expect(segments?.[1]).toMatchObject({ type: "gap", count: 7 });
+  });
+
+  it("viewer #3: merges top+neighborhood into ranks 1-5, trailing gap for the rest", () => {
+    const segments = windowBoardRows(windowRows(10, 3), "acc-you", WINDOW_OPTIONS);
+    expect(segments?.map((segment) => segment.type)).toEqual(["rows", "gap"]);
+    expect(ranks(segments)).toEqual([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]]);
+  });
+
+  it("viewer #4 (owner sketch's explicit merge example): contiguous 1..viewer+2, no first expander", () => {
+    const segments = windowBoardRows(windowRows(10, 4), "acc-you", WINDOW_OPTIONS);
+    expect(segments?.map((segment) => segment.type)).toEqual(["rows", "gap"]);
+    expect(ranks(segments)).toEqual([[1, 2, 3, 4, 5, 6], [7, 8, 9, 10]]);
+  });
+
+  it("viewer #5: top and neighborhood exactly touch (zero-row gap) - still merges, never a '... 0 more' expander", () => {
+    const segments = windowBoardRows(windowRows(10, 5), "acc-you", WINDOW_OPTIONS);
+    expect(segments?.map((segment) => segment.type)).toEqual(["rows", "gap"]);
+    expect(ranks(segments)).toEqual([[1, 2, 3, 4, 5, 6, 7], [8, 9, 10]]);
+  });
+
+  it("viewer #6: one rank past the merge boundary - a real (1-row) leading gap appears", () => {
+    const segments = windowBoardRows(windowRows(10, 6), "acc-you", WINDOW_OPTIONS);
+    expect(segments?.map((segment) => segment.type)).toEqual(["rows", "gap", "rows", "gap"]);
+    expect(ranks(segments)).toEqual([[1, 2], [3], [4, 5, 6, 7, 8], [9, 10]]);
+    expect(segments?.[1]).toMatchObject({ type: "gap", count: 1 });
+    expect(segments?.[3]).toMatchObject({ type: "gap", count: 2 });
+  });
+
+  it("viewer last: leading gap only, no trailing gap (window already ends the array)", () => {
+    const segments = windowBoardRows(windowRows(8, 8), "acc-you", WINDOW_OPTIONS);
+    expect(segments?.map((segment) => segment.type)).toEqual(["rows", "gap", "rows"]);
+    expect(ranks(segments)).toEqual([[1, 2], [3, 4, 5], [6, 7, 8]]);
+  });
+
+  it("viewer second-to-last: the clamp swallows the would-be 1-row trailing gap into the window itself", () => {
+    const segments = windowBoardRows(windowRows(8, 7), "acc-you", WINDOW_OPTIONS);
+    expect(segments?.map((segment) => segment.type)).toEqual(["rows", "gap", "rows"]);
+    // Un-clamped, radius 2 would give a 5-row window (ranks 5-9, out of
+    // range) - clamped to the real array, the window absorbs rank 8 too,
+    // so there is no leftover trailing gap at all.
+    expect(ranks(segments)).toEqual([[1, 2], [3, 4], [5, 6, 7, 8]]);
+  });
+
+  it("viewer absent: null (anonymous viewerAccountId) - caller falls back to its own plain cap", () => {
+    expect(windowBoardRows(windowRows(10, null), null, WINDOW_OPTIONS)).toBeNull();
+  });
+
+  it("viewer absent: null even with a non-null viewerAccountId if no row is actually marked isYou", () => {
+    expect(windowBoardRows(windowRows(10, null), "acc-you", WINDOW_OPTIONS)).toBeNull();
   });
 });

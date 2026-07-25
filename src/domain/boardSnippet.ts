@@ -187,3 +187,110 @@ export function dedupedRankForJustFinished(
   ).length;
   return better + 1;
 }
+
+/**
+ * BD-1: a displayable chunk of a windowed board - either a contiguous run
+ * of rows to render as-is, or a collapsed span the UI shows as a single
+ * "… N more" expander until tapped. `rows` on a "gap" segment is the actual
+ * content to reveal in place (BoardSnippet.tsx's own local expand-in-place
+ * state, not this module) - `windowBoardRows` itself is a pure description
+ * of the fully-collapsed window, no expansion state of its own.
+ */
+export type BoardWindowSegment =
+  | { type: "rows"; rows: BoardSnippetRow[] }
+  | { type: "gap"; count: number; rows: BoardSnippetRow[] };
+
+export interface WindowBoardRowsOptions {
+  /** How many top-ranked rows always show, regardless of the viewer's own
+   *  position (the owner sketch's "top players"). */
+  topCount: number;
+  /** How many rows show on EACH side of the viewer's own row (the owner
+   *  sketch's "the two on either side of YOUR finish... you... two
+   *  below"). */
+  radius: number;
+  /** At or under this many total rows, windowing would save nothing - the
+   *  whole point is condensing a board too long to show in full, so a
+   *  board this short renders in full instead (rule 1 below). */
+  showAllAt: number;
+}
+
+/**
+ * BD-1 ("windowed board snippet: top 2 + your neighborhood + inline
+ * expanders"): reduces a compact board snippet's rows to "top `topCount` +
+ * your own neighborhood", collapsing everyone in between (or trailing after
+ * it) into `gap` segments instead of either showing the whole board or
+ * silently truncating it at a plain N-row cap. Three rules, checked in
+ * order - exactly the brief's own ordering:
+ *
+ *  1. `rows.length <= showAllAt`: windowing has nothing to save - return
+ *     every row as one `rows` segment (today's typical few-finisher board
+ *     never windows at all, unaffected by this feature).
+ *  2. The viewer is on the board (see the `viewerAccountId` note below) and
+ *     `rows.length > showAllAt`: `[0, topCount)`, then
+ *     `[viewerIndex - radius, viewerIndex + radius]` (clamped to the array),
+ *     collapsing whatever's strictly between the two windows - or trailing
+ *     after the second - into `gap` segments. The two windows MERGE into
+ *     one contiguous `rows` segment (no leading gap at all) the instant
+ *     they touch or overlap: a viewer close enough to the top that there's
+ *     nothing to collapse there (e.g. rank 4 of topCount 2/radius 2 - top
+ *     ends at rank 2, the neighborhood starts at rank 2 - contiguous, not
+ *     just close) must never render a "… 0 more" expander for a gap that
+ *     doesn't exist.
+ *  3. The viewer isn't identifiable on the board at all: `null`. There's no
+ *     position to window around, so the caller falls back to its own
+ *     pre-existing plain top-N cap (BoardSnippet.tsx's `maxRows`) unchanged
+ *     - this function has nothing useful to add.
+ *
+ * `viewerAccountId` only ever gates null-vs-not-null (rule 3's "or
+ * anonymous"): `BoardSnippetRow` carries no accountId of its own - `isYou`
+ * is already the accountId match, resolved once upstream in
+ * `boardSnippetRowsFromBoard`/`boardSnippetRowsForResult` - so the viewer's
+ * actual ROW is always located via `row.isYou`, never by comparing this id
+ * against anything on a row. A non-null id whose rows happen to carry no
+ * `isYou` match still correctly falls through to rule 3 (`viewerIndex`
+ * stays `-1` either way).
+ */
+export function windowBoardRows(
+  rows: BoardSnippetRow[],
+  viewerAccountId: string | null,
+  { topCount, radius, showAllAt }: WindowBoardRowsOptions,
+): BoardWindowSegment[] | null {
+  if (rows.length <= showAllAt) {
+    return [{ type: "rows", rows }];
+  }
+
+  const viewerIndex = viewerAccountId === null ? -1 : rows.findIndex((row) => row.isYou);
+  if (viewerIndex === -1) {
+    return null;
+  }
+
+  const topEnd = Math.min(topCount, rows.length);
+  const windowStart = Math.max(0, viewerIndex - radius);
+  const windowEnd = Math.min(rows.length - 1, viewerIndex + radius);
+
+  const segments: BoardWindowSegment[] = [];
+  if (windowStart <= topEnd) {
+    // Touching (zero rows between them) or overlapping - one contiguous
+    // block, no leading expander (see rule 2's doc above).
+    const mergedEnd = Math.max(topEnd, windowEnd + 1);
+    segments.push({ type: "rows", rows: rows.slice(0, mergedEnd) });
+  } else {
+    segments.push({ type: "rows", rows: rows.slice(0, topEnd) });
+    segments.push({
+      type: "gap",
+      count: windowStart - topEnd,
+      rows: rows.slice(topEnd, windowStart),
+    });
+    segments.push({ type: "rows", rows: rows.slice(windowStart, windowEnd + 1) });
+  }
+
+  if (windowEnd < rows.length - 1) {
+    segments.push({
+      type: "gap",
+      count: rows.length - 1 - windowEnd,
+      rows: rows.slice(windowEnd + 1),
+    });
+  }
+
+  return segments;
+}

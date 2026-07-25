@@ -2580,6 +2580,35 @@ h1 {
   color: #ffad9f;
 }
 
+/* BD-1 ("windowed board snippet"): the inline "… N more" expander row - a
+   muted list row, not a real board row, so it never borrows `.rank`'s cyan
+   or the DNF salmon. Same full-row-span shape as `.trend-row-toggle` above
+   (a `<li>`'s only child button must span the whole grid via
+   `grid-column: 1 / -1`, or `.board-snippet li`'s 4-column rank/name/time/
+   link grid squeezes it into just the first ~2.4em track - the exact
+   PKG-10 bug that rule was written to fix, now reused here) with the same
+   44px tap-target floor the rest of the app holds every button to. */
+.board-snippet-expander {
+  display: flex;
+  grid-column: 1 / -1;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  padding: 10px 0;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.88rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.board-snippet-expander:hover,
+.board-snippet-expander:focus-visible {
+  color: var(--text-bright);
+}
+
 .play-another-card {
   display: flex;
   flex-direction: column;
