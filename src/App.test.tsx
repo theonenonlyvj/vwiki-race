@@ -6936,7 +6936,7 @@ describe("Home v2: guarded streak/trend chip (Increment 4)", () => {
     expect(screen.queryByText(/30-day avg/i)).toBeNull();
     // F4: below-guard no longer goes silent - it reads as progress, same
     // framing Boards' own unranked section uses.
-    expect(screen.getByText(/4\/10 challenges/)).toBeVisible();
+    expect(screen.getByText(/finish 6 more races to rank/i)).toBeVisible();
   });
 
   it("F4: shows the below-guard progress chip alone when there's no streak either", async () => {
@@ -6947,7 +6947,7 @@ describe("Home v2: guarded streak/trend chip (Increment 4)", () => {
     });
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
-    expect(await screen.findByText(/4\/10 challenges/)).toBeVisible();
+    expect(await screen.findByText(/finish 6 more races to rank/i)).toBeVisible();
     expect(screen.queryByText(/day streak/i)).toBeNull();
     expect(screen.queryByText(/30-day avg/i)).toBeNull();
   });
@@ -8338,7 +8338,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
           window: "7",
           guard: 3,
           ranked: [
-            { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3 },
+            { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3, avgElapsedMs: 277_000, avgClicks: 9.3 },
           ],
           unranked: [
             { accountId: "acc-2", displayName: "Ari", playedCount: 1 },
@@ -8353,18 +8353,18 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     const board = screen.getByRole("region", { name: "Stats" });
     await user.click(within(board).getByRole("tab", { name: "7d" }));
 
-    expect(await within(board).findByText(/rolling 7 days · ranked by average placement · play ≥3 challenges to rank/i)).toBeVisible();
+    expect(await within(board).findByText(/rolling 7 days · ranked by average placement · finish 3 races to rank/i)).toBeVisible();
     expect(within(board).getByText("1.")).toBeVisible();
     expect(within(board).getByText(/vijay/i)).toBeVisible();
-    expect(within(board).getByText(/avg #1\.3 \(3 challenges\)/)).toBeVisible();
+    expect(within(board).getByText(/avg #1\.3 · 4:37 · 9\.3 clk/)).toBeVisible();
     expect(within(board).getByText(/\(you\)/i)).toBeVisible();
 
     const unrankedSection = within(board).getByRole("region", { name: "Not yet ranked" });
     expect(within(unrankedSection).getByText(/ari/i)).toBeVisible();
-    expect(within(unrankedSection).getByText(/1\/3 challenges/)).toBeVisible();
+    expect(within(unrankedSection).getByText(/finish 2 more races to rank/i)).toBeVisible();
   });
 
-  it("switches windows on segment change - 30d's guard is 10, framed as progress toward it", async () => {
+  it("switches windows on segment change - a custom mocked guard is framed as progress toward it", async () => {
     const fetchImpl = createFetchMock({
       boardsTrendsByWindow: {
         "30": {
@@ -8382,8 +8382,8 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     const board = screen.getByRole("region", { name: "Stats" });
     await user.click(within(board).getByRole("tab", { name: "30d" }));
 
-    expect(await within(board).findByText(/rolling 30 days · ranked by average placement · play ≥10 challenges to rank/i)).toBeVisible();
-    expect(within(board).getByText(/4\/10 challenges/)).toBeVisible();
+    expect(await within(board).findByText(/rolling 30 days · ranked by average placement · finish 10 races to rank/i)).toBeVisible();
+    expect(within(board).getByText(/finish 6 more races to rank/i)).toBeVisible();
   });
 
   it("expands the viewer's own ranked row into their last 3 dailies as placement/DNF + time·clicks (invariant 1)", async () => {
@@ -8396,7 +8396,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
         "7": {
           window: "7",
           guard: 3,
-          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3 }],
+          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1 }],
           unranked: [],
         },
       },
@@ -8438,11 +8438,11 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
           guard: 3,
           ranked: [
             // Lower avgPlacement than prevAvgPlacement -> improved -> ▲.
-            { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3, prevAvgPlacement: 2.1 },
+            { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1, prevAvgPlacement: 2.1 },
             // Higher avgPlacement than prevAvgPlacement -> declined -> ▼.
-            { accountId: "acc-2", displayName: "Ari", avgPlacement: 3.0, playedCount: 4, prevAvgPlacement: 1.5 },
+            { accountId: "acc-2", displayName: "Ari", avgPlacement: 3.0, playedCount: 4, avgElapsedMs: 6_000, avgClicks: 2, prevAvgPlacement: 1.5 },
             // No previous window standing at all -> –.
-            { accountId: "acc-3", displayName: "Sam", avgPlacement: 2.0, playedCount: 3, prevAvgPlacement: null },
+            { accountId: "acc-3", displayName: "Sam", avgPlacement: 2.0, playedCount: 3, avgElapsedMs: 7_000, avgClicks: 3, prevAvgPlacement: null },
           ],
           unranked: [],
         },
@@ -8482,8 +8482,8 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     const board = screen.getByRole("region", { name: "Stats" });
     await user.click(within(board).getByRole("tab", { name: "7d" }));
 
-    expect(await within(board).findByText(/play ≥5 challenges to rank/i)).toBeVisible();
-    expect(within(board).getByText(/2\/5 challenges/)).toBeVisible();
+    expect(await within(board).findByText(/finish 5 races to rank/i)).toBeVisible();
+    expect(within(board).getByText(/finish 3 more races to rank/i)).toBeVisible();
   });
 
   it("renders an error banner + Retry on a failed trends fetch, never the 'no one has cleared the guard' empty state (F6)", async () => {
@@ -8493,7 +8493,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
         "7": {
           window: "7",
           guard: 3,
-          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3 }],
+          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1 }],
           unranked: [],
         },
       },
@@ -8506,7 +8506,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     await user.click(within(board).getByRole("tab", { name: "7d" }));
 
     expect(await within(board).findByRole("alert")).toHaveTextContent(/couldn.t load this trend/i);
-    expect(within(board).queryByText(/nobody.s played enough challenges to rank yet/i)).toBeNull();
+    expect(within(board).queryByText(/nobody.s finished enough races to rank yet/i)).toBeNull();
 
     await user.click(within(board).getByRole("button", { name: /retry/i }));
 
@@ -8526,7 +8526,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
         lifetime: {
           window: "lifetime",
           guard: 2,
-          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 4 }],
+          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 4, avgElapsedMs: 5_667, avgClicks: 1 }],
           unranked: [],
           roster: [
             { accountId: "acc-1", displayName: "Vijay", racesStarted: 4, finishes: 4, wins: 3 },
@@ -8558,7 +8558,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     expect(within(roster).getByText(/1 race · 0 finishes · 0 wins/i)).toBeVisible();
     expect(within(roster).getByText(/lollerskates/i)).toBeVisible();
     expect(within(roster).getByText(/2 races · 2 finishes · 1 win/i)).toBeVisible();
-    expect(within(roster).getByText(/challenge rankings need 2 played challenges/i)).toBeVisible();
+    expect(within(roster).getByText(/challenge rankings need 2 finished races/i)).toBeVisible();
   });
 });
 
@@ -8671,6 +8671,8 @@ function createFetchMock(options?: {
       displayName: string | null;
       avgPlacement: number;
       playedCount: number;
+      avgElapsedMs: number;
+      avgClicks: number;
       prevAvgPlacement?: number | null;
     }>;
     unranked: Array<{ accountId: string; displayName: string | null; playedCount: number }>;

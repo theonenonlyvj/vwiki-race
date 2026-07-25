@@ -926,9 +926,9 @@ describe("VWiki Race API client", () => {
   it("fetches and validates Boards' rolling-trend response", async () => {
     const trends = {
       window: "7" as const,
-      guard: 3,
+      guard: 2,
       ranked: [
-        { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3 },
+        { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3, avgElapsedMs: 5667, avgClicks: 4.3 },
       ],
       unranked: [
         { accountId: "acc-2", displayName: "Casey", playedCount: 1 },

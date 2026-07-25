@@ -170,77 +170,102 @@ export function createWorker(options: WorkerOptions = {}) {
 
       const tracking = buildTracking(env);
       const repository = protocol(tracking);
-      if (dailyDate) {
-        await repository.ensureDailyChallengeJob(dailyDate);
-      }
-      const job = await repository.claimDueDailyChallengeJob();
-      if (!job) {
-        logDailyJob("no_due_job", { dailyDate: dailyDate ?? "retry" });
-        return;
-      }
-
-      const flavor = dailyFlavorForCentralDate(job.dailyDate);
-      const selectionStartedAt = Date.now();
-      let queueResult: "hit" | "miss" = "miss";
-      logDailyJob("claimed", {
-        dailyDate: job.dailyDate,
-        flavor,
-        attemptCount: job.attemptCount,
-      });
       try {
-        const queued = await acceptQueuedDailyFeature(repository, job, flavor, selectionStartedAt);
-        if (queued) {
-          queueResult = "hit";
+        if (dailyDate) {
+          await repository.ensureDailyChallengeJob(dailyDate);
+        }
+        const job = await repository.claimDueDailyChallengeJob();
+        if (!job) {
+          logDailyJob("no_due_job", { dailyDate: dailyDate ?? "retry" });
+          return;
+        }
+
+        const flavor = dailyFlavorForCentralDate(job.dailyDate);
+        const selectionStartedAt = Date.now();
+        let queueResult: "hit" | "miss" = "miss";
+        logDailyJob("claimed", {
+          dailyDate: job.dailyDate,
+          flavor,
+          attemptCount: job.attemptCount,
+        });
+        try {
+          const queued = await acceptQueuedDailyFeature(repository, job, flavor, selectionStartedAt);
+          if (queued) {
+            queueResult = "hit";
+            logDailyJob("accepted", {
+              dailyDate: job.dailyDate,
+              flavor,
+              queue: queueResult,
+              attemptCount: job.attemptCount,
+              challengeId: queued.id,
+              elapsedMs: Date.now() - selectionStartedAt,
+            });
+            return;
+          }
+          logDailyJob("queue_miss", {
+            dailyDate: job.dailyDate,
+            flavor,
+            queue: queueResult,
+            elapsedMs: Date.now() - selectionStartedAt,
+          });
+          const { selectedScore, ...candidate } = await getDailyCandidateSource().findCandidate({
+            dailyDate: job.dailyDate,
+            flavor,
+          });
+          const challenge = await repository.acceptDailyFeature(job, {
+            kind: "automatic",
+            candidate,
+            classifierVersion: CLASSIFIER_VERSION,
+            selectedScore,
+          });
           logDailyJob("accepted", {
             dailyDate: job.dailyDate,
             flavor,
             queue: queueResult,
             attemptCount: job.attemptCount,
-            challengeId: queued.id,
+            challengeId: challenge.id,
             elapsedMs: Date.now() - selectionStartedAt,
           });
-          return;
+        } catch (caught) {
+          const failureCode = dailyFailureCode(caught);
+          try {
+            await repository.failDailyChallengeJob(job, failureCode);
+          } catch {
+            logDailyJob("failure_record_failed", { dailyDate: job.dailyDate, failureCode });
+          }
+          logDailyJob("failed", {
+            dailyDate: job.dailyDate,
+            flavor,
+            queue: queueResult,
+            attemptCount: job.attemptCount,
+            failureCode,
+            elapsedMs: Date.now() - selectionStartedAt,
+          });
+          throw caught;
         }
-        logDailyJob("queue_miss", {
-          dailyDate: job.dailyDate,
-          flavor,
-          queue: queueResult,
-          elapsedMs: Date.now() - selectionStartedAt,
-        });
-        const { selectedScore, ...candidate } = await getDailyCandidateSource().findCandidate({
-          dailyDate: job.dailyDate,
-          flavor,
-        });
-        const challenge = await repository.acceptDailyFeature(job, {
-          kind: "automatic",
-          candidate,
-          classifierVersion: CLASSIFIER_VERSION,
-          selectedScore,
-        });
-        logDailyJob("accepted", {
-          dailyDate: job.dailyDate,
-          flavor,
-          queue: queueResult,
-          attemptCount: job.attemptCount,
-          challengeId: challenge.id,
-          elapsedMs: Date.now() - selectionStartedAt,
-        });
-      } catch (caught) {
-        const failureCode = dailyFailureCode(caught);
-        try {
-          await repository.failDailyChallengeJob(job, failureCode);
-        } catch {
-          logDailyJob("failure_record_failed", { dailyDate: job.dailyDate, failureCode });
+      } finally {
+        // Auto zz-sweep (owner ruling, 2026-07-25 - "metric-independent
+        // ranking changes"): runs on every hourly retry tick, after the
+        // daily-job logic above, regardless of whether that logic
+        // succeeded, no-op'd ("no_due_job" - the common case, most hours),
+        // or threw (the `finally` still runs before the throw propagates).
+        // Its own failure is caught and logged, never allowed to mask a
+        // daily-job outcome (success OR a legitimate rethrown failure) -
+        // this is a best-effort maintenance task, not part of the daily
+        // job's own contract.
+        if (isRetryTrigger) {
+          try {
+            const changed = await repository.sweepZzExcludedTestAccountRuns();
+            if (changed > 0) {
+              logZzSweep({ event: "board_excluded", changedCount: changed });
+            }
+          } catch (caught) {
+            logZzSweep({
+              event: "sweep_failed",
+              failureCode: dailyFailureCode(caught),
+            });
+          }
         }
-        logDailyJob("failed", {
-          dailyDate: job.dailyDate,
-          flavor,
-          queue: queueResult,
-          attemptCount: job.attemptCount,
-          failureCode,
-          elapsedMs: Date.now() - selectionStartedAt,
-        });
-        throw caught;
       }
     },
   };
@@ -840,6 +865,16 @@ function dailyFailureCode(caught: unknown): string {
 
 function logDailyJob(event: string, fields: Record<string, string | number>): void {
   console.info("daily_challenge_job", JSON.stringify({ event, ...fields }));
+}
+
+/**
+ * Auto zz-sweep (owner ruling, 2026-07-25 - "metric-independent ranking
+ * changes"): a structured line only logged when the hourly sweep actually
+ * changed something (or itself failed) - the common "nothing to sweep"
+ * outcome, every hour, stays silent rather than paging the logs.
+ */
+function logZzSweep(fields: Record<string, string | number>): void {
+  console.info("zz_account_sweep", JSON.stringify(fields));
 }
 
 function logDailyCandidateDiagnostic(

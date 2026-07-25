@@ -3616,7 +3616,11 @@ describe("Task 4 D1 projections", () => {
       topTargets: [],
       mostVisited: [],
       dailyStreak: 0,
-      trend30: { avgPlacement: null, playedCount: 0, ranked: false, guard: 1 },
+      // Owner ruling, 2026-07-25 ("metric-independent ranking changes"):
+      // `guard` is now the flat `DAILY_TREND_INCLUSION_FLOOR` (2),
+      // regardless of catalog size (was `ceil(0/3) = 1` under the old
+      // reality-scaled formula, since this fixture is otherwise empty).
+      trend30: { avgPlacement: null, playedCount: 0, ranked: false, guard: 2 },
     });
   });
 
@@ -3674,8 +3678,12 @@ describe("Task 4 D1 projections", () => {
       // every challenge, not just dailies - this account's completed run
       // above lands on the seeded `challenge-0001` (the only active
       // challenge in this fixture's 30d window), so it's now the sole,
-      // solo entrant: guard = ceil(1/3) = 1, cleared by playedCount 1.
-      trend30: { avgPlacement: 1, playedCount: 1, ranked: true, guard: 1 },
+      // solo entrant. Owner ruling, 2026-07-25 ("metric-independent ranking
+      // changes"): the guard is a flat 2 counted completions now (not
+      // catalog-scaled) - this account's single completion stays below it,
+      // so it's unranked with no avgPlacement, same shape the below-guard
+      // branch above uses.
+      trend30: { avgPlacement: null, playedCount: 1, ranked: false, guard: 2 },
     });
     await expect(count("account_profiles")).resolves.toBe(0);
     await expect(count("account_aliases")).resolves.toBe(1);
@@ -4714,68 +4722,107 @@ describe("getAccountChallengeOutcomes (Increment 5)", () => {
 });
 
 describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, owner ruling 2026-07-20)", () => {
-  // The always-present seed challenges (challenge-0001/2/3) are never
-  // deleted by the outer `beforeEach` (other describe blocks depend on
-  // them existing), but they're all `is_active = 1` and created
-  // 2026-07-13 Central - inside nearly every window this block's tests use
-  // as "today". Pre-FB-10 they were invisible to `listDailyTrends` (it only
-  // ever looked at `daily_features`), so they never mattered here; now that
-  // trends aggregate over every challenge, they'd silently inflate every
-  // guard-denominator count in this file unless neutralized. Deactivating
-  // (not deleting) them is reversible and no test in this block ever plays
-  // them, so this is a pure no-op for every other describe block.
-  beforeEach(async () => {
-    await env.VWIKI_RACE_DB.prepare(
-      "UPDATE challenges SET is_active = 0 WHERE id IN ('challenge-0001', 'challenge-0002', 'challenge-0003')",
-    ).run();
-  });
-  afterEach(async () => {
-    await env.VWIKI_RACE_DB.prepare(
-      "UPDATE challenges SET is_active = 1 WHERE id IN ('challenge-0001', 'challenge-0002', 'challenge-0003')",
-    ).run();
-  });
+  // Owner ruling, 2026-07-25 ("metric-independent ranking changes"): the
+  // inclusion guard is now a flat constant (`DAILY_TREND_INCLUSION_FLOOR`),
+  // not reality-scaled off how many ACTIVE challenges exist in the window -
+  // so this block no longer needs to neutralize the always-present seed
+  // challenges (challenge-0001/2/3) to keep them from inflating a guard
+  // denominator that doesn't exist anymore.
 
-  it("computes avg placement per account across a window's challenges, deduping repeat attempts, applying the participation guard", async () => {
+  it("computes avg placement/time/clicks per account across a window's challenges, deduping repeat attempts, applying the flat inclusion floor", async () => {
     await insertDailyChallenge({ id: "trend-d1", sortOrder: 501, createdAt: "2026-07-16T12:00:00.000Z" });
     await insertDailyChallenge({ id: "trend-d2", sortOrder: 502, createdAt: "2026-07-17T12:00:00.000Z" });
     await insertDailyChallenge({ id: "trend-d3", sortOrder: 503, createdAt: "2026-07-18T12:00:00.000Z" });
     await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-16", challengeId: "trend-d1", selectionSource: "automatic" });
     await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-17", challengeId: "trend-d2", selectionSource: "automatic" });
     await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-18", challengeId: "trend-d3", selectionSource: "automatic" });
-    // PKG-14: the guard is reality-scaled off how many ACTIVE challenges
-    // actually exist in the window (`ceil(activeChallenges / 3)`, clamped
-    // to [1, 3] for 7d) - filling out the rest of the 7-day window
-    // (2026-07-12..15, unplayed by anyone) brings the window to a full 7
-    // challenges, so `ceil(7/3) = 3` reproduces this test's intended
-    // guard-of-3 narrative exactly as before FB-10.
-    for (const [index, dailyDate] of ["2026-07-12", "2026-07-13", "2026-07-14", "2026-07-15"].entries()) {
-      const challengeId = `trend-guard-filler-${index}`;
-      await insertDailyChallenge({ id: challengeId, sortOrder: 504 + index, createdAt: `${dailyDate}T12:00:00.000Z` });
-      await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate, challengeId, selectionSource: "automatic" });
-    }
 
     const accountA = "trend-account-a";
     const accountB = "trend-account-b";
+    const accountC = "trend-account-c";
     // Day 1: A's worse attempt then a better one (dedup must keep the best) - A places 1st, B 2nd.
     await insertCompletedV2({ id: "d1-a-worse", accountId: accountA, elapsedMs: 9_000, completedAt: "2026-07-16T01:00:09.000Z", challengeId: "trend-d1" });
     await insertCompletedV2({ id: "d1-a-better", accountId: accountA, elapsedMs: 5_000, completedAt: "2026-07-16T01:00:05.000Z", challengeId: "trend-d1" });
     await insertCompletedV2({ id: "d1-b", accountId: accountB, elapsedMs: 8_000, completedAt: "2026-07-16T01:00:08.000Z", challengeId: "trend-d1" });
-    // Day 2: B places 1st, A 2nd.
+    // Day 2: C places 1st, A 2nd. B doesn't play day 2 at all - stays at a
+    // single counted completion (day 1), one short of the flat floor of 2.
+    await insertCompletedV2({ id: "d2-c", accountId: accountC, elapsedMs: 4_000, completedAt: "2026-07-17T01:00:04.000Z", challengeId: "trend-d2" });
     await insertCompletedV2({ id: "d2-a", accountId: accountA, elapsedMs: 9_000, completedAt: "2026-07-17T01:00:09.000Z", challengeId: "trend-d2" });
-    await insertCompletedV2({ id: "d2-b", accountId: accountB, elapsedMs: 4_000, completedAt: "2026-07-17T01:00:04.000Z", challengeId: "trend-d2" });
     // Day 3: only A plays, alone in 1st.
     await insertCompletedV2({ id: "d3-a", accountId: accountA, elapsedMs: 3_000, completedAt: "2026-07-18T01:00:03.000Z", challengeId: "trend-d3" });
 
     const { repository } = fixture();
     const { ranked, unranked } = await repository.listDailyTrends(7, "2026-07-18");
 
-    // A: placements 1, 2, 1 -> avg 1.333... rounded to 1 decimal -> 1.3; played 3 >= guard(3) -> ranked.
+    // A: placements 1, 2, 1 -> avg 1.333... rounded to 1 decimal -> 1.3;
+    // 3 counted completions clears the flat floor (2) -> ranked. avg
+    // elapsed = (5000+9000+3000)/3 = 5666.67ms -> rounds to 5667; avg clicks
+    // = 1 (insertCompletedV2 always writes click_count = 1).
     expect(ranked).toEqual([
-      { accountId: accountA, displayName: null, avgPlacement: 1.3, playedCount: 3 },
+      { accountId: accountA, displayName: null, avgPlacement: 1.3, playedCount: 3, avgElapsedMs: 5667, avgClicks: 1 },
     ]);
-    // B: placements 2, 1 -> played 2 < guard(3) -> unranked, no avgPlacement reported.
-    expect(unranked).toEqual([
-      { accountId: accountB, displayName: null, playedCount: 2 },
+    // B (1 completion) and C (1 completion) both stay one short of the
+    // floor - neither DNFs nor a second challenge, just genuinely below it.
+    expect(unranked.map((entry) => entry.accountId).sort()).toEqual([accountB, accountC].sort());
+    expect(unranked.find((entry) => entry.accountId === accountB)).toEqual(
+      { accountId: accountB, displayName: null, playedCount: 1 },
+    );
+    expect(unranked.find((entry) => entry.accountId === accountC)).toEqual(
+      { accountId: accountC, displayName: null, playedCount: 1 },
+    );
+  });
+
+  it("owner ruling, 2026-07-25: ranked entries carry avg time/clicks across their counted completions, distinct from avgPlacement", async () => {
+    const accountId = "trend-avg-columns-account";
+    await insertDailyChallenge({ id: "trend-avg-d1", sortOrder: 800, createdAt: "2026-07-17T12:00:00.000Z" });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-17", challengeId: "trend-avg-d1", selectionSource: "automatic" });
+    await insertCompletedV2({ id: "trend-avg-d1-run", accountId, elapsedMs: 4_000, completedAt: "2026-07-17T01:00:04.000Z", challengeId: "trend-avg-d1" });
+    await env.VWIKI_RACE_DB.prepare("UPDATE runs SET click_count = 4 WHERE id = ?").bind("trend-avg-d1-run").run();
+
+    await insertDailyChallenge({ id: "trend-avg-d2", sortOrder: 801, createdAt: "2026-07-18T12:00:00.000Z" });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-18", challengeId: "trend-avg-d2", selectionSource: "automatic" });
+    await insertCompletedV2({ id: "trend-avg-d2-run", accountId, elapsedMs: 8_000, completedAt: "2026-07-18T01:00:08.000Z", challengeId: "trend-avg-d2" });
+    await env.VWIKI_RACE_DB.prepare("UPDATE runs SET click_count = 10 WHERE id = ?").bind("trend-avg-d2-run").run();
+
+    const { repository } = fixture();
+    const { ranked } = await repository.listDailyTrends(7, "2026-07-18");
+
+    // Both solo -> avgPlacement 1; avg elapsed = (4000+8000)/2 = 6000ms;
+    // avg clicks = (4+10)/2 = 7 - display-only, doesn't affect the sort.
+    expect(ranked).toEqual([
+      { accountId, displayName: null, avgPlacement: 1, playedCount: 2, avgElapsedMs: 6000, avgClicks: 7 },
+    ]);
+  });
+
+  it("rounds avg elapsed to the nearest ms and avg clicks to one decimal", async () => {
+    const accountId = "trend-avg-rounding-account";
+    const days: Array<{
+      id: string;
+      sortOrder: number;
+      dailyDate: string;
+      completedAt: string;
+      elapsedMs: number;
+      clickCount: number;
+    }> = [
+      { id: "trend-avg-round-d1", sortOrder: 810, dailyDate: "2026-07-16", completedAt: "2026-07-16T01:00:01.000Z", elapsedMs: 1_000, clickCount: 1 },
+      { id: "trend-avg-round-d2", sortOrder: 811, dailyDate: "2026-07-17", completedAt: "2026-07-17T01:00:02.000Z", elapsedMs: 2_000, clickCount: 2 },
+      { id: "trend-avg-round-d3", sortOrder: 812, dailyDate: "2026-07-18", completedAt: "2026-07-18T01:00:02.000Z", elapsedMs: 2_000, clickCount: 2 },
+    ];
+    for (const day of days) {
+      await insertDailyChallenge({ id: day.id, sortOrder: day.sortOrder, createdAt: `${day.dailyDate}T12:00:00.000Z` });
+      await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: day.dailyDate, challengeId: day.id, selectionSource: "automatic" });
+      const runId = `${day.id}-run`;
+      await insertCompletedV2({ id: runId, accountId, elapsedMs: day.elapsedMs, completedAt: day.completedAt, challengeId: day.id });
+      await env.VWIKI_RACE_DB.prepare("UPDATE runs SET click_count = ? WHERE id = ?").bind(day.clickCount, runId).run();
+    }
+
+    const { repository } = fixture();
+    const { ranked } = await repository.listDailyTrends(7, "2026-07-18");
+
+    // avg elapsed = (1000+2000+2000)/3 = 1666.67 -> rounds to 1667ms;
+    // avg clicks = (1+2+2)/3 = 1.667 -> rounds to 1.7 (one decimal).
+    expect(ranked).toEqual([
+      { accountId, displayName: null, avgPlacement: 1, playedCount: 3, avgElapsedMs: 1667, avgClicks: 1.7 },
     ]);
   });
 
@@ -4786,16 +4833,6 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-18", challengeId: "trend-window-inside", selectionSource: "automatic" });
     // 17 days before "today" - outside the 7d window.
     await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-01", challengeId: "trend-window-outside", selectionSource: "automatic" });
-    // PKG-14: fill out the rest of the 7-day window (unplayed by anyone) so
-    // this test's single played day stays below both the week guard
-    // (ceil(6/3) = 2) and the lifetime guard (ceil(7/3) = 3) - proving the
-    // window/lifetime date-bound distinction on its own, independent of the
-    // reality-scaled guard math `dailyTrendGuard.test.ts` already covers.
-    for (const [index, dailyDate] of ["2026-07-12", "2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16"].entries()) {
-      const challengeId = `trend-window-filler-${index}`;
-      await insertDailyChallenge({ id: challengeId, sortOrder: 512 + index, createdAt: `${dailyDate}T12:00:00.000Z` });
-      await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate, challengeId, selectionSource: "automatic" });
-    }
 
     const accountId = "trend-window-account";
     await insertCompletedV2({ id: "window-inside-run", accountId, elapsedMs: 5_000, completedAt: "2026-07-18T01:00:05.000Z", challengeId: "trend-window-inside" });
@@ -4805,16 +4842,23 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     const week = await repository.listDailyTrends(7, "2026-07-18");
     const lifetime = await repository.listDailyTrends(null, "2026-07-18");
 
+    // Week only counts the in-window challenge - 1 completion, below the
+    // flat floor of 2, stays unranked. Lifetime counts both - 2 completions
+    // clears the floor, so it's ranked instead (owner ruling, 2026-07-25:
+    // was also `unranked` before the guard became completions-only-and-flat,
+    // since the pre-ruling reality-scaled lifetime guard was 3 here).
     expect(week.unranked.find((entry) => entry.accountId === accountId)?.playedCount).toBe(1);
-    expect(lifetime.unranked.find((entry) => entry.accountId === accountId)?.playedCount).toBe(2);
+    expect(week.ranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
+    expect(lifetime.ranked.find((entry) => entry.accountId === accountId)).toMatchObject({ playedCount: 2 });
+    expect(lifetime.unranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
   });
 
-  it("ranks exactly at the participation guard boundary (30d guard = 10) and leaves one fewer play unranked", async () => {
+  it("ranks exactly at the flat inclusion floor (2 counted completions) and leaves one fewer completion unranked", async () => {
     const rankedAccount = "trend-guard-ranked";
     const unrankedAccount = "trend-guard-unranked";
-    for (let index = 0; index < 10; index += 1) {
+    for (let index = 0; index < 2; index += 1) {
       const challengeId = `trend-guard-challenge-${index}`;
-      const dailyDate = `2026-07-${String(9 + index).padStart(2, "0")}`;
+      const dailyDate = index === 0 ? "2026-07-17" : "2026-07-18";
       await insertDailyChallenge({ id: challengeId, sortOrder: 600 + index, createdAt: `${dailyDate}T12:00:00.000Z` });
       await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate, challengeId, selectionSource: "automatic" });
       await insertCompletedV2({
@@ -4825,7 +4869,8 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
         challengeId,
       });
       if (index > 0) {
-        // Skips the very first daily -> exactly 9 plays, one short of the guard.
+        // Skips the first challenge - exactly 1 completion, one short of
+        // the flat floor of 2.
         await insertCompletedV2({
           id: `${challengeId}-unranked`,
           accountId: unrankedAccount,
@@ -4835,25 +4880,12 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
         });
       }
     }
-    // PKG-14: the guard is reality-scaled off how many ACTIVE challenges
-    // actually exist in the window (`ceil(activeChallenges / 3)`, clamped
-    // to [1, 10] for 30d) - the above loop only covers 10 of the 30-day
-    // window's calendar dates, which alone would scale the guard down to
-    // `ceil(10/3) = 4`. Filling out the remaining 20 dates (unplayed by
-    // anyone) brings the window to a full 30 challenges, so `ceil(30/3) =
-    // 10` reproduces this test's "guard = 10" boundary exactly as before.
-    for (let daysBefore = 10; daysBefore < 30; daysBefore += 1) {
-      const challengeId = `trend-guard-filler-30d-${daysBefore}`;
-      const dailyDate = centralDateDaysBefore("2026-07-18", daysBefore);
-      await insertDailyChallenge({ id: challengeId, sortOrder: 650 + daysBefore, createdAt: `${dailyDate}T12:00:00.000Z` });
-      await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate, challengeId, selectionSource: "automatic" });
-    }
 
     const { repository } = fixture();
     const { ranked, unranked } = await repository.listDailyTrends(30, "2026-07-18");
 
-    expect(ranked.find((entry) => entry.accountId === rankedAccount)).toMatchObject({ playedCount: 10 });
-    expect(unranked.find((entry) => entry.accountId === unrankedAccount)).toMatchObject({ playedCount: 9 });
+    expect(ranked.find((entry) => entry.accountId === rankedAccount)).toMatchObject({ playedCount: 2 });
+    expect(unranked.find((entry) => entry.accountId === unrankedAccount)).toMatchObject({ playedCount: 1 });
     expect(ranked.find((entry) => entry.accountId === unrankedAccount)).toBeUndefined();
   });
 
@@ -4873,15 +4905,15 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     }
 
     const { repository } = fixture();
-    // PKG-14: with only this single daily ever played, the lifetime guard
-    // scales down to `ceil(1/3) = 1` - every one of these 105 single-attempt
-    // finishers now clears it and lands in `ranked` (not `unranked`, as it
-    // did under the old flat guard=10). The no-LIMIT assertion this test
-    // exists for is unaffected by which array they land in.
-    const { ranked } = await repository.listDailyTrends(null, "2026-07-18");
+    // Every one of these 105 accounts solos exactly this one challenge - a
+    // single counted completion each, one short of the flat
+    // `DAILY_TREND_INCLUSION_FLOOR` (2), so all 105 land in `unranked`, not
+    // `ranked`. The no-LIMIT guarantee this test exists for applies equally
+    // either way - `placements`, this query's own base CTE, has no LIMIT.
+    const { unranked } = await repository.listDailyTrends(null, "2026-07-18");
 
-    expect(ranked).toHaveLength(total);
-    expect(ranked.find((entry) => entry.accountId === "nolimit-account-104")).toBeDefined();
+    expect(unranked).toHaveLength(total);
+    expect(unranked.find((entry) => entry.accountId === "nolimit-account-104")).toBeDefined();
   }, 20_000);
 
   it("excludes board_excluded runs from a challenge's placement computation", async () => {
@@ -4912,12 +4944,10 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     ).bind(ghost, canonical).run();
 
     const { repository } = fixture();
-    // PKG-14: with only this single in-window daily, the guard scales down
-    // to `ceil(1/3) = 1`, so this one completed play now clears it and
-    // lands in `ranked` rather than `unranked` (the pre-PKG-14 flat guard=3
-    // kept it unranked) - alias resolution is what this test actually
-    // covers, so it checks membership across both arrays rather than
-    // pinning to whichever one the guard happens to sort it into.
+    // A single completion stays below the flat inclusion floor (2) either
+    // way, so it lands in `unranked` - alias resolution is what this test
+    // actually covers, so it checks membership across both arrays rather
+    // than pinning to a specific one.
     const { ranked, unranked } = await repository.listDailyTrends(7, "2026-07-18");
     const ids = [...ranked, ...unranked].map((entry) => entry.accountId);
 
@@ -4983,17 +5013,17 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     expect(ranked.map((entry) => entry.accountId)).toEqual([alpha, beta]);
   });
 
-  it("F2: a board-visible DNF day counts toward playedCount (participation) but never toward avgPlacement", async () => {
+  it("owner ruling, 2026-07-25: a board-visible DNF no longer counts toward playedCount at all - only completions do", async () => {
     const accountId = "trend-dnf-account";
-    // 8 solo finishes (each placement 1) across 2026-07-01..08.
-    for (let index = 0; index < 8; index += 1) {
-      const dailyDate = `2026-07-${String(index + 1).padStart(2, "0")}`;
-      const challengeId = `trend-dnf-finish-${index}`;
-      await insertDailyChallenge({ id: challengeId, sortOrder: 3000 + index, createdAt: `${dailyDate}T12:00:00.000Z` });
-      await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate, challengeId, selectionSource: "automatic" });
-      await insertCompletedV2({ id: `${challengeId}-run`, accountId, elapsedMs: 5_000, completedAt: `${dailyDate}T01:00:05.000Z`, challengeId });
-    }
-    // 3 DNF-only days across 2026-07-09..11.
+    // 1 solo finish - exactly 1 counted completion.
+    await insertDailyChallenge({ id: "trend-dnf-finish-0", sortOrder: 3000, createdAt: "2026-07-01T12:00:00.000Z" });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-01", challengeId: "trend-dnf-finish-0", selectionSource: "automatic" });
+    await insertCompletedV2({ id: "trend-dnf-finish-0-run", accountId, elapsedMs: 5_000, completedAt: "2026-07-01T01:00:05.000Z", challengeId: "trend-dnf-finish-0" });
+    // 3 board-visible DNF-only days (well above MIN_COUNTED_DNF_CLICKS).
+    // Pre-2026-07-25, each of these would have added to `playedCount` (F2,
+    // amended by FB-7) - now none of them do, for this guard specifically;
+    // they still count toward "played" everywhere else (listChallengeDnfs,
+    // listAllPlayersRoster, getAccountDailyStreak - all unchanged).
     for (let index = 0; index < 3; index += 1) {
       const dailyDate = `2026-07-${String(9 + index).padStart(2, "0")}`;
       const challengeId = `trend-dnf-dnf-${index}`;
@@ -5005,19 +5035,15 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     const { repository } = fixture();
     const { ranked, unranked } = await repository.listDailyTrends(30, "2026-07-18");
 
-    // PKG-14: 11 challenges exist in this 30d window (8 finish + 3 DNF
-    // days), scaling the guard to `ceil(11/3) = 4` - 11 played clears it
-    // either way, so this test's real point (DNF counts toward
-    // `playedCount` but never `avgPlacement`) is unaffected by the guard
-    // formula change. avgPlacement is over the 8 finishes only (each solo
-    // -> placement 1 every time -> avg exactly 1).
-    expect(ranked).toEqual([
-      { accountId, displayName: null, avgPlacement: 1, playedCount: 11 },
-    ]);
-    expect(unranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
+    // Exactly 1 counted completion despite 3 additional DNF days - stays
+    // below the flat floor of 2, unranked.
+    expect(ranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
+    expect(unranked.find((entry) => entry.accountId === accountId)).toEqual({
+      accountId, displayName: null, playedCount: 1,
+    });
   });
 
-  it("F2: an account whose participation is entirely DNFs clears the guard on playedCount but stays unranked (no avgPlacement to rank by)", async () => {
+  it("owner ruling, 2026-07-25: an account whose participation is entirely DNFs has zero counted completions and appears in neither array", async () => {
     const accountId = "trend-all-dnf-account";
     for (let index = 0; index < 10; index += 1) {
       const dailyDate = `2026-07-${String(index + 1).padStart(2, "0")}`;
@@ -5030,8 +5056,13 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     const { repository } = fixture();
     const { ranked, unranked } = await repository.listDailyTrends(30, "2026-07-18");
 
+    // Zero counted completions - unlike before 2026-07-25 (10 DNFs used to
+    // clear a reality-scaled guard on playedCount alone), a DNF-only
+    // account no longer surfaces here at all, ranked or unranked. It's
+    // still visible elsewhere (`listAllPlayersRoster`'s census is
+    // unaffected by this ruling).
     expect(ranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
-    expect(unranked.find((entry) => entry.accountId === accountId)).toMatchObject({ playedCount: 10 });
+    expect(unranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
   });
 
   it("FB-7 (owner ruling, 2026-07-19): a challenge whose only interaction is a 1-click DNF is NOT played", async () => {
@@ -5070,7 +5101,7 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     expect(unranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
   });
 
-  it("FB-10: a non-daily (manual) challenge created inside the window counts toward both playedCount and the guard denominator", async () => {
+  it("FB-10: a non-daily (manual) challenge created inside the window counts toward playedCount", async () => {
     const challengeId = "trend-manual-in-window";
     // Deliberately no `insertEditorialFeature` - a plain manual challenge,
     // never featured as a daily. Pre-FB-10, `listDailyTrends` could never
@@ -5083,10 +5114,11 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     const { repository } = fixture();
     const { ranked, unranked, guard } = await repository.listDailyTrends(7, "2026-07-18");
 
-    // Only this one active challenge exists in the 7d window -> guard = ceil(1/3) = 1.
-    expect(guard).toBe(1);
-    expect(ranked).toEqual([{ accountId, displayName: null, avgPlacement: 1, playedCount: 1 }]);
-    expect(unranked).toEqual([]);
+    // Owner ruling, 2026-07-25: guard is the flat inclusion floor (2), not
+    // reality-scaled off catalog size - 1 completion stays below it.
+    expect(guard).toBe(2);
+    expect(ranked).toEqual([]);
+    expect(unranked).toEqual([{ accountId, displayName: null, playedCount: 1 }]);
   });
 
   it("FB-10: a challenge created OUTSIDE the 7d window doesn't count, even with an in-window run", async () => {
@@ -5105,14 +5137,7 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     expect(unranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
   });
 
-  it("FB-10: a deactivated challenge never inflates the guard denominator, though a run on it still counts toward playedCount", async () => {
-    // 3 challenges stay active; a 4th (created inside the same window) gets
-    // deactivated after the fact - same shape as the owner's "swapped-out
-    // #6" scenario. If the retired challenge still counted toward the
-    // guard it'd be ceil(4/3) = 2; excluded (FB-10), it stays ceil(3/3) = 1
-    // - a boundary that only differs if exclusion is actually wired up.
-    await insertDailyChallenge({ id: "trend-guard-active-1", sortOrder: 4020, createdAt: "2026-07-14T12:00:00.000Z" });
-    await insertDailyChallenge({ id: "trend-guard-active-2", sortOrder: 4021, createdAt: "2026-07-15T12:00:00.000Z" });
+  it("FB-10: a run on a challenge that's since been deactivated still counts toward playedCount", async () => {
     const playedChallengeId = "trend-guard-active-3";
     await insertDailyChallenge({ id: playedChallengeId, sortOrder: 4022, createdAt: "2026-07-16T12:00:00.000Z" });
     const retiredChallengeId = "trend-guard-retired";
@@ -5127,10 +5152,10 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     const { repository } = fixture();
     const { ranked, guard } = await repository.listDailyTrends(7, "2026-07-18");
 
-    expect(guard).toBe(1);
+    expect(guard).toBe(2);
     // playedCount = 2: the retired challenge's own run still counts toward
-    // this account's numerator, even though it no longer counts toward
-    // anyone's guard denominator.
+    // this account's numerator, clearing the flat floor even though the
+    // challenge itself can no longer be raced fresh.
     expect(ranked.find((entry) => entry.accountId === accountId)).toMatchObject({ playedCount: 2 });
   });
 
@@ -5197,15 +5222,16 @@ describe("listDailyTrends - D1 bind-cap regression (FB-10 fixer pass)", () => {
       // The hard fuse itself: the pre-fix implementation filtered the main
       // query with a per-challenge `IN (?,?,...)` list built from every
       // challenge created inside the window - at this same 150-challenge
-      // scale it would bind ~151 params (150 challenge ids + 1 for
-      // `MIN_COUNTED_DNF_CLICKS`). Cloudflare D1 caps bound parameters at
-      // ~100 per statement, so that shape 500s in real D1; Miniflare
-      // doesn't enforce the cap, so a naive "does it throw" test can't
-      // catch this by construction - the rewritten filter uses a
+      // scale it would bind ~150 params. Cloudflare D1 caps bound
+      // parameters at ~100 per statement, so that shape 500s in real D1;
+      // Miniflare doesn't enforce the cap, so a naive "does it throw" test
+      // can't catch this by construction - the rewritten filter uses a
       // `created_at >= ? AND created_at < ?` subquery, exactly 2 fixed
-      // binds (plus `MIN_COUNTED_DNF_CLICKS`) no matter how many challenges
-      // exist in the window, so this stays small and constant regardless of
-      // catalog size.
+      // binds no matter how many challenges exist in the window (owner
+      // ruling, 2026-07-25, dropped the query's only other bind -
+      // `MIN_COUNTED_DNF_CLICKS` - entirely, once DNFs stopped counting
+      // toward this guard at all), so this stays small and constant
+      // regardless of catalog size.
       expect(maxBindArgs()).toBeLessThanOrEqual(5);
     },
     20_000,
@@ -5317,6 +5343,57 @@ describe("listAllPlayersRoster (PKG-14: direct owner feedback - lifetime/board s
     expect(roster.find((entry) => entry.accountId === zeroClickAccount)).toMatchObject({
       racesStarted: 1, finishes: 0, wins: 0,
     });
+  });
+});
+
+describe("sweepZzExcludedTestAccountRuns (owner ruling, 2026-07-25 - auto zz-sweep)", () => {
+  it("flips board_excluded=1 for a zz-prefixed account's still-included runs and returns the changed-row count", async () => {
+    const accountId = "zztest-sweep-account";
+    await insertAccountProfile(accountId, "zztest");
+    await insertCompletedV2({ id: "zz-sweep-run", accountId, elapsedMs: 4_000, completedAt: "2026-07-18T01:00:04.000Z" });
+
+    const { repository } = fixture();
+    await expect(repository.sweepZzExcludedTestAccountRuns()).resolves.toBe(1);
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT board_excluded FROM runs WHERE id = 'zz-sweep-run'",
+    ).first()).resolves.toEqual({ board_excluded: 1 });
+  });
+
+  it("is idempotent - a second call is a no-op once caught up", async () => {
+    const accountId = "zztest-idempotent-account";
+    await insertAccountProfile(accountId, "zztest2");
+    await insertCompletedV2({ id: "zz-idempotent-run", accountId, elapsedMs: 4_000, completedAt: "2026-07-18T01:00:04.000Z" });
+
+    const { repository } = fixture();
+    await expect(repository.sweepZzExcludedTestAccountRuns()).resolves.toBe(1);
+    await expect(repository.sweepZzExcludedTestAccountRuns()).resolves.toBe(0);
+  });
+
+  it("never touches a non-zz account's runs", async () => {
+    const accountId = "regular-player-account";
+    await insertAccountProfile(accountId, "Vijay");
+    await insertCompletedV2({ id: "regular-run", accountId, elapsedMs: 4_000, completedAt: "2026-07-18T01:00:04.000Z" });
+
+    const { repository } = fixture();
+    await expect(repository.sweepZzExcludedTestAccountRuns()).resolves.toBe(0);
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT board_excluded FROM runs WHERE id = 'regular-run'",
+    ).first()).resolves.toEqual({ board_excluded: 0 });
+  });
+
+  it("returns 0 when there is nothing to sweep at all", async () => {
+    const { repository } = fixture();
+    await expect(repository.sweepZzExcludedTestAccountRuns()).resolves.toBe(0);
+  });
+
+  it("sweeps every still-included run for a zz account, not just one", async () => {
+    const accountId = "zztest-multi-run-account";
+    await insertAccountProfile(accountId, "zzmulti");
+    await insertCompletedV2({ id: "zz-multi-run-1", accountId, elapsedMs: 4_000, completedAt: "2026-07-18T01:00:04.000Z", challengeId: "challenge-0001" });
+    await insertCompletedV2({ id: "zz-multi-run-2", accountId, elapsedMs: 5_000, completedAt: "2026-07-18T01:00:05.000Z", challengeId: "challenge-0002" });
+
+    const { repository } = fixture();
+    await expect(repository.sweepZzExcludedTestAccountRuns()).resolves.toBe(2);
   });
 });
 
@@ -5770,35 +5847,11 @@ describe("beginRandomChallengeAttempt / finishRandomChallengeAttempt (Increment 
 });
 
 describe("GET /api/v2/boards/trends", () => {
-  // Same FB-10 neutralization as the `listDailyTrends` describe block above
-  // - challenge-0001/2/3 are always present, always active, and created
-  // 2026-07-13 Central, which would otherwise silently inflate this block's
-  // guard-denominator expectations now that trends aggregate over every
-  // challenge, not just `daily_features` rows.
-  beforeEach(async () => {
-    await env.VWIKI_RACE_DB.prepare(
-      "UPDATE challenges SET is_active = 0 WHERE id IN ('challenge-0001', 'challenge-0002', 'challenge-0003')",
-    ).run();
-  });
-  afterEach(async () => {
-    await env.VWIKI_RACE_DB.prepare(
-      "UPDATE challenges SET is_active = 1 WHERE id IN ('challenge-0001', 'challenge-0002', 'challenge-0003')",
-    ).run();
-  });
-
   it("returns window/guard/ranked/unranked, unauthenticated", async () => {
     const challengeId = "boards-trends-route-challenge";
     await insertDailyChallenge({ id: challengeId, sortOrder: 1600, createdAt: "2026-07-18T12:00:00.000Z" });
     await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-18", challengeId, selectionSource: "automatic" });
     await insertCompletedV2({ id: "boards-trends-route-run", accountId: "boards-trends-account", elapsedMs: 4_000, completedAt: "2026-07-18T01:00:04.000Z", challengeId });
-    // PKG-14: fill out the rest of the 7-day window (unplayed by anyone) so
-    // `ceil(activeChallenges / 3)` reaches its 7d cap of 3, reproducing this
-    // test's pre-PKG-14 flat guard=3 expectation.
-    for (const [index, dailyDate] of ["2026-07-12", "2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16", "2026-07-17"].entries()) {
-      const fillerChallengeId = `boards-trends-route-filler-${index}`;
-      await insertDailyChallenge({ id: fillerChallengeId, sortOrder: 1610 + index, createdAt: `${dailyDate}T12:00:00.000Z` });
-      await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate, challengeId: fillerChallengeId, selectionSource: "automatic" });
-    }
 
     const { repository } = fixture({ now: "2026-07-18T20:00:00.000Z" });
     const worker = createWorker({
@@ -5817,9 +5870,11 @@ describe("GET /api/v2/boards/trends", () => {
     );
 
     expect(response.status).toBe(200);
+    // Owner ruling, 2026-07-25: guard is the flat inclusion floor (2) - the
+    // single completion here stays unranked.
     await expect(response.json()).resolves.toEqual({
       window: "7",
-      guard: 3,
+      guard: 2,
       ranked: [],
       unranked: [
         { accountId: "boards-trends-account", displayName: null, playedCount: 1 },
@@ -5894,15 +5949,16 @@ describe("GET /api/v2/boards/trends", () => {
     expect(lifetimeBody.roster.map((entry) => entry.accountId).sort()).toEqual(
       ["roster-route-custom-player", "roster-route-daily-player"].sort(),
     );
-    // FB-10: both accounts solo their one challenge each -> the only
-    // active challenge in scope is `dailyChallengeId` (challenge-0001 is
-    // neutralized to `is_active = 0` by this block's own beforeEach), so
-    // guard = ceil(1/3) = 1 and both playedCount(1) clear it.
-    expect(lifetimeBody.guard).toBe(1);
-    expect(lifetimeBody.ranked.map((entry) => entry.accountId).sort()).toEqual(
+    // Owner ruling, 2026-07-25: both accounts solo their one challenge each
+    // - a single completion, one short of the flat inclusion floor (2) -
+    // so both stay unranked (not "ranked" as under the old reality-scaled
+    // ceil(1/3)=1 guard). The roster above is still the one place both show
+    // up unconditionally.
+    expect(lifetimeBody.guard).toBe(2);
+    expect(lifetimeBody.ranked).toEqual([]);
+    expect(lifetimeBody.unranked.map((entry) => entry.accountId).sort()).toEqual(
       ["roster-route-custom-player", "roster-route-daily-player"].sort(),
     );
-    expect(lifetimeBody.unranked).toEqual([]);
 
     const sevenDayResponse = await worker.fetch(
       new Request("https://worker.example/api/v2/boards/trends?window=7"),

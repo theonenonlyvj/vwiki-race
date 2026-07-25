@@ -283,12 +283,16 @@ export interface AccountStats {
    * challenges played (created within that window), guard-gated the same
    * way Boards' trend segments are. `avgPlacement` is only meaningful when
    * `ranked` is true; a below-guard account still gets `playedCount` so
-   * Home/You can render "N/{guard} challenges" progress copy instead of a
-   * bare rejection. PKG-14, amended by FB-10: `guard` is this response's own
-   * server-computed threshold (reality-scaled off how many ACTIVE
-   * challenges actually exist in the window, not a fixed constant) - Home
-   * reads it off this field the same way Boards reads `BoardsTrendsResponse.
-   * guard` (F5 invariant: never re-derived client-side).
+   * Home/You can render `trendGuardProgressCopy` (domain/dailyTrends.ts)
+   * instead of a bare rejection. Owner ruling, 2026-07-25 ("metric-
+   * independent ranking changes"): `guard` is now a flat, constant floor
+   * (`DAILY_TREND_INCLUSION_FLOOR`, domain/dailyTrends.ts) - no longer
+   * reality-scaled off how many ACTIVE challenges exist in the window - and
+   * `playedCount` here means COUNTED COMPLETIONS only (a DNF no longer
+   * contributes, unlike "played" everywhere else in this app - see
+   * `listDailyTrends`'s doc comment). Home reads `guard` off this field the
+   * same way Boards reads `BoardsTrendsResponse.guard` (F5 invariant: never
+   * re-derived client-side).
    */
   trend30: {
     avgPlacement: number | null;
@@ -303,20 +307,37 @@ export interface AccountStats {
  * "7d/30d/lifetime" paragraph; generalized by FB-10, owner ruling
  * 2026-07-20, from daily-only to every challenge): one row per canonical
  * account, using the same best-rank-per-account-per-challenge definition as
- * `ChallengeBoardPlacement`, aggregated across a window's challenges. A
- * `DailyTrendRankedEntry` has cleared the participation guard (`playedCount
- * >= guard`, and has at least one finished challenge to average - F2:
- * `playedCount` alone counts board-visible DNF challenges too, but an
- * all-DNF account has no `avgPlacement` to rank by and stays unranked);
- * accounts below it appear as `DailyTrendUnrankedEntry` instead, with no
- * `avgPlacement` - council: unranked state "should read as progress toward
- * a goal, not a bare rejection", so `playedCount` is still surfaced.
+ * `ChallengeBoardPlacement`, aggregated across a window's challenges.
+ *
+ * Owner ruling, 2026-07-25 ("metric-independent ranking changes"): a
+ * `DailyTrendRankedEntry` has cleared the flat `DAILY_TREND_INCLUSION_FLOOR`
+ * (domain/dailyTrends.ts) - `playedCount` here is COUNTED COMPLETIONS only
+ * (best attempt per challenge, same dedup as `avgPlacement`'s own
+ * denominator), NOT the broader played-OR-DNF count `listChallengeDnfs`/
+ * `listAllPlayersRoster`/`getAccountDailyStreak` still use elsewhere (FB-7's
+ * DNF-counts-toward-"played" ruling is unchanged there, just superseded for
+ * THIS inclusion guard specifically) - a DNF-only account never appears in
+ * either this array or `DailyTrendUnrankedEntry` at all, since it has zero
+ * counted completions to report. `avgElapsedMs`/`avgClicks` (added the same
+ * ruling) are this account's own average time/clicks across those same
+ * counted completions in the window - display-only info columns alongside
+ * the placement; the SORT stays `avgPlacement` (a separate metric decision
+ * is pending, per the owner - this ruling deliberately didn't touch it).
+ * Accounts below the floor appear as `DailyTrendUnrankedEntry` instead (with
+ * no `avgPlacement`/avg columns) ONLY when they have exactly
+ * `DAILY_TREND_INCLUSION_FLOOR - 1` (i.e. 1, at the current floor of 2)
+ * counted completions - the "runway": one finish away from ranking. A
+ * zero-completion account (whether never played or DNF-only) doesn't appear
+ * in `unranked` either - see `trendGuardProgressCopy` for the copy this
+ * drives.
  */
 export interface DailyTrendRankedEntry {
   accountId: string;
   displayName: string | null;
   avgPlacement: number;
   playedCount: number;
+  avgElapsedMs: number;
+  avgClicks: number;
 }
 
 export interface DailyTrendUnrankedEntry {

@@ -806,6 +806,13 @@ function isDailyTrendRankedEntry(value: unknown): value is BoardsTrendsResponse[
     (value.displayName === null || hasString(value, "displayName")) &&
     hasNumber(value, "avgPlacement") &&
     hasNumber(value, "playedCount") &&
+    // Owner ruling, 2026-07-25 ("metric-independent ranking changes"): the
+    // info columns alongside the placement - this account's own average
+    // time/clicks across its counted completions in the window. Always
+    // present on a ranked entry (never optional/nullable - a ranked entry
+    // has at least `DAILY_TREND_INCLUSION_FLOOR` completions to average).
+    hasNumber(value, "avgElapsedMs") &&
+    hasNumber(value, "avgClicks") &&
     // F3: `prevAvgPlacement` is nullable (unranked/absent previous window,
     // or lifetime - "no arrow"); also tolerated as entirely absent so an
     // older cached response shape doesn't hard-fail validation.

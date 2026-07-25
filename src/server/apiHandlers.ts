@@ -428,12 +428,15 @@ export function createApiHandlers(
       const cleanToday = requiredString(todayCentral, "invalid_today_central", "A Central date is required.");
       const protocol = dailyProtocol(repository);
 
-      // PKG-14: `guard` is no longer derived here from `windowDays` alone -
-      // it comes straight off `listDailyTrends`'s own return, reality-scaled
-      // against however many active challenges actually exist in this
-      // window (see `dailyTrendGuard`'s doc comment). The lifetime roster
-      // fetch is independent of both this and the previous-window fetch
-      // below, so it runs in parallel rather than serially tacked on.
+      // PKG-14, amended by owner ruling 2026-07-25 ("metric-independent
+      // ranking changes"): `guard` is no longer derived here from
+      // `windowDays` alone - it comes straight off `listDailyTrends`'s own
+      // return, which is now a flat constant (`DAILY_TREND_INCLUSION_FLOOR`,
+      // domain/dailyTrends.ts) rather than reality-scaled against catalog
+      // size. Still never hardcoded/re-derived here (F5) in case that ever
+      // changes again. The lifetime roster fetch is independent of both this
+      // and the previous-window fetch below, so it runs in parallel rather
+      // than serially tacked on.
       const [{ ranked, unranked, guard }, roster] = await Promise.all([
         protocol.listDailyTrends(windowDays, cleanToday),
         window === "lifetime" ? protocol.listAllPlayersRoster() : Promise.resolve(undefined),

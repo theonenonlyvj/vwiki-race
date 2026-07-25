@@ -262,21 +262,23 @@ export interface RunProtocolRepository extends TrackingRepository {
    * 3.1's flagged "revisit at Increment 4": rolling trends must consider
    * every eligible finisher of each challenge, not just the first 100.
    *
-   * F2 (spec §Boards "≥1 eligible/leaderboard-visible run"), amended by FB-7
-   * (owner ruling, 2026-07-19): a board-visible DNF (>=
-   * `MIN_COUNTED_DNF_CLICKS`, see runProtocol.ts) counts toward each entry's
-   * `playedCount` (participation) the same as a finish does, both for
-   * clearing the ranking guard and for the below-guard progress count - but
-   * `avgPlacement` is only ever computed over finished challenges. A
-   * sub-threshold (0/1-click) DNF is a non-attempt and never counts.
+   * Owner ruling, 2026-07-25 ("metric-independent ranking changes"):
+   * `guard` is now the flat `DAILY_TREND_INCLUSION_FLOOR` (domain/
+   * dailyTrends.ts), not reality-scaled off catalog size - and `playedCount`
+   * on both `ranked`/`unranked` entries here means COUNTED COMPLETIONS only
+   * (best attempt per challenge, `avgPlacement`'s own denominator). This
+   * supersedes the prior F2/FB-7 behavior FOR THIS METHOD ONLY: a
+   * board-visible DNF still counts toward "played" everywhere else
+   * (`listChallengeDnfs`, `listAllPlayersRoster`, `getAccountDailyStreak`),
+   * but no longer helps an account clear this guard - only a genuine finish
+   * does. An account with zero counted completions (never played, or
+   * DNF-only) doesn't appear in either array at all. `avgElapsedMs`/
+   * `avgClicks` on each ranked entry are that account's own average
+   * time/clicks across those same counted completions - display-only info
+   * columns; the SORT stays `avgPlacement` (unchanged by this ruling).
    *
-   * PKG-14, amended by FB-10: `guard` is computed HERE (not by the caller
-   * from `windowDays` alone) because it's reality-scaled off how many ACTIVE
-   * challenges exist inside this exact window (lifetime = all time) - a
-   * retired/deactivated challenge never inflates it, though a challenge
-   * played before it was later deactivated still counts toward a played
-   * numerator. Callers (apiHandlers' `getBoardsTrends`, `getAccountStats`'
-   * `trend30`) just echo this `guard` back out; see `dailyTrendGuard`.
+   * Callers (apiHandlers' `getBoardsTrends`, `getAccountStats`'s `trend30`)
+   * just echo this `guard` back out, same as before.
    */
   listDailyTrends(windowDays: 7 | 30 | null, todayCentral: string): Promise<{
     ranked: DailyTrendRankedEntry[];
@@ -304,6 +306,29 @@ export interface RunProtocolRepository extends TrackingRepository {
    * on a missed day - no grace period.
    */
   getAccountDailyStreak(accountId: string, todayCentral: string): Promise<number>;
+  /**
+   * Auto zz-sweep (owner ruling, 2026-07-25 - "metric-independent ranking
+   * changes"): an idempotent maintenance sweep, run hourly off the "17 * * *
+   * *" retry cron (`worker.ts`'s `scheduled()`), that flips `board_excluded
+   * = 1` on any still-included run (`board_excluded = 0`) belonging to an
+   * account whose CURRENT `account_profiles.public_name` starts with "zz" -
+   * the house convention for manual QA/test accounts (see the
+   * `listAllPlayersRoster` worker test's "zephyr-style test account"
+   * comment). Previously this exclusion was entirely manual (a hand-run
+   * `UPDATE runs SET board_excluded = 1 ...`); this automates it so a
+   * forgotten zz-account never lingers on a public board past the next
+   * hourly tick. Matches on `runs.canonical_account_id` directly (stamped at
+   * run-creation time to the account's own id - see `startRunV2`'s INSERT),
+   * not the `account_aliases`-resolved identity every READ query in this
+   * file uses - a deliberate, narrower match: this sweep only needs to catch
+   * a zz-account's OWN runs, not runs merged in from some other identity.
+   * Idempotent (the `board_excluded = 0` guard means re-running it is a
+   * no-op once caught up) and safe to call on every hourly tick regardless
+   * of whether any zz account exists yet. Returns the number of rows
+   * flipped this call, so the caller can log a structured line only when
+   * something actually changed.
+   */
+  sweepZzExcludedTestAccountRuns(): Promise<number>;
   findQueuedDailyCandidate(flavor: DailyFlavor): Promise<DailyQueuedCandidate | null>;
   acceptDailyFeature(job: DailyChallengeJob, selection: DailyFeatureSelection): Promise<Challenge>;
   findChallengeCreationReplay(

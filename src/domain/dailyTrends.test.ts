@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  DAILY_TREND_INCLUSION_FLOOR,
   dailyTrendGuard,
   dailyTrendPreviousWindowEnd,
   dailyTrendWindowCreatedAtBounds,
   dailyTrendWindowStart,
   partitionChallengesByTrendWindow,
+  trendGuardProgressCopy,
   type TrendChallengeCandidate,
 } from "./dailyTrends";
 
@@ -43,6 +45,36 @@ describe("dailyTrendGuard (PKG-14: reality-scaled, not a flat threshold)", () =>
   it("scales the middle of the range too, not just the floor/cap ends", () => {
     expect(dailyTrendGuard(30, 15)).toBe(5);
     expect(dailyTrendGuard(null, 9)).toBe(3);
+  });
+});
+
+describe("DAILY_TREND_INCLUSION_FLOOR (owner ruling, 2026-07-25: flat, not reality-scaled)", () => {
+  it("is a flat 2, unaffected by catalog size", () => {
+    expect(DAILY_TREND_INCLUSION_FLOOR).toBe(2);
+  });
+});
+
+describe("trendGuardProgressCopy (owner ruling, 2026-07-25: replaces the old N/M-challenges fraction)", () => {
+  it("gives the plain instruction with no personal progress at zero completions", () => {
+    expect(trendGuardProgressCopy(0, DAILY_TREND_INCLUSION_FLOOR)).toBe("Finish 2 races to rank");
+  });
+
+  it("acknowledges banked progress with 'more' once at least one completion counts", () => {
+    expect(trendGuardProgressCopy(1, DAILY_TREND_INCLUSION_FLOOR)).toBe("Finish 1 more race to rank");
+  });
+
+  it("singularizes 'race' when exactly one remains, in either phrasing", () => {
+    expect(trendGuardProgressCopy(0, 1)).toBe("Finish 1 race to rank");
+    expect(trendGuardProgressCopy(1, 2)).toBe("Finish 1 more race to rank");
+  });
+
+  it("pluralizes 'races' when more than one remains", () => {
+    expect(trendGuardProgressCopy(0, 3)).toBe("Finish 3 races to rank");
+    expect(trendGuardProgressCopy(1, 3)).toBe("Finish 2 more races to rank");
+  });
+
+  it("clamps to zero remaining rather than going negative if ever called past the guard", () => {
+    expect(trendGuardProgressCopy(5, 2)).toBe("Finish 0 more races to rank");
   });
 });
 

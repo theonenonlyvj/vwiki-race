@@ -14,6 +14,7 @@ import {
   type HomeHeroSelection,
 } from "../domain/challengeSelection";
 import { dailyFlavorBadgeText } from "../domain/dailyEditorial";
+import { trendGuardProgressCopy } from "../domain/dailyTrends";
 import { formatTimeAndClicks } from "../domain/formatting";
 import { pathStepsToChain } from "../domain/winningPath";
 import type { AllPlayersRosterEntry, Challenge, ServerPathStep } from "../domain/types";
@@ -84,19 +85,21 @@ function isTrendSegment(segment: BoardsSegment): segment is TrendSegment {
  * views (Increment 3 - unchanged this increment); the last three are
  * rolling-placement trends (Increment 4), reading `GET
  * /api/v2/boards/trends` - ranked rows that have cleared the participation
- * guard, plus a muted "not yet ranked" section framed as progress ("M/{guard}
- * challenges" - FB-10, owner ruling 2026-07-20, generalized this and every
- * other trend/guard/rank string from "dailies" to "challenges" once trends
- * themselves started aggregating over every challenge, not just dailies),
- * never a bare rejection (council note). All trend copy (the
- * guard number itself, and every "N/{guard}" progress line) reads off the
- * server-echoed `trends.guard` - never re-derived client-side (F5) - so a
- * future guard-formula change can't silently disagree between server and
- * client. Each ranked row also gets a muted ▲/▼/– trend arrow (F3) comparing
- * its `avgPlacement` against the immediately-preceding same-length window
- * (server-computed as `prevAvgPlacement`); lifetime never gets one (no
- * "previous window" to compare against). A failed trends fetch renders an
- * error banner + Retry (F6), never the "no one has cleared the guard" empty
+ * guard, plus a muted "not yet ranked" runway section for accounts one
+ * finish short of it ("Finish N more race(s) to rank", via
+ * `trendGuardProgressCopy` - owner ruling, 2026-07-25, replaced the old
+ * "M/{guard} challenges" played-OR-DNF progress fraction once the guard
+ * became flat/completions-only), never a bare rejection (council note). All
+ * trend copy (the guard number itself, and every progress line) reads off
+ * the server-echoed `trends.guard` - never re-derived client-side (F5) - so
+ * a future guard-formula change can't silently disagree between server and
+ * client. Each ranked row also shows its own avg time/clicks across its
+ * counted completions (display-only info columns, owner ruling 2026-07-25 -
+ * the SORT stays `avgPlacement`) plus a muted ▲/▼/– trend arrow (F3)
+ * comparing its `avgPlacement` against the immediately-preceding same-length
+ * window (server-computed as `prevAvgPlacement`); lifetime never gets one
+ * (no "previous window" to compare against). A failed trends fetch renders
+ * an error banner + Retry (F6), never the "no one has cleared the guard" empty
  * state - that empty state is reserved for a real zero-ranked response.
  *
  * "Today" reuses `heroSelection` - AppShell's `homeHero` (PKG-01), the exact
@@ -552,7 +555,7 @@ export default function Boards({
         ) : (
           <>
             <p className="board-trend-subheader muted">
-              Rolling {TREND_PROSE_LABEL[segment]} · ranked by average placement · play {"≥"}{guard} challenges to rank
+              Rolling {TREND_PROSE_LABEL[segment]} · ranked by average placement · {trendGuardProgressCopy(0, guard)}.
             </p>
 
             <section className="board-snippet" aria-label={`${SEGMENT_LABEL[segment]} rolling trend`}>
@@ -574,8 +577,8 @@ export default function Boards({
                             {row.displayName ?? "Unknown"}
                             {isYou ? <span className="muted"> (you)</span> : null}
                           </span>
-                          <span>
-                            avg #{row.avgPlacement.toFixed(1)} ({row.playedCount} challenges){" "}
+                          <span className="trend-row-score">
+                            avg #{row.avgPlacement.toFixed(1)} · {formatTimeAndClicks(row.avgElapsedMs, row.avgClicks)}{" "}
                             <span aria-label={trendArrowLabel(row)} className="trend-arrow muted">
                               {trendArrowGlyph(row)}
                             </span>
@@ -607,13 +610,24 @@ export default function Boards({
                 // Boards' own unranked section already uses below. Reads off
                 // the same server-echoed `guard` this branch's own presence
                 // already guarantees is non-null (F5 - never hardcode it).
+                // Owner ruling, 2026-07-25: "played" -> "finished" - a DNF no
+                // longer helps clear this guard (see `listDailyTrends`).
                 <p className="muted">
-                  Nobody&apos;s played enough challenges to rank yet — play {guard} to show up here.
+                  Nobody&apos;s finished enough races to rank yet — finish {guard} to show up here.
                 </p>
               )}
             </section>
 
             {unrankedRows.length ? (
+              // Owner ruling, 2026-07-25 ("metric-independent ranking
+              // changes"): the "runway" - every row here has cleared 0 but
+              // not `guard` counted completions (only ever exactly `guard -
+              // 1` in practice, since the server never returns a
+              // zero-completion account in this list at all - see
+              // `listDailyTrends`). Replaces the old "{playedCount}/{guard}
+              // challenges" progress fraction with `trendGuardProgressCopy`'s
+              // "Finish N more race(s) to rank" - the same copy Home's
+              // below-guard streak/trend chip uses, off the same numbers.
               <section className="board-snippet board-trend-unranked muted" aria-label="Not yet ranked">
                 <h3>Not yet ranked</h3>
                 <ol>
@@ -625,7 +639,7 @@ export default function Boards({
                           {row.displayName ?? "Unknown"}
                           {isYou ? <span className="muted"> (you)</span> : null}
                         </span>
-                        <span>{row.playedCount}/{guard} challenges</span>
+                        <span>{trendGuardProgressCopy(row.playedCount, guard)}</span>
                       </li>
                     );
                   })}
@@ -652,7 +666,7 @@ export default function Boards({
               <section className="board-snippet board-roster muted" aria-label="Everyone who's played">
                 <h3>Everyone who&apos;s played</h3>
                 <p className="board-roster-explainer muted">
-                  Challenge rankings need {guard} played challenges — every racer counts here.
+                  Challenge rankings need {guard} finished races — every racer counts here.
                 </p>
                 {roster.length ? (
                   <ol>

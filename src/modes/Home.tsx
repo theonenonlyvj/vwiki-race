@@ -10,6 +10,7 @@ import {
   type HomeHeroSelection,
 } from "../domain/challengeSelection";
 import { dailyFlavorBadgeText } from "../domain/dailyEditorial";
+import { trendGuardProgressCopy } from "../domain/dailyTrends";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { PlayAnotherSuggestionState } from "../domain/playAnother";
 import type { AccountStats, CatalogStatus, Challenge } from "../domain/types";
@@ -542,17 +543,21 @@ export default function Home({
  * change it - it's the daily-ritual metric).
  *
  * F4 (council acceptance): a below-guard trend no longer goes silent - it
- * shows the same muted "M/{guard} challenges" progress framing Boards' own
- * unranked section uses, so a below-guard account still sees *something*
- * moving instead of a chip that just isn't there. PKG-14, generalized by
- * FB-10: `trend30.guard` is read straight off the server's response
- * (reality-scaled off however many ACTIVE challenges actually exist, not a
- * fixed constant) - never hardcoded or re-derived here, same F5 discipline
- * Boards' own guard copy follows. `trend30` itself now aggregates every
- * challenge a player raced in the last 30 days (created within that
- * window), not just dailies - the copy below says "challenges" accordingly.
- * The whole row still disappears when there's truly nothing to show yet -
- * no streak and zero challenges played, ever (a brand-new account).
+ * shows the same muted `trendGuardProgressCopy` ("Finish N (more) race(s) to
+ * rank", domain/dailyTrends.ts) progress framing Boards' own runway section
+ * uses, so a below-guard account still sees *something* moving instead of a
+ * chip that just isn't there. PKG-14, generalized by FB-10, amended by owner
+ * ruling 2026-07-25 ("metric-independent ranking changes"): `trend30.guard`
+ * is read straight off the server's response - now a flat constant
+ * (`DAILY_TREND_INCLUSION_FLOOR`), not reality-scaled off catalog size - and
+ * `trend30.playedCount` in the below-guard branch means COUNTED COMPLETIONS
+ * only, same redefinition `listDailyTrends` applies. Never hardcoded or
+ * re-derived here, same F5 discipline Boards' own guard copy follows.
+ * `trend30` itself still aggregates every challenge a player raced in the
+ * last 30 days (created within that window), not just dailies - FB-10,
+ * unaffected by the 2026-07-25 ruling. The whole row still disappears when
+ * there's truly nothing to show yet - no streak and zero challenges played,
+ * ever (a brand-new account).
  *
  * PKG-06 (council 2026-07-19, owner-proxy ruling, Judge A rescope): a guest
  * with no identified session at all (`stats === null` because there's
@@ -587,7 +592,7 @@ function StreakTrendRow({
       {dailyStreak > 0 ? " · " : null}
       {trend30.ranked
         ? `30-day avg #${trend30.avgPlacement?.toFixed(1)} (${trend30.playedCount} challenges)`
-        : `${trend30.playedCount}/${trend30.guard} challenges`}
+        : trendGuardProgressCopy(trend30.playedCount, trend30.guard)}
     </p>
   );
 }

@@ -814,3 +814,131 @@ describe("daily challenge D1 jobs", () => {
     expect(createTracking).not.toHaveBeenCalled();
   });
 });
+
+async function insertZzAccountRun(accountId: string, publicName: string, runId: string): Promise<void> {
+  await env.VWIKI_RACE_DB.prepare(
+    `INSERT INTO account_profiles (account_id, public_name, identity_status, updated_at)
+     VALUES (?, ?, 'claimed', '2026-07-15T00:00:00.000Z')`,
+  ).bind(accountId, publicName).run();
+  await env.VWIKI_RACE_DB.prepare(
+    `INSERT INTO runs
+       (id, challenge_id, account_id, canonical_account_id, status, started_at,
+        completed_at, elapsed_ms, wall_elapsed_ms, click_count, start_title,
+        target_title, final_title, start_page_id, target_page_id, last_page_id,
+        last_title, expires_at, ranked_eligible, protocol_version, created_at,
+        updated_at)
+     VALUES (?, 'challenge-0001', ?, ?, 'completed', '2026-07-15T01:00:00.000Z',
+             '2026-07-15T01:00:04.000Z', 4000, 4000, 3, 'Moon', 'Gravity',
+             'Gravity', 19331, 38579, 38579, 'Gravity',
+             '2026-07-16T01:00:00.000Z', 1, 2,
+             '2026-07-15T01:00:00.000Z', '2026-07-15T01:00:04.000Z')`,
+  ).bind(runId, accountId, accountId).run();
+}
+
+describe("auto zz-sweep (owner ruling, 2026-07-25 - metric-independent ranking changes)", () => {
+  it("flips board_excluded for a zz-prefixed account's run on the hourly retry tick, even when there's no due daily job", async () => {
+    await insertZzAccountRun("zz-worker-account", "zztest", "zz-worker-run");
+
+    const findCandidate = vi.fn();
+    const repository = createD1TrackingRepository({
+      db: env.VWIKI_RACE_DB,
+      now: () => new Date("2026-07-15T11:17:00.000Z"),
+    });
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: {},
+        identity: {},
+        runProtocol: repository,
+        authorize: async () => { throw new Error("not used"); },
+      } as unknown as WorkerTracking),
+      createDailyCandidateSource: () => ({ findCandidate }),
+      now: () => new Date("2026-07-15T11:17:00.000Z"),
+    });
+
+    await worker.scheduled(createScheduledController({
+      scheduledTime: new Date("2026-07-15T11:17:00.000Z"),
+      cron: "17 * * * *",
+    }), env as unknown as WorkerEnv);
+
+    // No due daily job exists (same fixture shape as the pre-existing "does
+    // not contact Wikipedia" test above) - the sweep still ran, after that
+    // no-op daily-job logic.
+    expect(findCandidate).not.toHaveBeenCalled();
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT board_excluded FROM runs WHERE id = 'zz-worker-run'",
+    ).first()).resolves.toEqual({ board_excluded: 1 });
+  });
+
+  it("runs the sweep even when the daily-job branch itself fails, without masking that failure", async () => {
+    await insertZzAccountRun("zz-worker-failure-account", "zzfailuretest", "zz-worker-failure-run");
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO daily_challenge_jobs
+         (daily_date, status, attempt_count, next_attempt_at, created_at, updated_at)
+       VALUES ('2026-07-11', 'pending', 0, '2026-07-15T11:00:00.000Z', '2026-07-15T00:00:00.000Z', '2026-07-15T00:00:00.000Z')`,
+    ).run();
+    const repository = createD1TrackingRepository({
+      db: env.VWIKI_RACE_DB,
+      now: () => new Date("2026-07-15T11:17:00.000Z"),
+    });
+    const findCandidate = vi.fn(async () => {
+      throw new ApiError("daily_candidate_unavailable", "No candidate.", 502);
+    });
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: {},
+        identity: {},
+        runProtocol: repository,
+        authorize: async () => { throw new Error("not used"); },
+      } as unknown as WorkerTracking),
+      createDailyCandidateSource: () => ({ findCandidate }),
+      now: () => new Date("2026-07-15T11:17:00.000Z"),
+    });
+
+    await expect(worker.scheduled(createScheduledController({
+      scheduledTime: new Date("2026-07-15T11:17:00.000Z"),
+      cron: "17 * * * *",
+    }), env as unknown as WorkerEnv)).rejects.toBeInstanceOf(ApiError);
+
+    // The daily-job failure still propagates (unchanged contract) - but the
+    // sweep ran anyway, in its own `finally`, before that rejection surfaced.
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT board_excluded FROM runs WHERE id = 'zz-worker-failure-run'",
+    ).first()).resolves.toEqual({ board_excluded: 1 });
+  });
+
+  it("does not run the sweep on the daily-drop cron, only the hourly retry trigger", async () => {
+    await insertZzAccountRun("zz-daily-cron-account", "zzskip", "zz-daily-cron-run");
+
+    const findCandidate = vi.fn(async () => ({
+      startTitle: "Sweep scope start",
+      startPageId: 9001,
+      startAllowedLinkCount: 8,
+      targetTitle: "Sweep scope target",
+      targetPageId: 9002,
+      selectedScore: 60,
+    }));
+    const repository = createD1TrackingRepository({
+      db: env.VWIKI_RACE_DB,
+      now: () => new Date("2026-07-15T10:00:00.000Z"),
+    });
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: {},
+        identity: {},
+        runProtocol: repository,
+        authorize: async () => { throw new Error("not used"); },
+      } as unknown as WorkerTracking),
+      createDailyCandidateSource: () => ({ findCandidate }),
+      now: () => new Date("2026-07-15T10:00:00.000Z"),
+    });
+
+    await worker.scheduled(createScheduledController({
+      scheduledTime: new Date("2026-07-15T10:00:00.000Z"),
+      cron: "0 10 * * *",
+    }), env as unknown as WorkerEnv);
+
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT board_excluded FROM runs WHERE id = 'zz-daily-cron-run'",
+    ).first()).resolves.toEqual({ board_excluded: 0 });
+  });
+});

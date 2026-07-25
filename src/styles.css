@@ -1417,6 +1417,15 @@ h1 {
   white-space: nowrap;
 }
 
+/* Owner ruling, 2026-07-25 ("metric-independent ranking changes"): the
+   ranked row's avg-placement/time/clicks column - same DT-1 tabular-digit
+   rule as every other time·clicks column in the app (`.board-snippet`'s own
+   3rd column, `.leaderboard-player`'s first span) so the digits don't shift
+   width as rows re-render. */
+.trend-row-score {
+  font-variant-numeric: tabular-nums;
+}
+
 /* PKG-10 follow-on: this is the ranked `<li>`'s second child once expanded
    (the toggle button is the first) - now that the toggle spans the li's
    full 3-column width via `grid-column: 1 / -1`, the row-flow auto-

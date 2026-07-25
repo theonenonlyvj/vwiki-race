@@ -34,10 +34,66 @@ function dailyTrendGuardCap(windowDays: TrendWindowDays): number {
  * counts every ACTIVE challenge created in the window (not just
  * `daily_features` rows) - see `listDailyTrends` and
  * `partitionChallengesByTrendWindow`'s `activeCount`.
+ *
+ * SUPERSEDED for `listDailyTrends`'s own ranked/unranked split (owner
+ * ruling, 2026-07-25 - "metric-independent ranking changes"): reality-scaling
+ * turned out to be the wrong axis entirely - it scaled off catalog SIZE, not
+ * whether an account had actually finished anything, so a padded `playedCount`
+ * (DNFs counted alongside finishes, see the old `dnf_days`/`played_days`
+ * CTEs `listDailyTrends` used to build) could clear a guard of 1 or 2 without
+ * a single completed race. `listDailyTrends` now uses the flat
+ * `DAILY_TREND_INCLUSION_FLOOR` below instead, gated on COMPLETIONS only.
+ * This function and its cap are kept exactly as they were (still fully
+ * tested by `dailyTrends.test.ts`) since nothing here was wrong on its own
+ * terms - they're simply unused by `listDailyTrends` now. Do not wire this
+ * back in without another explicit owner ruling.
  */
 export function dailyTrendGuard(windowDays: TrendWindowDays, challengesAvailable: number): number {
   const cap = dailyTrendGuardCap(windowDays);
   return Math.min(cap, Math.max(1, Math.ceil(challengesAvailable / 3)));
+}
+
+/**
+ * Owner ruling, 2026-07-25 ("metric-independent ranking changes"): replaces
+ * `dailyTrendGuard`'s reality-scaled formula for `listDailyTrends`'s own
+ * ranked/unranked split with a flat, constant floor - ranked = an account
+ * with at least this many COUNTED COMPLETIONS in the window (completed +
+ * `board_excluded = 0`, best attempt per challenge - the same dedup
+ * `listDailyTrends`'s own `placements` CTE already applies). Deliberately
+ * NOT scaled by catalog size and deliberately NOT the same "played"
+ * definition `listChallengeDnfs`/`listAllPlayersRoster`/
+ * `getAccountDailyStreak` still use elsewhere (a board-visible DNF still
+ * counts toward "played" everywhere else, per FB-7) - a DNF no longer helps
+ * an account clear THIS guard at all, only a genuine finish does. Still
+ * server-echoed on `BoardsTrendsResponse.guard`/`AccountStats.trend30.guard`
+ * exactly like the old reality-scaled value was - the client never
+ * hardcodes it (F5).
+ */
+export const DAILY_TREND_INCLUSION_FLOOR = 2;
+
+/**
+ * Owner-directed copy for an account below `DAILY_TREND_INCLUSION_FLOOR`
+ * (Boards' "not yet ranked" runway list, and Home's below-guard streak/trend
+ * chip - both read off the exact same `listDailyTrends` numbers and must
+ * never drift apart). Replaces the old "{playedCount}/{guard} challenges"
+ * progress framing (a played-OR-DNF count against a reality-scaled guard)
+ * now that the guard is flat and purely completion-based:
+ *
+ * - Zero completions yet: the plain instruction ("Finish 2 races to rank") -
+ *   there's no personal progress to acknowledge.
+ * - At least one completion: "Finish {remaining} more race(s) to rank" - the
+ *   "more" acknowledges the completions already banked.
+ *
+ * `completedCount` is expected to be `< guard` (ranked accounts don't call
+ * this) but the remaining-count math degrades gracefully (clamped to >= 0)
+ * if it's ever called with a cleared count.
+ */
+export function trendGuardProgressCopy(completedCount: number, guard: number): string {
+  const remaining = Math.max(0, guard - completedCount);
+  const races = `race${remaining === 1 ? "" : "s"}`;
+  return completedCount > 0
+    ? `Finish ${remaining} more ${races} to rank`
+    : `Finish ${remaining} ${races} to rank`;
 }
 
 /**

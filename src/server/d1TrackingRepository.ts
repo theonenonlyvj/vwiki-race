@@ -9,7 +9,7 @@ import type {
 import { dailyFlavorForCentralDate } from "../domain/dailyEditorial";
 import { centralDateKey, previousCentralDate } from "../domain/challengeSelection";
 import {
-  dailyTrendGuard,
+  DAILY_TREND_INCLUSION_FLOOR,
   dailyTrendWindowCreatedAtBounds,
   partitionChallengesByTrendWindow,
 } from "../domain/dailyTrends";
@@ -2490,14 +2490,17 @@ export function createD1TrackingRepository(options: {
       // filters 7d/30d with exactly 2 fixed `created_at` binds via
       // `dailyTrendWindowCreatedAtBounds` - see the "300 in-window
       // challenges" bind-cap regression test.
+      //
+      // Owner ruling, 2026-07-25 ("metric-independent ranking changes"):
+      // the guard is now the flat `DAILY_TREND_INCLUSION_FLOOR`, not
+      // reality-scaled off how many ACTIVE challenges exist in the window -
+      // so unlike before FB-10's fixer pass, this function no longer needs
+      // an `activeCount`/active-challenge tally at all (lifetime's old
+      // dedicated `count(*) ... WHERE is_active = 1` read is gone; 7d/30d's
+      // partition below is now purely for the empty-window fast path and
+      // the `ids`-derived early return, never a guard input).
       let windowedIds: string[] | null = null;
-      let activeChallengesInWindow: number;
-      if (windowDays === null) {
-        const activeRow = await db
-          .prepare(`SELECT count(*) available FROM challenges WHERE is_active = 1`)
-          .first<{ available: number }>();
-        activeChallengesInWindow = Number(activeRow?.available ?? 0);
-      } else {
+      if (windowDays !== null) {
         // A single, always-cheap, zero-bind read of the whole (small)
         // challenge catalog - window membership itself needs the real
         // Central date of each `created_at` (DST-correct, via
@@ -2516,17 +2519,9 @@ export function createD1TrackingRepository(options: {
           todayCentral,
         );
         windowedIds = partition.ids;
-        activeChallengesInWindow = partition.activeCount;
       }
 
-      // PKG-14: the participation guard is reality-scaled off how many
-      // ACTIVE challenges exist in this exact window (lifetime = ever) -
-      // FB-10: a retired/deactivated challenge (however recently created)
-      // never inflates it, but the `challengeFilterSql` subquery below still
-      // includes it (no `is_active` filter there), so a challenge a user
-      // played before it was deactivated still counts in their
-      // `played_count` numerator.
-      const guard = dailyTrendGuard(windowDays, activeChallengesInWindow);
+      const guard = DAILY_TREND_INCLUSION_FLOOR;
 
       // No challenge at all exists in this window (young catalog, or a
       // genuinely empty stretch) - nothing to rank or count either way. Zero
@@ -2557,23 +2552,23 @@ export function createD1TrackingRepository(options: {
       // truncated per-challenge field would silently distort every
       // account's average once aggregated across many challenges.
       //
-      // F2 (spec §Boards "≥1 eligible/leaderboard-visible run"), amended by
-      // FB-7 (owner ruling, 2026-07-19): a board-visible DNF (>=
-      // MIN_COUNTED_DNF_CLICKS, same eligibility shape as
-      // `listChallengeDnfs`) counts toward `played_count` alongside
-      // completed challenges, but `avg_placement` stays over `placements`
-      // only (finished challenges) - `played_days` is a distinct UNION of
-      // finished-challenge and DNF-challenge per account so a challenge
-      // that's both (unusual, but harmless) doesn't double-count.
-      // Sub-threshold (0/1-click) DNFs are non-attempts and never enter
-      // `played_days`.
+      // Owner ruling, 2026-07-25 ("metric-independent ranking changes"):
+      // this query used to also union in board-visible DNF challenges
+      // (`dnf_days`/`played_days`) so a DNF alone could count toward
+      // `played_count` (F2, amended by FB-7) - that's gone. The base row set
+      // is now `placements` alone (completed + board_excluded = 0, best
+      // attempt per challenge), so `completed_count`/`avg_placement`/
+      // `avg_elapsed_ms`/`avg_click_count` are all the exact same
+      // denominator - an account with zero finishes in the window (never
+      // played, or DNF-only) produces no row here at all and is absent from
+      // both `ranked` and `unranked`.
       const { results } = await db
         .prepare(
           `WITH resolved AS (
              SELECT r.challenge_id,
                     coalesce(a.canonical_account_id, r.canonical_account_id, r.account_id) account_id,
                     r.id, r.status, r.elapsed_ms, r.click_count, r.completed_at,
-                    r.abandoned_at, r.protocol_version, r.ranked_eligible
+                    r.protocol_version, r.ranked_eligible
              FROM runs r
              LEFT JOIN account_aliases a
                ON a.alias_account_id = coalesce(r.canonical_account_id, r.account_id)
@@ -2593,61 +2588,52 @@ export function createD1TrackingRepository(options: {
              ) attempt_rank
              FROM finished
            ), placements AS (
-             SELECT challenge_id, account_id,
+             SELECT challenge_id, account_id, elapsed_ms, click_count,
                     row_number() OVER (
                       PARTITION BY challenge_id
                       ORDER BY elapsed_ms ASC, click_count ASC, completed_at ASC, id
                     ) placement
              FROM best
              WHERE attempt_rank = 1
-           ), dnf_days AS (
-             SELECT DISTINCT challenge_id, account_id
-             FROM resolved
-             WHERE status = 'abandoned'
-               AND click_count >= ?
-               AND elapsed_ms IS NOT NULL
-               AND abandoned_at IS NOT NULL
-           ), played_days AS (
-             SELECT account_id, challenge_id FROM placements
-             UNION
-             SELECT account_id, challenge_id FROM dnf_days
-           ), played AS (
-             SELECT account_id, count(*) played_count
-             FROM played_days
-             GROUP BY account_id
            ), avgs AS (
-             SELECT account_id, avg(placement) avg_placement
+             SELECT account_id,
+                    avg(placement) avg_placement,
+                    count(*) completed_count,
+                    avg(elapsed_ms) avg_elapsed_ms,
+                    avg(click_count) avg_click_count
              FROM placements
              GROUP BY account_id
            )
-           SELECT played.account_id, avgs.avg_placement,
-                  played.played_count, p.public_name AS display_name
-           FROM played
-           LEFT JOIN avgs ON avgs.account_id = played.account_id
-           LEFT JOIN account_profiles p ON p.account_id = played.account_id`,
+           SELECT avgs.account_id, avgs.avg_placement, avgs.completed_count,
+                  avgs.avg_elapsed_ms, avgs.avg_click_count,
+                  p.public_name AS display_name
+           FROM avgs
+           LEFT JOIN account_profiles p ON p.account_id = avgs.account_id`,
         )
-        .bind(...challengeFilterBindings, MIN_COUNTED_DNF_CLICKS)
+        .bind(...challengeFilterBindings)
         .all<DailyTrendQueryRow>();
 
       const ranked: DailyTrendRankedEntry[] = [];
       const unranked: DailyTrendUnrankedEntry[] = [];
       for (const row of results) {
-        const playedCount = Number(row.played_count);
+        // `avgs` is built from `placements` alone, so every row here has at
+        // least one counted completion (`completed_count >= 1`) - there is
+        // no zero-completion row to handle.
+        const completedCount = Number(row.completed_count);
         const displayName = row.display_name ?? null;
-        // An account can clear the participation guard on DNF days alone
-        // (no finishes at all) - `avg_placement` is then `null` (nothing to
-        // average), and there's no meaningful placement to rank by, so it
-        // reads as unranked-with-progress rather than a ranked row with a
-        // fabricated average.
-        if (playedCount >= guard && row.avg_placement !== null) {
+        if (completedCount >= guard) {
           ranked.push({
             accountId: row.account_id,
             displayName,
             avgPlacement: Math.round(Number(row.avg_placement) * 10) / 10,
-            playedCount,
+            playedCount: completedCount,
+            avgElapsedMs: Math.round(Number(row.avg_elapsed_ms)),
+            avgClicks: Math.round(Number(row.avg_click_count) * 10) / 10,
           });
         } else {
-          unranked.push({ accountId: row.account_id, displayName, playedCount });
+          // The "runway" - below the floor, but with at least one real
+          // finish already banked (see `trendGuardProgressCopy`).
+          unranked.push({ accountId: row.account_id, displayName, playedCount: completedCount });
         }
       }
       ranked.sort((left, right) =>
@@ -2748,6 +2734,28 @@ export function createD1TrackingRepository(options: {
         right.wins - left.wins ||
         (left.displayName ?? "").localeCompare(right.displayName ?? ""));
       return roster;
+    },
+
+    async sweepZzExcludedTestAccountRuns() {
+      // Owner ruling, 2026-07-25 ("metric-independent ranking changes"):
+      // deliberately the exact SQL the owner specified - matches on
+      // `runs.canonical_account_id` directly (stamped at run-creation time,
+      // see `startRunV2`'s INSERT), not the `account_aliases`-resolved
+      // identity every READ query in this file uses. Idempotent: the
+      // `board_excluded = 0` guard means a repeat call only ever touches
+      // rows this sweep (or a manual moderation UPDATE) hasn't already
+      // caught, so running it every hour regardless of whether anything
+      // changed is always safe.
+      const result = await db
+        .prepare(
+          `UPDATE runs SET board_excluded = 1
+           WHERE board_excluded = 0
+             AND canonical_account_id IN (
+               SELECT account_id FROM account_profiles WHERE public_name LIKE 'zz%'
+             )`,
+        )
+        .run();
+      return mutationChanges(result);
     },
 
     async getAccountDailyStreak(accountId, todayCentral) {
@@ -5555,10 +5563,12 @@ interface ChallengeOutcomeQueryRow {
 
 interface DailyTrendQueryRow {
   account_id: string;
-  // F2: `null` for an account whose played days are all DNFs (no
-  // finishes at all) - `avgs` is a LEFT JOIN against `played`.
+  // Never null in practice - `avgs` (and this whole query) is built from
+  // `placements` alone, so every row has at least one counted completion.
   avg_placement: number | null;
-  played_count: number;
+  completed_count: number;
+  avg_elapsed_ms: number;
+  avg_click_count: number;
   display_name?: string | null;
 }
 
