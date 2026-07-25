@@ -1500,6 +1500,7 @@ describe("VWiki Race app", () => {
     const repository: VGamesIdentityRepository = {
       clearSession: vi.fn(),
       getDeviceCredential: () => "device-credential",
+      getLastDisplayName: () => null,
       getSession: () => null,
       saveSession: () => {
         throw new DOMException("Storage blocked", "SecurityError");
@@ -3053,15 +3054,166 @@ describe("VWiki Race app", () => {
     // literal `/^you$/i` match can legitimately never (re)appear. Both
     // labels route to the same "you" mode/panel this test actually cares
     // about, so match either.
-    await user.click(await screen.findByRole("button", { name: /^(you|log in)$/i }));
-
+    //
+    // De-flake (2026-07-25, session-durability package): even the
+    // either-label match still raced - findByRole could resolve the "You"
+    // button an instant BEFORE the background clear commits, NV-1 then
+    // swaps the label and React replaces the node, and user-event throws on
+    // (or no-ops against) the now-detached element it had already resolved.
+    // Waiting for the clear to land in storage FIRST makes the nav label
+    // stable ("Log In") before the click is ever dispatched - same
+    // coverage, one fewer cross-chain race.
     await waitFor(() => expect(storage.getItem("vwiki-race:vgames-session")).toBeNull());
+    await user.click(await screen.findByRole("button", { name: /^(you|log in)$/i }));
     // "Honest You": a cleared identity lands in State A - NV-1's explicit
     // status line + Log in/Create account pair, not a static "Current
     // player" status readout (and no more bare "Guest" chip either).
     expect(screen.getByText("Not logged in.")).toBeVisible();
     expect(screen.queryByRole("button", { name: /guest - tap to manage/i })).toBeNull();
     expect(screen.queryByText("7")).toBeNull();
+  });
+
+  // Session durability (owner ask 2026-07-25: "can we persist my login
+  // creds, or someone's chosen name?"): the four tests below pin the rule
+  // that TRANSIENT failures never clear the stored session - only a true
+  // auth rejection (a real 401/"unauthorized" from a healthy upstream) or
+  // an explicit user action may. The worker keeps the two distinguishable
+  // on purpose: a failed identity-service introspect surfaces as
+  // 503 "vgames_identity_unavailable" / 504 "vgames_identity_timeout"
+  // (src/server/vgamesIdentityClient.ts), never as a synthesized 401.
+  it("keeps the stored session when the stats projection fails transiently (identity service unavailable)", async () => {
+    const storage = claimedStorage();
+    const fetchImpl = createFetchMock({
+      statsFailure: { status: 503, code: "vgames_identity_unavailable" },
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
+
+    await user.click(await screen.findByRole("button", { name: /^you$/i }));
+
+    // The existing degraded affordance shows (RC-06's inline error + Retry)...
+    expect(await screen.findByText(/couldn't load your stats/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: /^retry$/i })).toBeVisible();
+    // ...but the session itself SURVIVES: still logged in, token still
+    // stored, no login sheet forced open.
+    expect(screen.getByRole("status", { name: /vijay, logged in/i })).toBeVisible();
+    expect(JSON.parse(storage.getItem("vwiki-race:vgames-session") ?? "{}")).toMatchObject({
+      token: "jwt-claimed",
+    });
+    expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull();
+    expect(screen.queryByText("Not logged in.")).toBeNull();
+  });
+
+  it("keeps the stored session when the stats projection times out upstream (proxy-mapped 504)", async () => {
+    const storage = claimedStorage();
+    const fetchImpl = createFetchMock({
+      statsFailure: { status: 504, code: "vgames_identity_timeout" },
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
+
+    await user.click(await screen.findByRole("button", { name: /^you$/i }));
+
+    expect(await screen.findByText(/couldn't load your stats/i)).toBeVisible();
+    expect(screen.getByRole("status", { name: /vijay, logged in/i })).toBeVisible();
+    expect(JSON.parse(storage.getItem("vwiki-race:vgames-session") ?? "{}")).toMatchObject({
+      token: "jwt-claimed",
+    });
+  });
+
+  it("still clears the stored session on a true 401 from the very first stats read (healthy upstream, invalid token)", async () => {
+    const storage = claimedStorage();
+    const fetchImpl = createFetchMock({
+      statsFailure: { status: 401, code: "unauthorized" },
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
+
+    await waitFor(() => expect(storage.getItem("vwiki-race:vgames-session")).toBeNull());
+    await user.click(await screen.findByRole("button", { name: /^(you|log in)$/i }));
+    expect(screen.getByText("Not logged in.")).toBeVisible();
+    // The wipe is scoped to the SESSION: the device identity survives - the
+    // last-known display name is captured for the next guest prefill.
+    expect(storage.getItem("vwiki-race:vgames-last-display-name")).toBe("Vijay");
+  });
+
+  it("prefills the guest name after a stale-identity wipe - the chosen name outlives the cleared session", async () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      "vwiki-race:vgames-session",
+      JSON.stringify({ accountId: "acc-guest", displayName: "Nimbus", token: "jwt-stale", status: "ghost" }),
+    );
+    // Only the seeded stale token 401s - the fresh guest session minted on
+    // resume works normally, matching the real recovery shape.
+    const fetchImpl = createFetchMock({
+      statsFailure: { status: 401, code: "unauthorized", token: "jwt-stale" },
+    });
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
+
+    await waitFor(() => expect(storage.getItem("vwiki-race:vgames-session")).toBeNull());
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+
+    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    // The name input comes back PREFILLED with the wiped session's name -
+    // the device credential still maps to the same ghost server-side, so
+    // resuming is one tap, not a retype.
+    expect(within(dialog).getByLabelText(/display name/i)).toHaveValue("Nimbus");
+    await user.click(within(dialog).getByRole("button", { name: /continue as guest/i }));
+
+    expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
+    expect(JSON.parse(storage.getItem("vwiki-race:vgames-session") ?? "{}")).toMatchObject({
+      displayName: "Nimbus",
+      status: "ghost",
+    });
+  });
+
+  it("wires every identity-sheet input for password managers (autocomplete + name on real submit forms)", async () => {
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={memoryStorage()} />);
+
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const tabs = within(dialog).getByRole("group", { name: /identity options/i });
+
+    // Guest (default tab): the chosen name advertises itself as a nickname
+    // so browser autofill can offer it back on any device.
+    const guestName = within(dialog).getByLabelText(/display name/i);
+    expect(guestName).toHaveAttribute("autocomplete", "nickname");
+    expect(guestName).toHaveAttribute("name", "nickname");
+    expect(guestName.closest("form")).not.toBeNull();
+
+    // Create account: username + a new-password PAIR (both fields must say
+    // new-password or managers only generate into one of them).
+    await user.click(within(tabs).getByRole("button", { name: /create account/i }));
+    const createUsername = within(dialog).getByLabelText(/vgames username/i);
+    expect(createUsername).toHaveAttribute("autocomplete", "username");
+    expect(createUsername).toHaveAttribute("name", "username");
+    const createPassword = within(dialog).getByLabelText(/^password$/i);
+    expect(createPassword).toHaveAttribute("autocomplete", "new-password");
+    expect(createPassword).toHaveAttribute("name", "new-password");
+    const confirmPassword = within(dialog).getByLabelText(/confirm password/i);
+    expect(confirmPassword).toHaveAttribute("autocomplete", "new-password");
+    const createForm = createPassword.closest("form") as HTMLFormElement;
+    expect(createForm).not.toBeNull();
+    expect(within(createForm).getByRole("button", { name: /create account/i }))
+      .toHaveAttribute("type", "submit");
+
+    // Log in: username + current-password, submitted through a real form so
+    // the browser sees a genuine credential submission and offers to save.
+    await user.click(within(tabs).getByRole("button", { name: /^log in$/i }));
+    const loginUsername = within(dialog).getByLabelText(/^username$/i);
+    expect(loginUsername).toHaveAttribute("autocomplete", "username");
+    expect(loginUsername).toHaveAttribute("name", "username");
+    const loginPassword = within(dialog).getByLabelText(/^password$/i);
+    expect(loginPassword).toHaveAttribute("autocomplete", "current-password");
+    expect(loginPassword).toHaveAttribute("name", "password");
+    const loginForm = loginPassword.closest("form") as HTMLFormElement;
+    expect(loginForm).not.toBeNull();
+    expect(within(loginForm).getByRole("button", { name: /^log in$/i }))
+      .toHaveAttribute("type", "submit");
   });
 
   it("clears a stale Create 401 identity and resumes the exact intent after login", async () => {
@@ -8685,6 +8837,18 @@ function createFetchMock(options?: {
   boardsTrendsFailOnce?: boolean;
   leaderboardContext?: { isPersonalBest: boolean; rank: number | null };
   statsUnauthorizedAfterFirst?: boolean;
+  // Session durability (owner ask 2026-07-25): fails EVERY stats read with
+  // the given status/code - deterministic from the boot-time proactive
+  // fetch onward, no run-ending flow needed to trigger a refetch. Models
+  // both a TRUE auth rejection (401/"unauthorized") and the worker's
+  // proxy-mapped transient introspect failures
+  // (503/"vgames_identity_unavailable", 504/"vgames_identity_timeout" -
+  // src/server/vgamesIdentityClient.ts), which must NEVER clear the session.
+  // Optional `token` scopes the failure to that bearer token only, so a
+  // test can invalidate a seeded stale session while a freshly-minted one
+  // keeps working - exactly the real "old token rejected, new login fine"
+  // shape.
+  statsFailure?: { status: number; code: string; token?: string };
   creationOutcome?: CreateChallengeOutcome;
   canManageDailies?: boolean;
   // Every fixture challenge's only known non-start link resolves straight
@@ -8866,6 +9030,14 @@ function createFetchMock(options?: {
     if (url === "/api/v2/accounts/me/stats") {
       statsReads += 1;
       if (options?.delayedAccountStats) return options.delayedAccountStats;
+      if (
+        options?.statsFailure &&
+        (!options.statsFailure.token ||
+          (init?.headers as Record<string, string> | undefined)?.Authorization ===
+            `Bearer ${options.statsFailure.token}`)
+      ) {
+        return jsonError(options.statsFailure.code, "Stats projection failed.", options.statsFailure.status);
+      }
       if (options?.statsUnauthorizedAfterFirst && statsReads > 1) {
         return jsonError("unauthorized", "Session expired.", 401);
       }
@@ -9299,11 +9471,13 @@ function identity(displayName: string, token: string): VGamesIdentitySession {
 
 function identityRepository(session: VGamesIdentitySession): VGamesIdentityRepository {
   let current: VGamesIdentitySession | null = session;
+  let lastDisplayName: string | null = session.displayName;
   return {
     clearSession: () => { current = null; },
     getDeviceCredential: () => "device-credential",
+    getLastDisplayName: () => lastDisplayName,
     getSession: () => current,
-    saveSession: (next) => { current = next; },
+    saveSession: (next) => { current = next; lastDisplayName = next.displayName; },
   };
 }
 

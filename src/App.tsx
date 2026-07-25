@@ -260,6 +260,25 @@ function readCachedIdentitySession(
 }
 
 /**
+ * Companion to readCachedIdentitySession above, for the name-draft
+ * initializer: the last display name any session on this device played
+ * under, which survives clearSession() by design (see
+ * VGamesIdentityRepository.getLastDisplayName). Lets a cold boot with NO
+ * live session - e.g. a stale token was wiped in a previous visit - still
+ * open the guest form prefilled with the name the device's ghost is already
+ * known by server-side, instead of a blank input that reads as "the app
+ * forgot me."
+ */
+function readCachedLastDisplayName(
+  storage: StorageLike | undefined,
+  injectedIdentityRepository: VGamesIdentityRepository | undefined,
+): string | null {
+  const resolvedStorage = storage ?? readBrowserStorage();
+  const repository = injectedIdentityRepository ?? createVGamesIdentityRepository(resolvedStorage);
+  return repository.getLastDisplayName();
+}
+
+/**
  * RC-03 (Judge B amendment 5, the lower-risk third option): content
  * equality for the fields that actually matter to the app, not object
  * identity. `readCachedIdentitySession` above builds a THROWAWAY repository
@@ -370,7 +389,8 @@ export default function App({
       () => readCachedIdentitySession(storage, injectedIdentityRepository),
     );
   const [displayNameDraft, setDisplayNameDraft] = useState(
-    () => readCachedIdentitySession(storage, injectedIdentityRepository)?.displayName ?? "",
+    () => readCachedIdentitySession(storage, injectedIdentityRepository)?.displayName ??
+      readCachedLastDisplayName(storage, injectedIdentityRepository) ?? "",
   );
   const [usernameDraft, setUsernameDraft] = useState(() => {
     const cached = readCachedIdentitySession(storage, injectedIdentityRepository);
@@ -1612,6 +1632,17 @@ export default function App({
     setAuthPrompt(null);
     setGhostGuard(null);
     setGhostGuardWaivedFor(new Set());
+    // Password-manager note (owner ask 2026-07-25): drafts clear on CLOSE,
+    // never on submit-success while the sheet is still up. Clearing a
+    // password input's value before the browser has seen the form go away
+    // can suppress Chrome/Safari's save-credentials prompt; here the
+    // setAuthPrompt(null) above unmounts the whole <form> in the SAME React
+    // commit, so the inputs are removed with their submitted values intact -
+    // the browser's provisional save (captured at submit time) is unaffected,
+    // and the plaintext password just stops lingering in App state after the
+    // sheet is gone.
+    setPasswordDraft("");
+    setConfirmPasswordDraft("");
   }
 
   async function continueAsGuest() {
@@ -1935,7 +1966,18 @@ export default function App({
     statsRequest.current += 1;
     setAccountStatsProjection(null);
     setIdentitySession(null);
-    setDisplayNameDraft("");
+    // Owner ask 2026-07-25 ("persist ... someone's chosen name"): a cleared
+    // SESSION deliberately does not blank the NAME draft anymore. The device
+    // credential survives every clear (see the doc comment above), and guest
+    // identity is a get-or-create keyed by it server-side - so after a
+    // stale-token wipe (or logout), "Continue as guest" with the same name
+    // resumes the SAME ghost. clearSession() persists the outgoing name; the
+    // draft keeps it prefilled so re-entry is one tap, not a retype. The
+    // "Play as someone else" flow still blanks it explicitly on open
+    // (openAuthPrompt's freshName branch), unchanged. The login/create
+    // drafts DO clear: username/password are password-manager territory, and
+    // an empty pair autofills cleaner than a half-guessed prefill.
+    setDisplayNameDraft(identityRepository.getLastDisplayName() ?? "");
     setUsernameDraft("");
     setPasswordDraft("");
     setConfirmPasswordDraft("");
@@ -2678,6 +2720,7 @@ function IdentityPrompt({
                   aria-label="Display name"
                   autoComplete="nickname"
                   maxLength={24}
+                  name="nickname"
                   onChange={(event) => onDisplayNameChange(event.target.value)}
                   placeholder="e.g. a nickname"
                   value={displayNameDraft}
@@ -2737,6 +2780,7 @@ function IdentityPrompt({
                 autoComplete="username"
                 maxLength={20}
                 minLength={3}
+                name="username"
                 onChange={(event) => onUsernameChange(event.target.value.toLowerCase())}
                 pattern="[a-z0-9_]{3,20}"
                 placeholder="e.g. vijay"
@@ -2752,6 +2796,7 @@ function IdentityPrompt({
                 autoComplete="new-password"
                 maxLength={128}
                 minLength={6}
+                name="new-password"
                 onChange={(event) => onPasswordChange(event.target.value)}
                 type="password"
                 value={passwordDraft}
@@ -2764,6 +2809,7 @@ function IdentityPrompt({
                 autoComplete="new-password"
                 maxLength={128}
                 minLength={6}
+                name="confirm-new-password"
                 onChange={(event) => onConfirmPasswordChange(event.target.value)}
                 type="password"
                 value={confirmPasswordDraft}

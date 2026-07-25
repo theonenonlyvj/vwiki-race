@@ -18,6 +18,17 @@ export interface VGamesIdentityRepository {
   getSession(): VGamesIdentitySession | null;
   saveSession(session: VGamesIdentitySession): void;
   clearSession(): void;
+  /** Owner ask 2026-07-25 ("persist ... someone's chosen name"): the last
+   *  display name any session on this device played under, surviving
+   *  `clearSession()` on purpose - a stale-token wipe (or a deliberate
+   *  logout) keeps the DEVICE CREDENTIAL, and guest identity is a
+   *  get-or-create keyed by that credential server-side, so the next
+   *  "Continue as guest" resumes the SAME ghost. Losing the typed name to a
+   *  cleared session while keeping the credential made identity feel
+   *  non-persistent: the sheet reopened with a blank name input for a ghost
+   *  the server still remembers. `null` only when no session has ever been
+   *  saved or cleared on this device. */
+  getLastDisplayName(): string | null;
 }
 
 export interface GuestIdentityInput {
@@ -114,6 +125,7 @@ export function vgamesIdentityErrorMessage(caught: unknown, fallback: string): s
 
 const CREDENTIAL_STORAGE_KEY = "vwiki-race:vgames-device-credential";
 const SESSION_STORAGE_KEY = "vwiki-race:vgames-session";
+const LAST_DISPLAY_NAME_STORAGE_KEY = "vwiki-race:vgames-last-display-name";
 const LEGACY_APP_KEY = ["viki", "pedia"].join("");
 const LEGACY_CREDENTIAL_STORAGE_KEY = `${LEGACY_APP_KEY}:vgames-device-credential`;
 const LEGACY_SESSION_STORAGE_KEY = `${LEGACY_APP_KEY}:vgames-session`;
@@ -126,6 +138,7 @@ export function createVGamesIdentityRepository(
 ): VGamesIdentityRepository {
   let memoryCredential: string | null = null;
   let memorySession: VGamesIdentitySession | null | undefined;
+  let memoryLastDisplayName: string | null | undefined;
   const safeStorage: StorageLike = {
     getItem(key) {
       try {
@@ -149,6 +162,29 @@ export function createVGamesIdentityRepository(
       }
     },
   };
+
+  // Plain closure, not a method referenced via `this` - repository methods
+  // are safe to pass around/destructure (test fakes and App callbacks both
+  // do), so nothing here may depend on call-site receiver binding.
+  function getSession(): VGamesIdentitySession | null {
+    if (memorySession !== undefined) {
+      return memorySession;
+    }
+
+    const session = readSession(safeStorage, SESSION_STORAGE_KEY);
+    if (session) {
+      memorySession = session;
+      return memorySession;
+    }
+
+    const legacySession = readSession(safeStorage, LEGACY_SESSION_STORAGE_KEY);
+    if (legacySession) {
+      safeStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(legacySession));
+      safeStorage.removeItem(LEGACY_SESSION_STORAGE_KEY);
+    }
+    memorySession = legacySession;
+    return memorySession;
+  }
 
   return {
     getDeviceCredential() {
@@ -176,28 +212,11 @@ export function createVGamesIdentityRepository(
       return memoryCredential;
     },
 
-    getSession() {
-      if (memorySession !== undefined) {
-        return memorySession;
-      }
-
-      const session = readSession(safeStorage, SESSION_STORAGE_KEY);
-      if (session) {
-        memorySession = session;
-        return memorySession;
-      }
-
-      const legacySession = readSession(safeStorage, LEGACY_SESSION_STORAGE_KEY);
-      if (legacySession) {
-        safeStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(legacySession));
-        safeStorage.removeItem(LEGACY_SESSION_STORAGE_KEY);
-      }
-      memorySession = legacySession;
-      return memorySession;
-    },
+    getSession,
 
     saveSession(session) {
       memorySession = session;
+      memoryLastDisplayName = session.displayName;
       safeStorage.setItem(
         SESSION_STORAGE_KEY,
         JSON.stringify({
@@ -207,13 +226,40 @@ export function createVGamesIdentityRepository(
           status: session.status,
         }),
       );
+      safeStorage.setItem(LAST_DISPLAY_NAME_STORAGE_KEY, session.displayName);
       safeStorage.removeItem(LEGACY_SESSION_STORAGE_KEY);
     },
 
     clearSession() {
+      // Capture the outgoing session's name BEFORE removing it - this is
+      // what lets a session that was written by an OLDER build (no
+      // last-display-name key yet) still leave its name behind when a
+      // stale-token wipe clears it. See getLastDisplayName's interface doc.
+      const outgoing = getSession();
+      if (outgoing) {
+        memoryLastDisplayName = outgoing.displayName;
+        safeStorage.setItem(LAST_DISPLAY_NAME_STORAGE_KEY, outgoing.displayName);
+      }
       memorySession = null;
       safeStorage.removeItem(SESSION_STORAGE_KEY);
       safeStorage.removeItem(LEGACY_SESSION_STORAGE_KEY);
+    },
+
+    getLastDisplayName() {
+      if (memoryLastDisplayName !== undefined) {
+        return memoryLastDisplayName;
+      }
+      const stored = safeStorage.getItem(LAST_DISPLAY_NAME_STORAGE_KEY);
+      // Older builds only ever wrote the session itself - fall back to the
+      // live session's name so the very first read after an upgrade still
+      // answers. Not cached in that fallback case (no key written either):
+      // reads stay side-effect-free; the key appears on the next
+      // saveSession/clearSession.
+      if (stored === null) {
+        return getSession()?.displayName ?? null;
+      }
+      memoryLastDisplayName = stored;
+      return memoryLastDisplayName;
     },
   };
 }

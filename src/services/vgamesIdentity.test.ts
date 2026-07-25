@@ -68,6 +68,49 @@ describe("VGames identity repository", () => {
     expect(repository.getSession()).toBeNull();
   });
 
+  // Session durability (owner ask 2026-07-25): the chosen display name
+  // outlives the session on purpose - the device credential survives every
+  // clear, and guest identity is a get-or-create keyed by it server-side,
+  // so the name is the only piece a wipe used to lose.
+  it("remembers the last display name across clearSession and repository instances", () => {
+    const storage = memoryStorage();
+    const repository = createVGamesIdentityRepository(storage);
+
+    expect(repository.getLastDisplayName()).toBeNull();
+
+    repository.saveSession({
+      accountId: "acc-1",
+      displayName: "Nimbus",
+      token: "jwt-1",
+      status: "ghost",
+    });
+    repository.clearSession();
+
+    expect(repository.getSession()).toBeNull();
+    expect(repository.getLastDisplayName()).toBe("Nimbus");
+    // Survives a full reload (a brand-new repository over the same storage).
+    expect(createVGamesIdentityRepository(storage).getLastDisplayName()).toBe("Nimbus");
+  });
+
+  it("captures the name from a session written by an older build when clearing it", () => {
+    const storage = memoryStorage();
+    // Seeded session only - no last-display-name key exists yet (the shape
+    // every real device had before this feature shipped).
+    storage.setItem(
+      "vwiki-race:vgames-session",
+      JSON.stringify({ accountId: "acc-1", displayName: "Vijay", token: "jwt-1", status: "claimed" }),
+    );
+    const repository = createVGamesIdentityRepository(storage);
+
+    // Readable even before any write, via the live-session fallback...
+    expect(repository.getLastDisplayName()).toBe("Vijay");
+
+    // ...and durably captured by the clear itself.
+    repository.clearSession();
+    expect(storage.getItem("vwiki-race:vgames-last-display-name")).toBe("Vijay");
+    expect(createVGamesIdentityRepository(storage).getLastDisplayName()).toBe("Vijay");
+  });
+
   it("clears invalid cached sessions", () => {
     const storage = memoryStorage();
     storage.setItem(
