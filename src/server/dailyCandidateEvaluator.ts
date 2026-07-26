@@ -29,9 +29,21 @@ const PROXY_BATCH_SIZE = 50;
  * Southern Television broadcast interruption) drew two genuine DNFs
  * (28-36 minutes) and zero finishers. Scoring (`dailyCandidateScoring.ts`)
  * rewards editorial membership, pageviews, thumbnail, lead length, article
- * size - never whether the target is actually REACHABLE. A target with too
- * few inbound links is close to a needle-hunt regardless of player skill,
- * no matter how it scores on everything else.
+ * size - never whether the target is actually REACHABLE.
+ *
+ * Owner-reviewed analysis (2026-07-26) narrowed what these floors are
+ * allowed to claim: they remove the pathological <25-inlink needle-hunt
+ * tail (the 23/24-inlink outliers in the table below), but they are NOT a
+ * validated solvability predictor. The evidence tying low inlinks to
+ * zero-finisher days is weak - n=12 daily challenges, 2-7 attempts per day,
+ * and confounded by the 2026-07-18 outage (a day with depressed attempts
+ * for reasons unrelated to the target). Raw inlinks was nonetheless the
+ * best of 8 metrics tested against finish rate (Spearman 0.55) -
+ * hub-distance and inlinker-quality variants both scored worse AND cost
+ * more to compute, so plain `linkshere` counts stay the mechanism even
+ * though nothing tested cleared a strong evidentiary bar. Retune only
+ * after materially more data accumulates, and exclude outage days from
+ * whatever that retune uses.
  *
  * Calibrated against every daily between 2026-07-15 and 2026-07-26 (target
  * title/flavor from `daily_features` joined to `challenges`, real
@@ -44,7 +56,9 @@ const PROXY_BATCH_SIZE = 50;
  *   hard            98 (Voynich manuscript), 23 (today)     366, 500+
  *
  * Three findings drove the numbers below, all a departure from the naive
- * "hard is the extreme, so it needs the loosest floor" guess:
+ * "hard is the extreme, so it needs the loosest floor" guess - read these
+ * as "where the needle-hunt line got drawn," not "why targets above it
+ * finish":
  *
  * - "hard" needs the HIGHEST floor, not the lowest - both of its
  *   zero-finisher days (98 and 23 inlinks) sit well below its own
@@ -75,6 +89,23 @@ const INBOUND_LINK_FLOOR: Record<DailyFlavor, number> = {
   weird: 30,
   hard: 150,
 };
+
+/**
+ * "Recognizable" is the one flavor whose entire premise is a widely-known
+ * target, so unlike INBOUND_LINK_FLOOR (which is about the target being
+ * reachable) this floor is about the target actually being recognizable -
+ * a monthly pageview count under 1000 means most players simply won't know
+ * the article regardless of how well-connected or well-scored it is.
+ *
+ * "weird" and "hard" deliberately get NO pageviews floor: Bullfrog County,
+ * Nevada drew only 789 monthly pageviews as a "weird" daily and still
+ * finished 4/5 attempts - obscurity is those pools' entire reason to
+ * exist, not a defect to filter out. ("hard" still gets an inbound-link
+ * floor, per INBOUND_LINK_FLOOR above, because that floor measures
+ * connectedness, not fame - the two are independent axes, and only
+ * "recognizable" advertises the latter.)
+ */
+const RECOGNIZABLE_PAGEVIEWS_FLOOR = 1000;
 
 // Single canonical UA (also used by editorialTargetPools.ts and the
 // gateway/validator) so Wikimedia robot-policy compliance only needs
@@ -122,6 +153,8 @@ export type DailyChallengeDiagnosticEvent =
   | "random_invalid_payload"
   | "random_request_failed"
   | "random_request_timeout"
+  | "recognizable_pageviews_floor_discarded"
+  | "recognizable_pageviews_unavailable"
   | "render_failed"
   | "render_mismatch"
   | "selection";
@@ -235,6 +268,17 @@ export function createDailyCandidateEvaluator(options: {
             new Date(now()),
           );
         }
+        // Recognizable-only qualification gate: a "recognizable" target
+        // with too few monthly pageviews isn't actually recognizable,
+        // whatever else it scores on - see RECOGNIZABLE_PAGEVIEWS_FLOOR's
+        // own doc comment. No-op for "weird"/"hard". Free: reuses the
+        // pageviews already fetched just above for scoring, no new request.
+        const recognizableQualifiedTargets = filterTargetsByRecognizablePageviewsFloor(
+          targets,
+          request.flavor,
+          diagnostic,
+        );
+        if (recognizableQualifiedTargets.length === 0) throw unavailable();
 
         const randomStarts = await Promise.all(
           Array.from({ length: MAX_STARTS }, (_unused, index) =>
@@ -248,7 +292,7 @@ export function createDailyCandidateEvaluator(options: {
         }
         if (starts.length === 0) throw unavailable();
 
-        const ranked = rankPairs(starts, targets, request);
+        const ranked = rankPairs(starts, recognizableQualifiedTargets, request);
         if (ranked.length === 0) throw unavailable();
         if (request.flavor !== "hard") {
           emitSelectionDiagnostic(diagnostic, request, budget, ranked, ranked[0]!);
@@ -522,6 +566,51 @@ async function meetsInboundLinkFloor(
     });
     return true;
   }
+}
+
+/**
+ * Recognizable-only qualification gate: drops "recognizable" targets whose
+ * monthly pageviews fall below `RECOGNIZABLE_PAGEVIEWS_FLOOR` - see that
+ * constant's own doc comment for why "weird"/"hard" are exempt. Costs
+ * nothing extra: `target.recentPageviews` is already populated by
+ * `loadRecentPageviews` (called just before this, for scoring) by the time
+ * this runs, so this is a pure in-memory filter, no new Wikimedia request.
+ *
+ * Degrades to "passes" (with its own diagnostic, distinct from the discard
+ * one) when pageviews are unknown (`null`) - mirrors
+ * `meetsInboundLinkFloor`'s degrade-to-pass convention and
+ * `dailyCandidateScoring.ts`'s own treatment of `recentPageviews: null`
+ * ("unscored", never "ineligible"): a missing signal must never be treated
+ * as a confirmed failure.
+ */
+function filterTargetsByRecognizablePageviewsFloor(
+  targets: readonly CanonicalTarget[],
+  flavor: DailyFlavor,
+  diagnostic: (
+    event: DailyChallengeDiagnosticEvent,
+    fields: Record<string, string | number | boolean>,
+  ) => void,
+): CanonicalTarget[] {
+  if (flavor !== "recognizable") return [...targets];
+  const qualified: CanonicalTarget[] = [];
+  for (const target of targets) {
+    if (target.recentPageviews === null) {
+      diagnostic("recognizable_pageviews_unavailable", { title: target.title, flavor });
+      qualified.push(target);
+      continue;
+    }
+    if (target.recentPageviews >= RECOGNIZABLE_PAGEVIEWS_FLOOR) {
+      qualified.push(target);
+      continue;
+    }
+    diagnostic("recognizable_pageviews_floor_discarded", {
+      title: target.title,
+      flavor,
+      recentPageviews: target.recentPageviews,
+      floor: RECOGNIZABLE_PAGEVIEWS_FLOOR,
+    });
+  }
+  return qualified;
 }
 
 async function loadRecentPageviews(

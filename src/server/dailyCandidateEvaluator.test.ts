@@ -563,6 +563,114 @@ describe("daily candidate evaluator: inbound-link floor (owner incident, 2026-07
   });
 });
 
+describe("daily candidate evaluator: recognizable pageviews floor (owner-reviewed analysis, 2026-07-26)", () => {
+  it("discards a 'recognizable' target under the 1000 monthly pageviews floor, keeps one that clears it", async () => {
+    const targets = [target("Low", 1), target("High", 2)];
+    const fetchImpl = wikipediaFetch({
+      targets,
+      starts: ["Start one", "Start two", "Start three"],
+      pageviewsResponseForTitle: (title) =>
+        monthlyPageviewsResponse(title === "Low canonical" ? 500 : 5000),
+    });
+    const onDiagnostic = vi.fn();
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+      onDiagnostic,
+    });
+
+    const result = await evaluator.findCandidate({ dailyDate: "2026-07-17", flavor: "recognizable" });
+
+    expect(result.targetTitle).toBe("High canonical");
+    expect(onDiagnostic).toHaveBeenCalledWith("recognizable_pageviews_floor_discarded", {
+      title: "Low canonical",
+      flavor: "recognizable",
+      recentPageviews: 500,
+      floor: 1000,
+    });
+  });
+
+  it("passes a 'recognizable' target with pageviews at/above the floor without discarding it", async () => {
+    const targets = [target("Target", 1)];
+    const fetchImpl = wikipediaFetch({
+      targets,
+      starts: ["Start one", "Start two", "Start three"],
+      pageviewsResponseForTitle: () => monthlyPageviewsResponse(5000),
+    });
+    const onDiagnostic = vi.fn();
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+      onDiagnostic,
+    });
+
+    await expect(evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+    })).resolves.toMatchObject({ targetTitle: "Target canonical" });
+    expect(onDiagnostic).not.toHaveBeenCalledWith(
+      "recognizable_pageviews_floor_discarded",
+      expect.anything(),
+    );
+  });
+
+  it("degrades to 'passes' (never discards) when pageviews are unavailable for a 'recognizable' target, with a diagnostic", async () => {
+    const targets = [target("Target", 1)];
+    const onDiagnostic = vi.fn();
+    const fetchImpl = wikipediaFetch({
+      targets,
+      starts: ["Start one", "Start two", "Start three"],
+      pageviewsStatus: 503,
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+      onDiagnostic,
+    });
+
+    await expect(evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+    })).resolves.toMatchObject({ targetTitle: "Target canonical" });
+    expect(onDiagnostic).toHaveBeenCalledWith("recognizable_pageviews_unavailable", {
+      title: "Target canonical",
+      flavor: "recognizable",
+    });
+  });
+
+  it("does not apply the pageviews floor to 'weird' - obscurity is that pool's entire point (Bullfrog County, 789/mo, finished 4/5)", async () => {
+    const targets = [target("Target", 1)];
+    const onDiagnostic = vi.fn();
+    const fetchImpl = wikipediaFetch({
+      targets,
+      starts: ["Start one", "Start two", "Start three"],
+      pageviewsResponseForTitle: () => monthlyPageviewsResponse(200),
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+      onDiagnostic,
+    });
+
+    await expect(evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "weird",
+    })).resolves.toMatchObject({ targetTitle: "Target canonical" });
+    expect(onDiagnostic).not.toHaveBeenCalledWith(
+      "recognizable_pageviews_floor_discarded",
+      expect.anything(),
+    );
+    expect(onDiagnostic).not.toHaveBeenCalledWith(
+      "recognizable_pageviews_unavailable",
+      expect.anything(),
+    );
+  });
+});
+
 function target(
   title: string,
   pageId: number,
@@ -696,6 +804,25 @@ function pageviewsResponse(
 ): Response {
   return new Response(JSON.stringify({
     items: items.map((item) => ({ ...item, views })),
+  }), { headers: { "Content-Type": "application/json" } });
+}
+
+/**
+ * Like pageviewsResponse, but the 30 daily view counts sum to exactly
+ * `total` (front-loading the remainder of `total / 30`) - the recognizable
+ * pageviews floor tests need specific totals relative to
+ * RECOGNIZABLE_PAGEVIEWS_FLOOR (1000), not just "some views".
+ */
+function monthlyPageviewsResponse(total: number): Response {
+  const items = completePageviewItems();
+  const base = Math.floor(total / items.length);
+  let remainder = total - base * items.length;
+  return new Response(JSON.stringify({
+    items: items.map((item) => {
+      const bonus = remainder > 0 ? 1 : 0;
+      if (remainder > 0) remainder -= 1;
+      return { ...item, views: base + bonus };
+    }),
   }), { headers: { "Content-Type": "application/json" } });
 }
 
