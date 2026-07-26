@@ -3,7 +3,8 @@ import BoardSnippet from "../components/BoardSnippet";
 import ChallengePathGraphButton from "../components/ChallengePathGraphButton";
 import PlayAnotherCard from "../components/PlayAnotherCard";
 import StagedLoadingNotice from "../components/StagedLoadingNotice";
-import { boardSnippetRowsFromBoard, emptyPlacementsLabel } from "../domain/boardSnippet";
+import ZeroFinisherSuggestion from "../components/ZeroFinisherSuggestion";
+import { boardSnippetRowsFromBoard, emptyPlacementsLabel, ZERO_FINISHER_LABEL } from "../domain/boardSnippet";
 import {
   dailyDateForChallenge,
   previousCentralDate,
@@ -331,6 +332,21 @@ export default function Home({
     ? dailyFlavorBadgeText(heroChallenge.dailyFeature, heroIsYesterday ? "yesterday" : "today")
     : null;
   const heroBoardTitle = heroIsYesterday ? "Yesterday's board" : "Today's board";
+  // Zero-finisher escape hatch (owner ask, 2026-07-26): the hero's own board
+  // card renders EITHER today's or yesterday's daily depending on
+  // `heroIsYesterday` (see `heroBoardTitle` above) - this feature is scoped
+  // to TODAY's daily only (Boards' Today segment is this card's sibling
+  // site), so `!heroIsYesterday` gates it even though `emptyPlacementsLabel`
+  // itself has no calendar awareness. Note this branch only ever renders
+  // once `dailyState === "finished"` (below), which requires the viewer's
+  // own placement to exist in `heroBoardMatches.placements` - so `completions
+  // === 0` can't actually co-occur with a rendered viewer placement today;
+  // wired anyway for correctness/consistency with Boards' identical branch,
+  // in case that pre-condition ever changes.
+  const heroEmptyLabel = heroBoardMatches
+    ? emptyPlacementsLabel(heroBoardMatches.placements.length, heroBoardMatches.dnfs.length)
+    : undefined;
+  const heroShowsZeroFinisherSuggestion = !heroIsYesterday && heroEmptyLabel === ZERO_FINISHER_LABEL;
 
   return (
     <section className="home-layout">
@@ -494,9 +510,15 @@ export default function Home({
               because BoardSnippet already renders `children` in its empty
               branch too. */}
           <BoardSnippet
-            emptyLabel={heroBoardMatches
-              ? emptyPlacementsLabel(heroBoardMatches.placements.length, heroBoardMatches.dnfs.length)
-              : undefined}
+            emptyLabel={heroEmptyLabel}
+            emptyStateNotice={heroShowsZeroFinisherSuggestion ? (
+              <ZeroFinisherSuggestion
+                identityAccountId={identityAccountId}
+                suggestion={playAnotherSuggestion}
+                onOpenChallenge={onOpenChallenge}
+                onBrowseChallenges={onShowChallenges}
+              />
+            ) : undefined}
             onRetry={() => setHeroBoardRetryToken((value) => value + 1)}
             status={heroBoardStatus}
             title={heroBoardTitle}

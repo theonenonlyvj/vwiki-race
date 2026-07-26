@@ -84,6 +84,8 @@ function mockApiClient(overrides: Partial<VWikiRaceApiClient> = {}): VWikiRaceAp
 function renderBoards(overrides: Partial<Parameters<typeof Boards>[0]> = {}) {
   const onRaceChallenge = vi.fn();
   const onDisclosePath = vi.fn();
+  const onOpenChallenge = vi.fn();
+  const onShowChallenges = vi.fn();
   const props = {
     apiClient: mockApiClient(),
     challenges: [randomUserChallenge, yesterdaysDaily],
@@ -91,14 +93,16 @@ function renderBoards(overrides: Partial<Parameters<typeof Boards>[0]> = {}) {
     identityAccountId: null as string | null,
     identityToken: null as string | null,
     onDisclosePath,
+    onOpenChallenge,
     onRaceChallenge,
+    onShowChallenges,
     raceBusy: false,
     runPaths: {} as Record<string, ServerPathStep[]>,
     todayCentral,
     ...overrides,
   };
   render(<Boards {...props} />);
-  return { onDisclosePath, onRaceChallenge };
+  return { onDisclosePath, onOpenChallenge, onRaceChallenge, onShowChallenges };
 }
 
 describe("Boards: Today shares Home's honest hero selection (PKG-01)", () => {
@@ -422,6 +426,119 @@ describe("Boards: zero-finisher board copy (owner incident, 2026-07-26)", () => 
 
     expect(await screen.findByText("No completed runs yet.")).toBeVisible();
     expect(screen.queryByText("No one has cracked this one yet.")).toBeNull();
+  });
+});
+
+/**
+ * Zero-finisher escape hatch (owner ask, 2026-07-26): "on a day when nobody
+ * has finished the daily, point players at an easier challenge." Appends a
+ * link under the zero-finisher copy above, ONLY on Today's real daily -
+ * reuses Increment 5's existing play-another suggestion endpoint rather than
+ * any new server logic (`ZeroFinisherSuggestion`'s own test file covers the
+ * suggestion/fallback/anonymous copy logic directly; these tests cover the
+ * wiring into Boards - fetch trigger, callback plumbing, and the Today-only
+ * gate).
+ */
+describe("Boards: zero-finisher escape hatch link (owner ask, 2026-07-26)", () => {
+  const zeroFinisherBoard = {
+    placements: [],
+    dnfs: [
+      { accountId: "acc-1", displayName: "Ari", elapsedMs: 1_716_556, clickCount: 30 },
+    ],
+  };
+  const easierChallenge: Challenge = {
+    id: "challenge-easy-01",
+    label: "Easier Challenge",
+    mode: "solo",
+    start: { title: "Cat" },
+    target: { title: "Animal" },
+    ruleset: "ranked_classic",
+    source: "curated",
+  };
+
+  it("signed in + a suggestion exists: appends 'Try an easier one ›', opening the suggested challenge's Detail on click", async () => {
+    const apiClient = mockApiClient({
+      getChallengeBoard: vi.fn(async (challengeId: string) => ({ challengeId, ...zeroFinisherBoard })),
+      getPlayAnotherSuggestion: vi.fn(async () => easierChallenge),
+    });
+    const { onOpenChallenge } = renderBoards({
+      apiClient,
+      challenges: [randomUserChallenge, yesterdaysDaily, todaysDaily],
+      heroSelection: { challenge: todaysDaily, kind: "today-daily" },
+      identityAccountId: "acc-me",
+      identityToken: "jwt-me",
+    });
+
+    expect(await screen.findByText("No one has cracked this one yet.")).toBeVisible();
+    const link = await screen.findByRole("button", { name: /try an easier one/i });
+
+    await userEvent.setup().click(link);
+    expect(onOpenChallenge).toHaveBeenCalledWith("challenge-easy-01");
+  });
+
+  it("signed in but the suggestion is empty (started everything): falls back to 'Browse all challenges ›'", async () => {
+    const apiClient = mockApiClient({
+      getChallengeBoard: vi.fn(async (challengeId: string) => ({ challengeId, ...zeroFinisherBoard })),
+      getPlayAnotherSuggestion: vi.fn(async () => null),
+    });
+    const { onShowChallenges } = renderBoards({
+      apiClient,
+      challenges: [randomUserChallenge, yesterdaysDaily, todaysDaily],
+      heroSelection: { challenge: todaysDaily, kind: "today-daily" },
+      identityAccountId: "acc-me",
+      identityToken: "jwt-me",
+    });
+
+    expect(await screen.findByText("No one has cracked this one yet.")).toBeVisible();
+    const link = await screen.findByRole("button", { name: /browse all challenges/i });
+    expect(screen.queryByText(/try an easier one/i)).toBeNull();
+
+    await userEvent.setup().click(link);
+    expect(onShowChallenges).toHaveBeenCalledTimes(1);
+  });
+
+  it("anonymous viewer: links Browse directly and never calls the suggestion endpoint (it needs an account)", async () => {
+    const getPlayAnotherSuggestion = vi.fn(async () => easierChallenge);
+    const apiClient = mockApiClient({
+      getChallengeBoard: vi.fn(async (challengeId: string) => ({ challengeId, ...zeroFinisherBoard })),
+      getPlayAnotherSuggestion,
+    });
+    const { onShowChallenges } = renderBoards({
+      apiClient,
+      challenges: [randomUserChallenge, yesterdaysDaily, todaysDaily],
+      heroSelection: { challenge: todaysDaily, kind: "today-daily" },
+      identityAccountId: null,
+      identityToken: null,
+    });
+
+    expect(await screen.findByText("No one has cracked this one yet.")).toBeVisible();
+    const link = await screen.findByRole("button", { name: /browse all challenges/i });
+    expect(screen.queryByText(/try an easier one/i)).toBeNull();
+
+    await userEvent.setup().click(link);
+    expect(onShowChallenges).toHaveBeenCalledTimes(1);
+    expect(getPlayAnotherSuggestion).not.toHaveBeenCalled();
+  });
+
+  it("Yesterday's zero-finisher board (non-daily-today surface) never gets the link, even signed in with a real suggestion", async () => {
+    const user = userEvent.setup();
+    const apiClient = mockApiClient({
+      getChallengeBoard: vi.fn(async (challengeId: string) => ({ challengeId, ...zeroFinisherBoard })),
+      getPlayAnotherSuggestion: vi.fn(async () => easierChallenge),
+    });
+    renderBoards({
+      apiClient,
+      challenges: [randomUserChallenge, yesterdaysDaily, todaysDaily],
+      heroSelection: { challenge: todaysDaily, kind: "today-daily" },
+      identityAccountId: "acc-me",
+      identityToken: "jwt-me",
+    });
+
+    await user.click(screen.getByRole("tab", { name: "Yesterday" }));
+
+    expect(await screen.findByText("No one has cracked this one yet.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /try an easier one/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /browse all challenges/i })).toBeNull();
   });
 });
 

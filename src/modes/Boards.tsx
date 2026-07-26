@@ -8,7 +8,8 @@ import {
 import ChallengePathGraphButton from "../components/ChallengePathGraphButton";
 import StagedLoadingNotice from "../components/StagedLoadingNotice";
 import WinningPathChain from "../components/WinningPathChain";
-import { emptyPlacementsLabel } from "../domain/boardSnippet";
+import ZeroFinisherSuggestion from "../components/ZeroFinisherSuggestion";
+import { emptyPlacementsLabel, ZERO_FINISHER_LABEL } from "../domain/boardSnippet";
 import {
   dailyDateForChallenge,
   previousCentralDate,
@@ -17,6 +18,7 @@ import {
 import { dailyFlavorBadgeText } from "../domain/dailyEditorial";
 import { trendGuardProgressCopy } from "../domain/dailyTrends";
 import { formatTimeAndClicks } from "../domain/formatting";
+import type { PlayAnotherSuggestionState } from "../domain/playAnother";
 import { pathStepsToChain } from "../domain/winningPath";
 import type { AllPlayersRosterEntry, Challenge, ServerPathStep } from "../domain/types";
 import type {
@@ -168,7 +170,9 @@ export default function Boards({
   identityToken,
   initialSegment = "today",
   onDisclosePath,
+  onOpenChallenge,
   onRaceChallenge,
+  onShowChallenges,
   raceBusy,
   runPaths,
   todayCentral,
@@ -187,7 +191,18 @@ export default function Boards({
   // Challenge Detail - one App.tsx-owned cache/dedup (`requestedPaths`,
   // `runPaths`), not a Boards-local reimplementation.
   onDisclosePath: (runId: string) => void;
+  // Zero-finisher escape hatch (owner ask, 2026-07-26): Today's "Try an
+  // easier one ›" link opens the SUGGESTED challenge's Detail - same route
+  // Home's identical link and Browse's own cards use (invariant 3, "no run
+  // exists until Start") - reuses App.tsx's existing onOpenChallengeDetail,
+  // same callback Home already receives as its own `onOpenChallenge`.
+  onOpenChallenge: (challengeId: string) => void;
   onRaceChallenge: (challengeId: string) => void;
+  // Zero-finisher escape hatch: the "Browse all challenges ›" fallback (no
+  // suggestion available, or an anonymous viewer) - same
+  // `onSelectMode("challenges")` callback Home already receives as its own
+  // `onShowChallenges`.
+  onShowChallenges: () => void;
   raceBusy: boolean;
   runPaths: Record<string, ServerPathStep[]>;
   todayCentral: string;
@@ -443,6 +458,46 @@ export default function Boards({
   // background stale-while-revalidate refresh has last-good data already
   // matching (RC-04's "never blank live UI" stays intact for this segment).
   const boardIsLoading = Boolean(activeChallenge) && !boardMatchesActiveChallenge && !boardHasError;
+
+  // Zero-finisher escape hatch (owner ask, 2026-07-26): scoped to TODAY's
+  // daily specifically - never Yesterday, never a trend window. Pre-drop,
+  // "Today" mirrors Home's honest yesterday-daily framing
+  // (`todayShowsYesterdayFraming` above) - that's genuinely yesterday's
+  // daily wearing the Today tab, not today's, so it's excluded here too.
+  const isTodayDailySurface = segment === "today" && !todayShowsYesterdayFraming;
+  const emptyLabel = emptyPlacementsLabel(placements.length, dnfs.length);
+  const showsZeroFinisherSuggestion = isTodayDailySurface && emptyLabel === ZERO_FINISHER_LABEL;
+
+  // Reuses Increment 5's existing play-another suggestion endpoint
+  // (`getPlayAnotherSuggestion` - already viewer-aware, most-popular-not-
+  // yet-played) rather than any new server logic. Home/Results already
+  // receive this centrally-fetched (App.tsx) as a prop; Boards doesn't
+  // otherwise need it, so it's fetched locally here instead of threading a
+  // prop through AppShell for a feature this narrow - ONLY once the
+  // zero-finisher state actually needs it, and only for a signed-in session
+  // (the endpoint is authenticated; an anonymous viewer gets the Browse
+  // fallback directly, same as `ZeroFinisherSuggestion`'s own anonymous
+  // branch, with no fetch at all).
+  const [zeroFinisherSuggestion, setZeroFinisherSuggestion] =
+    useState<PlayAnotherSuggestionState>({ status: "loading" });
+  useEffect(() => {
+    if (!showsZeroFinisherSuggestion || !identityToken) return;
+    let cancelled = false;
+    setZeroFinisherSuggestion({ status: "loading" });
+    void apiClient.getPlayAnotherSuggestion(identityToken)
+      .then((challenge) => {
+        if (cancelled) return;
+        setZeroFinisherSuggestion(
+          challenge ? { status: "ready", challenge, playerCount: null } : { status: "empty" },
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setZeroFinisherSuggestion({ status: "error" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, showsZeroFinisherSuggestion, identityToken]);
 
   const ownPlacement = identityAccountId
     ? placements.find((row) => row.accountId === identityAccountId) ?? null
@@ -792,7 +847,17 @@ export default function Boards({
                 })}
               </ol>
             ) : (
-              <p className="muted">{emptyPlacementsLabel(placements.length, dnfs.length)}</p>
+              <>
+                <p className="muted">{emptyLabel}</p>
+                {showsZeroFinisherSuggestion ? (
+                  <ZeroFinisherSuggestion
+                    identityAccountId={identityAccountId}
+                    suggestion={zeroFinisherSuggestion}
+                    onOpenChallenge={onOpenChallenge}
+                    onBrowseChallenges={onShowChallenges}
+                  />
+                ) : null}
+              </>
             )}
           </section>
 

@@ -398,7 +398,9 @@ export default function AppShell({
             identityToken={identitySession?.token ?? null}
             initialSegment={boardsInitialSegment}
             onDisclosePath={onDisclosePath}
+            onOpenChallenge={onOpenChallengeDetail}
             onRaceChallenge={onRaceChallenge}
+            onShowChallenges={() => onSelectMode("challenges")}
             raceBusy={authBusy}
             runPaths={runPaths}
             todayCentral={todayCentral}

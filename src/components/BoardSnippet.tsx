@@ -64,6 +64,7 @@ export default function BoardSnippet({
   title,
   rows,
   emptyLabel = NO_ATTEMPTS_LABEL,
+  emptyStateNotice,
   children,
   maxRows = 3,
   onRetry,
@@ -72,6 +73,17 @@ export default function BoardSnippet({
   title: string;
   rows: BoardSnippetRow[];
   emptyLabel?: string;
+  // Zero-finisher escape hatch (owner ask, 2026-07-26): rendered directly
+  // under `emptyLabel`, ONLY in the genuinely-empty (`rows.length === 0`)
+  // branch below - never in the loading/error branches (nothing to escape
+  // from yet/on a failure), and never alongside real rows. The caller (Home,
+  // for its "Today's board" hero card only - never the "Yesterday's
+  // results" card, which never reaches this feature's zero-completions
+  // wiring since it's a DIFFERENT calendar day) decides whether this is
+  // today's daily and whether the label actually resolved to
+  // `ZERO_FINISHER_LABEL`; this component has no daily/calendar awareness of
+  // its own and just renders whatever it's handed.
+  emptyStateNotice?: ReactNode;
   children?: ReactNode;
   // RC-05: Results' own snippet and the yesterday-recap card keep the
   // original top-3 cap (default unchanged); Home's finished-state
@@ -130,6 +142,7 @@ export default function BoardSnippet({
       <section aria-label={title} className="board-snippet">
         <h3>{title}</h3>
         <p className="muted">{emptyLabel}</p>
+        {emptyStateNotice}
         {children}
       </section>
     );

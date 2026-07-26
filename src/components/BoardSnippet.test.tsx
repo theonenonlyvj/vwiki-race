@@ -227,6 +227,53 @@ describe("BoardSnippet: BD-1 windowed snippet", () => {
   });
 });
 
+/**
+ * Zero-finisher escape hatch (owner ask, 2026-07-26): `emptyStateNotice`
+ * plumbing only - the actual copy/suggestion-resolution logic lives in
+ * `ZeroFinisherSuggestion` (its own component + test file); this just proves
+ * `BoardSnippet` places whatever it's handed directly under the empty label
+ * and nowhere else.
+ */
+describe("BoardSnippet: emptyStateNotice (zero-finisher escape hatch)", () => {
+  it("renders emptyStateNotice under the empty-label paragraph when rows are empty", () => {
+    render(
+      <BoardSnippet
+        title="Today's board"
+        rows={[]}
+        emptyLabel="No one has cracked this one yet."
+        emptyStateNotice={<p>Try an easier one ›</p>}
+      />,
+    );
+
+    expect(screen.getByText("No one has cracked this one yet.")).toBeVisible();
+    expect(screen.getByText("Try an easier one ›")).toBeVisible();
+  });
+
+  it("never renders emptyStateNotice once real rows exist", () => {
+    render(
+      <BoardSnippet
+        title="Today's board"
+        rows={rankedRows(2, null)}
+        emptyStateNotice={<p>Try an easier one ›</p>}
+      />,
+    );
+
+    expect(screen.queryByText("Try an easier one ›")).toBeNull();
+  });
+
+  it("never renders emptyStateNotice in the loading or error branches", () => {
+    const { rerender } = render(
+      <BoardSnippet title="Today's board" rows={[]} status="loading" emptyStateNotice={<p>Try an easier one ›</p>} />,
+    );
+    expect(screen.queryByText("Try an easier one ›")).toBeNull();
+
+    rerender(
+      <BoardSnippet title="Today's board" rows={[]} status="error" emptyStateNotice={<p>Try an easier one ›</p>} />,
+    );
+    expect(screen.queryByText("Try an easier one ›")).toBeNull();
+  });
+});
+
 describe("BoardSnippet: RC-06 (one honest loading/error system) - status tri-state", () => {
   it("defaults status to 'ready' - a pre-existing caller (e.g. Results) that never passes it is unaffected", () => {
     render(<BoardSnippet title="Today's board" rows={rankedRows(2, null)} />);
