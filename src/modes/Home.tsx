@@ -3,7 +3,7 @@ import BoardSnippet from "../components/BoardSnippet";
 import ChallengePathGraphButton from "../components/ChallengePathGraphButton";
 import PlayAnotherCard from "../components/PlayAnotherCard";
 import StagedLoadingNotice from "../components/StagedLoadingNotice";
-import { boardSnippetRowsFromBoard } from "../domain/boardSnippet";
+import { boardSnippetRowsFromBoard, emptyPlacementsLabel } from "../domain/boardSnippet";
 import {
   dailyDateForChallenge,
   previousCentralDate,
@@ -430,6 +430,9 @@ export default function Home({
           the skeleton to resolve rather than showing ahead of it. */}
       {dailyState !== "finished" && dailyState !== "resolving" && yesterdaysDaily ? (
         <BoardSnippet
+          emptyLabel={yesterdayBoard
+            ? emptyPlacementsLabel(yesterdayBoard.placements.length, yesterdayBoard.dnfs.length)
+            : undefined}
           onRetry={retryYesterdayBoard}
           status={yesterdayBoardStatus}
           title="Yesterday's results"
@@ -491,6 +494,9 @@ export default function Home({
               because BoardSnippet already renders `children` in its empty
               branch too. */}
           <BoardSnippet
+            emptyLabel={heroBoardMatches
+              ? emptyPlacementsLabel(heroBoardMatches.placements.length, heroBoardMatches.dnfs.length)
+              : undefined}
             onRetry={() => setHeroBoardRetryToken((value) => value + 1)}
             status={heroBoardStatus}
             title={heroBoardTitle}

@@ -182,13 +182,20 @@ describe("daily candidate evaluator", () => {
       fetchImpl: fetchImpl as unknown as typeof fetch,
       gateway: { getArticle, clear: () => undefined },
       now: () => NOW,
-      maxRequests: 10,
+      // 11, not 10: one target now costs 4 (pool) + 1 (metadata) + 1
+      // (inbound-link floor check) + 1 (pageviews) + 3 (random starts) = 10
+      // raw fetches before a single gateway call is even attempted - one
+      // more than the pre-floor-check version of this test needed, so the
+      // budget cap grows by exactly the one new request type to keep
+      // exercising the same "gateway calls share the same budget" case
+      // (exhausted on the SECOND getArticle attempt, not the first).
+      maxRequests: 11,
     });
 
     await expect(evaluator.findCandidate({ dailyDate: "2026-07-17", flavor: "recognizable" })).rejects.toMatchObject({
       code: "daily_candidate_unavailable",
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(9);
+    expect(fetchImpl).toHaveBeenCalledTimes(10);
     expect(getArticle).toHaveBeenCalledTimes(1);
   });
 
@@ -343,6 +350,10 @@ describe("daily candidate evaluator", () => {
       if (url.searchParams.get("prop") === "info|pageprops|extracts|pageimages|categories") {
         return Promise.resolve(metadataResponse(targets));
       }
+      // Clears every flavor's floor immediately - this test is about the
+      // RANDOM-start request hanging until the phase aborts, not the
+      // inbound-link floor check.
+      if (url.searchParams.get("prop") === "linkshere") return Promise.resolve(linkshereResponse(500));
       if (url.pathname.includes("/metrics/pageviews/")) return Promise.resolve(pageviewsResponse());
       return new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
@@ -438,9 +449,117 @@ describe("daily candidate evaluator", () => {
       dailyDate: "2026-07-17",
       flavor: "recognizable",
       candidateCount: 3,
-      requestCount: 12,
+      requestCount: 13,
       selectedScore: 79,
     });
+  });
+});
+
+describe("daily candidate evaluator: inbound-link floor (owner incident, 2026-07-26)", () => {
+  it("discards a target below its flavor's inbound-link floor before scoring, keeps one that clears it, and caps the check to floor+1", async () => {
+    const targets = [target("Low", 1), target("High", 2)];
+    const fetchImpl = wikipediaFetch({
+      targets,
+      starts: ["Start one", "Start two", "Start three"],
+      linkshereResponse: (url) => {
+        const title = url.searchParams.get("titles");
+        // "recognizable" floor is 150 - 10 fails it, 500 clears it (and
+        // exceeds the real cap the code applies, exercising the "return the
+        // full array, the caller only checks length" path).
+        return linkshereResponse(title === "Low canonical" ? 10 : 500, title ?? "Hop");
+      },
+    });
+    const onDiagnostic = vi.fn();
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+      onDiagnostic,
+    });
+
+    const result = await evaluator.findCandidate({ dailyDate: "2026-07-17", flavor: "recognizable" });
+
+    expect(result.targetTitle).toBe("High canonical");
+    expect(onDiagnostic).toHaveBeenCalledWith("inbound_link_floor_discarded", {
+      title: "Low canonical",
+      flavor: "recognizable",
+      floor: 150,
+    });
+
+    const linkshereCalls = findActionCalls(fetchImpl, "linkshere");
+    expect(linkshereCalls.length).toBeGreaterThan(0);
+    for (const [input] of linkshereCalls) {
+      // Cheapness invariant: `lhlimit` is always floor+1 (151), never the
+      // target's true total - proving "at least the floor" without ever
+      // fetching it.
+      expect(new URL(String(input)).searchParams.get("lhlimit")).toBe("151");
+      expect(new URL(String(input)).searchParams.get("lhnamespace")).toBe("0");
+    }
+  });
+
+  it("counts the inbound-link floor check against the shared request budget", async () => {
+    const targets = [target("Target", 1)];
+    const fetchImpl = wikipediaFetch({ targets, starts: ["Start one", "Start two", "Start three"] });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+      // The editorial pool (4) + one metadata batch (1) exactly exhausts
+      // this budget - the floor check is the very next request the
+      // evaluator would make, so it must never fire.
+      maxRequests: 5,
+    });
+
+    await expect(evaluator.findCandidate({ dailyDate: "2026-07-17", flavor: "recognizable" })).rejects.toMatchObject({
+      code: "daily_candidate_unavailable",
+    });
+    expect(findActionCalls(fetchImpl, "linkshere")).toHaveLength(0);
+  });
+
+  it("degrades to 'passes' (never discards) when the inbound-link check itself fails, with a diagnostic - a thin pool must degrade, not die", async () => {
+    const targets = [target("Target", 1)];
+    const onDiagnostic = vi.fn();
+    const fetchImpl = wikipediaFetch({
+      targets,
+      starts: ["Start one", "Start two", "Start three"],
+      linkshereResponse: () => new Response("service unavailable", { status: 503 }),
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+      onDiagnostic,
+    });
+
+    await expect(evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+    })).resolves.toMatchObject({ targetTitle: "Target canonical" });
+    expect(onDiagnostic).toHaveBeenCalledWith(
+      "inbound_link_check_failed",
+      expect.objectContaining({ title: "Target canonical" }),
+    );
+  });
+
+  it("treats a page MediaWiki omits the linkshere key for (a legitimate zero) as failing any positive floor", async () => {
+    const targets = [target("Target", 1)];
+    const fetchImpl = wikipediaFetch({
+      targets,
+      starts: ["Start one", "Start two", "Start three"],
+      linkshereResponse: () => new Response(JSON.stringify({
+        query: { pages: [{ pageid: 1, ns: 0, title: "Target canonical" }] },
+      }), { headers: { "Content-Type": "application/json" } }),
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+    })).rejects.toMatchObject({ code: "daily_candidate_unavailable" });
   });
 });
 
@@ -495,6 +614,7 @@ function wikipediaFetch(options: {
   pageviewsResponseForTitle?: (title: string) => Response;
   poolDelayMs?: number;
   proxyResponse?: (url: URL) => Response;
+  linkshereResponse?: (url: URL) => Response;
 }) {
   let randomIndex = 0;
   return vi.fn(async (input: RequestInfo | URL) => {
@@ -517,6 +637,12 @@ function wikipediaFetch(options: {
     }
     if (url.searchParams.get("prop") === "links") {
       return options.proxyResponse?.(url) ?? linksResponse(null);
+    }
+    if (url.searchParams.get("prop") === "linkshere") {
+      // Default: comfortably clears every flavor's floor - individual tests
+      // for the floor's own discard/pass/degrade behavior override this via
+      // `linkshereResponse`.
+      return options.linkshereResponse?.(url) ?? linkshereResponse(500);
     }
     if (url.searchParams.get("prop") === "info|pageprops|extracts|pageimages|categories") {
       const requested = new Set(url.searchParams.get("titles")?.split("|") ?? []);
@@ -587,6 +713,23 @@ function linksResponse(targetTitle: string | null): Response {
         ns: 0,
         title: "Hop",
         links: targetTitle ? [{ ns: 0, title: targetTitle }] : [],
+      }],
+    },
+  }), { headers: { "Content-Type": "application/json" } });
+}
+
+function linkshereResponse(count: number, title = "Hop"): Response {
+  return new Response(JSON.stringify({
+    query: {
+      pages: [{
+        pageid: 1,
+        ns: 0,
+        title,
+        linkshere: Array.from({ length: count }, (_unused, index) => ({
+          pageid: index + 1,
+          ns: 0,
+          title: `Inbound ${index + 1}`,
+        })),
       }],
     },
   }), { headers: { "Content-Type": "application/json" } });

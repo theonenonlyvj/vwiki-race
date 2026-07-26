@@ -8,6 +8,7 @@ import {
 import ChallengePathGraphButton from "../components/ChallengePathGraphButton";
 import StagedLoadingNotice from "../components/StagedLoadingNotice";
 import WinningPathChain from "../components/WinningPathChain";
+import { emptyPlacementsLabel } from "../domain/boardSnippet";
 import {
   dailyDateForChallenge,
   previousCentralDate,
@@ -791,7 +792,7 @@ export default function Boards({
                 })}
               </ol>
             ) : (
-              <p className="muted">No completed runs yet.</p>
+              <p className="muted">{emptyPlacementsLabel(placements.length, dnfs.length)}</p>
             )}
           </section>
 

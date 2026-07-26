@@ -379,6 +379,52 @@ describe("Boards: RC-06 (one honest loading/error system) - daily board tri-stat
   });
 });
 
+describe("Boards: zero-finisher board copy (owner incident, 2026-07-26)", () => {
+  it("shows 'No one has cracked this one yet.' when a daily has zero completions but a real, counted DNF", async () => {
+    const apiClient = mockApiClient({
+      getChallengeBoard: vi.fn(async (challengeId: string) => ({
+        challengeId,
+        placements: [],
+        dnfs: [
+          { accountId: "acc-1", displayName: "Ari", elapsedMs: 1_716_556, clickCount: 30 },
+          { accountId: "acc-2", displayName: "Sam", elapsedMs: 2_169_899, clickCount: 26 },
+        ],
+      })),
+    });
+    renderBoards({
+      apiClient,
+      challenges: [randomUserChallenge, yesterdaysDaily, todaysDaily],
+      heroSelection: { challenge: todaysDaily, kind: "today-daily" },
+    });
+
+    expect(await screen.findByText("No one has cracked this one yet.")).toBeVisible();
+    expect(screen.queryByText("No completed runs yet.")).toBeNull();
+    // The DNF rows still render below - this is a "no finishers YET" message
+    // for a board full of real attempts, not a "genuinely no one played"
+    // claim.
+    expect(screen.getByText("Ari")).toBeVisible();
+    expect(screen.getByText("Sam")).toBeVisible();
+  });
+
+  it("keeps the plain 'No completed runs yet.' when a daily is genuinely untouched (zero placements, zero DNFs)", async () => {
+    const apiClient = mockApiClient({
+      getChallengeBoard: vi.fn(async (challengeId: string) => ({
+        challengeId,
+        placements: [],
+        dnfs: [],
+      })),
+    });
+    renderBoards({
+      apiClient,
+      challenges: [randomUserChallenge, yesterdaysDaily, todaysDaily],
+      heroSelection: { challenge: todaysDaily, kind: "today-daily" },
+    });
+
+    expect(await screen.findByText("No completed runs yet.")).toBeVisible();
+    expect(screen.queryByText("No one has cracked this one yet.")).toBeNull();
+  });
+});
+
 describe("Boards: FB-4 path comparison (council 2026-07-19, owner decision 10)", () => {
   const boardWithRunIds: ChallengeBoardResponse = {
     challengeId: yesterdaysDaily.id,

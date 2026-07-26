@@ -37,6 +37,32 @@ export interface BoardSnippetRow {
 }
 
 /**
+ * Owner incident, 2026-07-26: today's HARD daily (List of mosques in Morocco
+ * -> Southern Television broadcast interruption, 23 inbound links - see
+ * dailyCandidateEvaluator.ts's inbound-link floor fix) drew two genuine DNFs
+ * and zero finishers. "No completed runs yet." reads as if nobody even
+ * tried, which is actively discouraging on a board that's full of real
+ * attempts. Boards.tsx's own Today/Yesterday board (inline markup, gated on
+ * `placements.length` directly) and Home's BoardSnippet cards (fed
+ * pre-merge `placements`/`dnfs` counts before they're folded into one `rows`
+ * array below) both need this exact same copy decision, so it lives here -
+ * one function, not three independently-typed literals that could drift.
+ */
+export const NO_ATTEMPTS_LABEL = "No completed runs yet.";
+export const ZERO_FINISHER_LABEL = "No one has cracked this one yet.";
+
+/**
+ * `countedDnfs` is expected to already be server-filtered to
+ * `MIN_COUNTED_DNF_CLICKS` (`board.dnfs`/`ChallengeBoardDnfRow[]` already are
+ * - see `listChallengeDnfs` in d1TrackingRepository.ts) - a stray 0-1-click
+ * abandon (page load, immediate back button) never flips this to the
+ * zero-finisher copy on its own.
+ */
+export function emptyPlacementsLabel(completions: number, countedDnfs: number): string {
+  return completions === 0 && countedDnfs > 0 ? ZERO_FINISHER_LABEL : NO_ATTEMPTS_LABEL;
+}
+
+/**
  * Rows for a challenge's deduped board (Home's cards, Boards, Challenge
  * Detail's leaderboard) - already one row per canonical account (invariant 2
  * lives server-side), placements first, then DNFs. "You" is an accountId

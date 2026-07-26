@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   boardSnippetRowsForResult,
   boardSnippetRowsFromBoard,
+  emptyPlacementsLabel,
+  NO_ATTEMPTS_LABEL,
   windowBoardRows,
+  ZERO_FINISHER_LABEL,
   type BoardSnippetRow,
 } from "./boardSnippet";
 
@@ -19,6 +22,25 @@ const dnf = (accountId: string, displayName: string | null = accountId) => ({
   displayName,
   elapsedMs: 8_000,
   clickCount: 1,
+});
+
+describe("emptyPlacementsLabel (owner incident, 2026-07-26)", () => {
+  it("reads 'no one has cracked this one yet' only when there are zero completions AND at least one counted DNF", () => {
+    expect(emptyPlacementsLabel(0, 1)).toBe(ZERO_FINISHER_LABEL);
+    expect(emptyPlacementsLabel(0, 5)).toBe(ZERO_FINISHER_LABEL);
+  });
+
+  it("falls back to the plain 'no completed runs yet' when genuinely nobody has attempted", () => {
+    expect(emptyPlacementsLabel(0, 0)).toBe(NO_ATTEMPTS_LABEL);
+  });
+
+  it("never shows either empty label once at least one completion exists", () => {
+    // Not a real call site (BoardSnippet/Boards.tsx only ever consult this
+    // when there are zero placements to show), but the function itself
+    // should still degrade sanely rather than assume its inputs.
+    expect(emptyPlacementsLabel(1, 0)).toBe(NO_ATTEMPTS_LABEL);
+    expect(emptyPlacementsLabel(2, 3)).toBe(NO_ATTEMPTS_LABEL);
+  });
 });
 
 describe("boardSnippetRowsFromBoard", () => {

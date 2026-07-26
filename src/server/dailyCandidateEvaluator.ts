@@ -23,6 +23,59 @@ const PHASE_TIMEOUT_MS = 25_000;
 const MAX_TARGETS = 10;
 const MAX_STARTS = 3;
 const PROXY_BATCH_SIZE = 50;
+
+/**
+ * Owner incident, 2026-07-26: the HARD daily (List of mosques in Morocco ->
+ * Southern Television broadcast interruption) drew two genuine DNFs
+ * (28-36 minutes) and zero finishers. Scoring (`dailyCandidateScoring.ts`)
+ * rewards editorial membership, pageviews, thumbnail, lead length, article
+ * size - never whether the target is actually REACHABLE. A target with too
+ * few inbound links is close to a needle-hunt regardless of player skill,
+ * no matter how it scores on everything else.
+ *
+ * Calibrated against every daily between 2026-07-15 and 2026-07-26 (target
+ * title/flavor from `daily_features` joined to `challenges`, real
+ * en.wikipedia `linkshere` (namespace 0) counts, completions/counted-DNFs
+ * from `runs`):
+ *
+ *   flavor          zero-finisher days (inlinks)   finished days (inlinks)
+ *   recognizable    46 (Robert Maxwell, 5th Lord Maxwell)   500+, 500+, 500+
+ *   weird           (none observed)                 24, 38, 57, 163
+ *   hard            98 (Voynich manuscript), 23 (today)     366, 500+
+ *
+ * Three findings drove the numbers below, all a departure from the naive
+ * "hard is the extreme, so it needs the loosest floor" guess:
+ *
+ * - "hard" needs the HIGHEST floor, not the lowest - both of its
+ *   zero-finisher days (98 and 23 inlinks) sit well below its own
+ *   successful days (366, 500+), and a hard daily draws its target from the
+ *   SAME vital/unusual pools as the other two flavors (see
+ *   editorialTargetPools.ts / dailyStaticFallbackTargets.ts's "hard is the
+ *   deduplicated union") - only the scoring is harder, so the target itself
+ *   still needs to be "connected" the way a recognizable one is. Hence
+ *   "hard means connected-obscure, not needle-hunt": 150, matching
+ *   recognizable.
+ * - "recognizable" has one clear failure (46) and a wide, unambiguous gap up
+ *   to its next-worst success (500+) - 150 sits comfortably above the
+ *   failure with room to spare.
+ * - "weird" gets the LOWEST floor on purpose: every observed weird day
+ *   finished, down to 24 inlinks - genuinely obscure trivia is inherently
+ *   less-linked than a household name, and a floor anywhere near
+ *   recognizable's would gut the "weird" pool's entire reason to exist. 30
+ *   sits just above that pool's roughest historical day (24 inlinks, itself
+ *   a real outlier: 5 DNFs against only 2 finishers) without disqualifying
+ *   its two genuinely clean days (38, 57).
+ *
+ * Applied per the REQUESTED flavor (`request.flavor`), not the target's
+ * pool source - a hard request can pull from either pool, and the risk is
+ * the same either way.
+ */
+const INBOUND_LINK_FLOOR: Record<DailyFlavor, number> = {
+  recognizable: 150,
+  weird: 30,
+  hard: 150,
+};
+
 // Single canonical UA (also used by editorialTargetPools.ts and the
 // gateway/validator) so Wikimedia robot-policy compliance only needs
 // verifying in one place.
@@ -63,6 +116,8 @@ export class DailyChallengeCandidateError extends Error {
 export type DailyChallengeDiagnosticEvent =
   | "editorial_pool_source_failed"
   | "editorial_pool_fallback_used"
+  | "inbound_link_check_failed"
+  | "inbound_link_floor_discarded"
   | "random_bad_status"
   | "random_invalid_payload"
   | "random_request_failed"
@@ -157,7 +212,20 @@ export function createDailyCandidateEvaluator(options: {
         );
         if (sampledTargets.length === 0) throw unavailable();
 
-        const targets = await loadTargets(sampledTargets, budget, endpoint);
+        const loadedTargets = await loadTargets(sampledTargets, budget, endpoint);
+        if (loadedTargets.length === 0) throw unavailable();
+        // Qualification gate (owner incident, 2026-07-26): discard targets
+        // that fall below this flavor's inbound-link floor BEFORE spending
+        // any more budget on them (pageviews, scoring) - see
+        // INBOUND_LINK_FLOOR's own doc comment for the calibration behind
+        // these numbers.
+        const targets = await filterTargetsByInboundLinkFloor(
+          loadedTargets,
+          request.flavor,
+          budget,
+          endpoint,
+          diagnostic,
+        );
         if (targets.length === 0) throw unavailable();
         for (const target of targets) {
           target.recentPageviews = await loadRecentPageviews(
@@ -357,6 +425,103 @@ async function loadTargets(
     if (target) targets.push(target);
   }
   return deduplicateTargets(targets);
+}
+
+/**
+ * The qualification gate: drops every target below `request.flavor`'s
+ * `INBOUND_LINK_FLOOR` before pageviews/scoring ever see it. One budgeted
+ * `linkshere` call per target - same cost class as the pageviews fetch just
+ * below this in `findCandidate`, so it fits the evaluator's existing
+ * "one extra request per target" shape rather than adding a new order of
+ * magnitude to the budget.
+ */
+async function filterTargetsByInboundLinkFloor(
+  targets: readonly CanonicalTarget[],
+  flavor: DailyFlavor,
+  budget: WikimediaBudget,
+  endpoint: string,
+  diagnostic: (
+    event: DailyChallengeDiagnosticEvent,
+    fields: Record<string, string | number | boolean>,
+  ) => void,
+): Promise<CanonicalTarget[]> {
+  const floor = INBOUND_LINK_FLOOR[flavor];
+  const qualified: CanonicalTarget[] = [];
+  for (const target of targets) {
+    if (await meetsInboundLinkFloor(target.title, floor, budget, endpoint, diagnostic)) {
+      qualified.push(target);
+    } else {
+      diagnostic("inbound_link_floor_discarded", { title: target.title, flavor, floor });
+    }
+  }
+  return qualified;
+}
+
+/**
+ * Proves "at least `floor` namespace-0 inbound links" as cheaply as
+ * possible: `lhlimit` is capped to `floor + 1`, so Wikimedia never returns
+ * more than that regardless of a target's true total (Antikythera mechanism
+ * alone has 366; Technology/Water/Human are all 500+) - enough to know the
+ * target clears the floor without ever fetching the real count.
+ *
+ * Degrades to "passes" (never discards) on anything short of a clean,
+ * parseable answer - an unreadable response, a request failure, or a page
+ * MediaWiki couldn't resolve at all - with a diagnostic so it's visible
+ * without silently either killing the pool or (worse) getting stuck
+ * re-discarding a perfectly good target forever. This mirrors
+ * `loadRecentPageviews`'s own "unknown never blocks eligibility" shape
+ * (dailyCandidateScoring.ts treats `recentPageviews: null` as merely
+ * unscored, never ineligible) and the 2026-07-18 lesson (PKG-13,
+ * fetchBinding.test.ts): a thin target pool must degrade, never die, over a
+ * check that exists purely to avoid a worse outcome than not checking at
+ * all. `BudgetExhausted` is the one exception - it propagates so the
+ * evaluator's own timeout/budget handling in `findCandidate` still applies.
+ */
+async function meetsInboundLinkFloor(
+  title: string,
+  floor: number,
+  budget: WikimediaBudget,
+  endpoint: string,
+  diagnostic: (
+    event: DailyChallengeDiagnosticEvent,
+    fields: Record<string, string | number | boolean>,
+  ) => void,
+): Promise<boolean> {
+  try {
+    const payload = await apiJson(budget, endpoint, {
+      action: "query",
+      format: "json",
+      formatversion: "2",
+      origin: "*",
+      prop: "linkshere",
+      titles: title,
+      lhnamespace: "0",
+      lhlimit: String(floor + 1),
+    });
+    const page = queryPages(payload)[0];
+    if (!page || page.missing !== undefined) {
+      diagnostic("inbound_link_check_failed", { title, code: "no_page", detail: "linkshere lookup returned no page" });
+      return true;
+    }
+    const linkshere = page.linkshere;
+    // MediaWiki omits the `linkshere` key entirely for a page with zero
+    // matching inbound links (rather than returning an empty array) - that
+    // is a legitimate, countable zero, not a malformed response.
+    if (linkshere === undefined) return floor <= 0;
+    if (!Array.isArray(linkshere)) {
+      diagnostic("inbound_link_check_failed", { title, code: "malformed_response", detail: "linkshere was not an array" });
+      return true;
+    }
+    return linkshere.length >= floor;
+  } catch (caught) {
+    if (caught instanceof BudgetExhausted) throw caught;
+    diagnostic("inbound_link_check_failed", {
+      title,
+      code: diagnosticErrorCode(caught),
+      detail: diagnosticErrorDetail(caught),
+    });
+    return true;
+  }
 }
 
 async function loadRecentPageviews(

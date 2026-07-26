@@ -19,6 +19,11 @@ import type { EditorialTarget } from "./editorialTargetPools";
  *   unlikely to be renamed, merged, or deleted.
  * - No hyper-obscure or single-source topics - only entries that would
  *   read as "a normal daily", not a worst-case placeholder.
+ * - Clears its flavor's `INBOUND_LINK_FLOOR` (dailyCandidateEvaluator.ts) -
+ *   verified live against the API on 2026-07-26 (recognizable >= 150): every
+ *   entry below passed comfortably (all capped out at the 151-link check
+ *   itself, i.e. genuinely >=151). See STATIC_WEIRD_TITLES's own note below
+ *   for the four entries the SAME pass removed.
  *
  * `pageId` is intentionally omitted: the evaluator resolves these by title
  * through `loadTargets()`'s live Wikipedia query, same as pool-sourced
@@ -72,14 +77,20 @@ const STATIC_RECOGNIZABLE_TITLES: readonly string[] = [
   "Renaissance",
 ];
 
+/**
+ * Verified live against the API on 2026-07-26 for the "weird" floor
+ * (INBOUND_LINK_FLOOR.weird = 30, dailyCandidateEvaluator.ts). Four entries
+ * failed and were removed: "Bookland" (14 inbound links), "Toynbee tiles"
+ * (17), "Dancing plague of 1518" (27), "Emu War" (29) - each below 30, the
+ * exact shape of today's incident (a real, well-known-to-trivia-fans
+ * article that's still too thin to be reliably reachable). Every remaining
+ * entry passed, several right at the edge (e.g. "Bog snorkelling" at
+ * exactly 31) - re-run this check if entries are ever added back.
+ */
 const STATIC_WEIRD_TITLES: readonly string[] = [
-  "Bookland",
   "Gravity hill",
   "Phantom island",
   "Spite house",
-  "Toynbee tiles",
-  "Dancing plague of 1518",
-  "Emu War",
   "Great Molasses Flood",
   "Cadaver Synod",
   "Defenestrations of Prague",

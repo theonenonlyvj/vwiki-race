@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import StagedLoadingNotice from "./StagedLoadingNotice";
-import { windowBoardRows, type BoardSnippetRow } from "../domain/boardSnippet";
+import { NO_ATTEMPTS_LABEL, windowBoardRows, type BoardSnippetRow } from "../domain/boardSnippet";
 import { formatTimeAndClicks } from "../domain/formatting";
 
 // BD-1 ("windowed board snippet: top 2 + your neighborhood + inline
@@ -63,7 +63,7 @@ function BoardSnippetRowItem({ row, revealed }: { row: BoardSnippetRow; revealed
 export default function BoardSnippet({
   title,
   rows,
-  emptyLabel = "No completed runs yet.",
+  emptyLabel = NO_ATTEMPTS_LABEL,
   children,
   maxRows = 3,
   onRetry,
