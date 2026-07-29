@@ -671,6 +671,121 @@ describe("daily candidate evaluator: recognizable pageviews floor (owner-reviewe
   });
 });
 
+describe("daily candidate evaluator: no-repeat exclusions (owner incident, 2026-07-29 - a target is used once, ever)", () => {
+  it("discards an already-used editorial target before spending any inbound-link/pageviews budget on it", async () => {
+    const targets = [target("Low", 1), target("High", 2)];
+    const fetchImpl = wikipediaFetch({ targets, starts: ["Start one", "Start two", "Start three"] });
+    const onDiagnostic = vi.fn();
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+      onDiagnostic,
+    });
+
+    const result = await evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+      excludedTargetTitles: new Set(["low"]),
+    });
+
+    expect(result.targetTitle).toBe("High canonical");
+    expect(onDiagnostic).toHaveBeenCalledWith("excluded_target_discarded", { title: "Low" });
+    // Pre-floor, zero API cost: the excluded target never even reaches the
+    // metadata batch fetch (never mind the inbound-link/pageviews checks).
+    const metadata = findActionCalls(fetchImpl, "info|pageprops|extracts|pageimages|categories");
+    expect(metadata).toHaveLength(1);
+    expect(new URL(String(metadata[0]![0])).searchParams.get("titles")?.split("|")).toEqual(["High"]);
+  });
+
+  it("rejects the day when every sampled target is excluded, same as any other exhausted pool", async () => {
+    const targets = [target("Low", 1)];
+    const fetchImpl = wikipediaFetch({ targets, starts: ["Start one", "Start two", "Start three"] });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+      excludedTargetTitles: new Set(["low"]),
+    })).rejects.toMatchObject({ code: "daily_candidate_unavailable" });
+  });
+
+  it("discards a start used by a recent daily right after the cheap random fetch, before the gateway render", async () => {
+    const targets = [target("Target", 1)];
+    const fetchImpl = wikipediaFetch({ targets, starts: ["Start one", "Start two", "Start three"] });
+    const getArticle = vi.fn(async (title: string) => article({
+      pageId: title === "Start two" ? 102 : 103,
+      canonicalTitle: title,
+      links: allowedLinks(8),
+    }));
+    const onDiagnostic = vi.fn();
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: { getArticle, clear: () => undefined },
+      now: () => NOW,
+      onDiagnostic,
+    });
+
+    const result = await evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+      excludedStartTitles: new Set(["start one"]),
+    });
+
+    expect(result.startTitle).not.toBe("Start one");
+    expect(getArticle).not.toHaveBeenCalledWith("Start one");
+    expect(onDiagnostic).toHaveBeenCalledWith(
+      "excluded_start_discarded",
+      expect.objectContaining({ title: "Start one" }),
+    );
+  });
+
+  it("treats an empty exclusion set identically to omitting it entirely", async () => {
+    const targets = Array.from({ length: 3 }, (_, index) => target(`Target ${index + 1}`, index + 1));
+    const evaluatorWithout = createDailyCandidateEvaluator({
+      fetchImpl: wikipediaFetch({ targets, starts: ["Start one", "Start two", "Start three"] }) as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+    });
+    const evaluatorWithEmpty = createDailyCandidateEvaluator({
+      fetchImpl: wikipediaFetch({ targets, starts: ["Start one", "Start two", "Start three"] }) as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+    });
+
+    const withoutFields = await evaluatorWithout.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+    });
+    const withEmptySets = await evaluatorWithEmpty.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+      excludedTargetTitles: new Set(),
+      excludedStartTitles: new Set(),
+    });
+
+    expect(withEmptySets).toEqual(withoutFields);
+  });
+
+  it("does not exclude anything for a request that omits both fields (the on-demand random-challenge path's shape)", async () => {
+    const targets = [target("Technology", 1)];
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: wikipediaFetch({ targets, starts: ["Start one", "Start two", "Start three"] }) as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+    })).resolves.toMatchObject({ targetTitle: "Technology canonical" });
+  });
+});
+
 function target(
   title: string,
   pageId: number,

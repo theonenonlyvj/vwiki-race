@@ -110,6 +110,21 @@ export interface DailyAdminState {
   queueEntries: DailyQueueEntry[];
 }
 
+/**
+ * No-repeat exclusions for the daily generator (owner incident, 2026-07-29:
+ * the 07-29 auto-daily picked "Technology" as its target - already the
+ * 07-20 daily's target, and a live random-challenge target that same day -
+ * because the generator had no memory of anything it had picked before).
+ * Both sets are normalized via `domain/rules`' `normalizeTitle`, the same
+ * comparison the evaluator (and every other title-equality check in this
+ * codebase) already uses. See `getDailyExclusionSets`'s doc comment for
+ * exactly what each set contains.
+ */
+export interface DailyExclusionSets {
+  excludedTargetTitles: Set<string>;
+  excludedStartTitles: Set<string>;
+}
+
 export interface DailyQueuedCandidate extends DailyQueueEntry {
   challenge: Challenge;
 }
@@ -330,6 +345,32 @@ export interface RunProtocolRepository extends TrackingRepository {
    */
   sweepZzExcludedTestAccountRuns(): Promise<number>;
   findQueuedDailyCandidate(flavor: DailyFlavor): Promise<DailyQueuedCandidate | null>;
+  /**
+   * No-repeat exclusions (owner incident, 2026-07-29 - see
+   * `DailyExclusionSets`'s doc comment). Two sets, both normalized:
+   *
+   *  - `excludedTargetTitles`: every title EVER used as a daily target
+   *    (`daily_features` joined to its `challenges.target_title`), UNION
+   *    every `target_title` belonging to a currently-active catalog
+   *    challenge of ANY origin (manual, community, `wikipedia_random`, or
+   *    an older daily still live) - a fresh daily duplicating a target
+   *    that's already playable today is just as stale as repeating a past
+   *    daily. All-time, no rolling window: a target is used once, ever.
+   *  - `excludedStartTitles`: start titles used by any daily in the last 30
+   *    days - a lighter, rolling-window-only rule, since a start is just a
+   *    launch point, not "the answer" a player is trying to avoid
+   *    spoiling.
+   *
+   * `referenceDailyDate` anchors the 30-day start window - callers pass the
+   * daily date currently being generated (`job.dailyDate`), not wall-clock
+   * "now". One D1 round-trip. Called by `worker.ts`'s `scheduled()` before
+   * invoking the candidate evaluator, for both the queue-miss automatic
+   * path and the hourly retry path (the same code path there) - see that
+   * call site's own comment for the degrade-on-failure contract (a load
+   * failure here must never fail the whole daily job; thin pools degrade,
+   * never die).
+   */
+  getDailyExclusionSets(referenceDailyDate: string): Promise<DailyExclusionSets>;
   acceptDailyFeature(job: DailyChallengeJob, selection: DailyFeatureSelection): Promise<Challenge>;
   findChallengeCreationReplay(
     account: AuthorizedAccount,

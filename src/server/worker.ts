@@ -208,9 +208,11 @@ export function createWorker(options: WorkerOptions = {}) {
             queue: queueResult,
             elapsedMs: Date.now() - selectionStartedAt,
           });
+          const exclusions = await loadDailyExclusions(repository, job.dailyDate);
           const { selectedScore, ...candidate } = await getDailyCandidateSource().findCandidate({
             dailyDate: job.dailyDate,
             flavor,
+            ...exclusions,
           });
           const challenge = await repository.acceptDailyFeature(job, {
             kind: "automatic",
@@ -307,6 +309,35 @@ async function acceptQueuedDailyFeature(
 
 function isQueueSelectionRace(caught: unknown): boolean {
   return caught instanceof ApiError && caught.code === "daily_queue_selection_changed";
+}
+
+/**
+ * No-repeat exclusions (owner incident, 2026-07-29: the 07-29 auto-daily
+ * repeated "Technology", already the 07-20 daily's target - the generator
+ * had no memory of any prior daily). One D1 round-trip, shared by both the
+ * queue-miss automatic path and the hourly retry path above (they're the
+ * same code block here) - see `RunProtocolRepository.getDailyExclusionSets`'s
+ * doc comment for exactly what the two sets contain.
+ *
+ * Thin pools degrade, never die - the house rule this file's daily-job
+ * logic already follows for Wikipedia's own flakiness. A failure here (a
+ * real D1 outage, or simply a test double that doesn't implement this
+ * method - both surface as a thrown/rejected call, caught the same way)
+ * falls back to `{}`, which `findCandidate` treats identically to "no
+ * exclusions at all" - the pre-fix behavior - logged so it's visible
+ * without failing the whole daily job over a nice-to-have.
+ */
+async function loadDailyExclusions(
+  repository: RunProtocolRepository,
+  dailyDate: string,
+): Promise<Partial<Pick<DailyCandidateRequest, "excludedTargetTitles" | "excludedStartTitles">>> {
+  try {
+    const sets = await repository.getDailyExclusionSets(dailyDate);
+    return { excludedTargetTitles: sets.excludedTargetTitles, excludedStartTitles: sets.excludedStartTitles };
+  } catch (caught) {
+    logDailyJob("exclusion_sets_failed", { dailyDate, failureCode: dailyFailureCode(caught) });
+    return {};
+  }
 }
 
 async function dispatchV2(

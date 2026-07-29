@@ -135,6 +135,29 @@ export interface DailyCandidateRequest {
   dailyDate: string;
   flavor: DailyFlavor;
   signal?: AbortSignal;
+  /**
+   * No-repeat exclusions (owner incident, 2026-07-29: the 07-29 auto-daily
+   * picked "Technology" - already the 07-20 daily's target, a mega-hub the
+   * evaluator had no memory of ever having used before). Normalized
+   * (`domain/rules` `normalizeTitle`) titles to exclude from target
+   * selection - see `D1TrackingRepository.getDailyExclusionSets`'s doc
+   * comment for exactly what this set contains (all-time daily targets,
+   * plus every currently-active catalog challenge's target).
+   *
+   * Optional and left `undefined` by the on-demand random-challenge path
+   * (`dailyChallengeCandidates.ts`'s other caller, `worker.ts`'s
+   * `findRandomCandidate`) - repeats there are fine; only the curated daily
+   * needs this memory. Absent or empty is identical to "no exclusion at
+   * all" - unchanged pre-fix behavior either way.
+   */
+  excludedTargetTitles?: ReadonlySet<string>;
+  /**
+   * Normalized start titles used by any daily in the last 30 days - a
+   * lighter-touch, rolling-window rule than `excludedTargetTitles`: a start
+   * is just a launch point, not "the answer" a repeat would spoil. Same
+   * absent/empty-means-no-exclusion contract.
+   */
+  excludedStartTitles?: ReadonlySet<string>;
 }
 
 export class DailyChallengeCandidateError extends Error {
@@ -147,6 +170,8 @@ export class DailyChallengeCandidateError extends Error {
 export type DailyChallengeDiagnosticEvent =
   | "editorial_pool_source_failed"
   | "editorial_pool_fallback_used"
+  | "excluded_start_discarded"
+  | "excluded_target_discarded"
   | "inbound_link_check_failed"
   | "inbound_link_floor_discarded"
   | "random_bad_status"
@@ -238,8 +263,27 @@ export function createDailyCandidateEvaluator(options: {
             fallbackCount: editorialTargets.length,
           });
         }
-        const sampledTargets = stableSample(
+        // No-repeat exclusion gate (owner incident, 2026-07-29): drops any
+        // editorial-pool target this daily has already used (all-time) or
+        // that's still live as an active catalog challenge - BEFORE
+        // `stableSample` ever sees it, so a repeat can never occupy one of
+        // the sampled slots. Zero API cost: `editorialTargets` is already
+        // in memory (the pool fetch, or the static fallback) by the time
+        // this runs. Pool-depth sanity: the recognizable pool is Vital
+        // L1-2 (~100 entries) minus roughly 8 used so far - comfortably
+        // more than MAX_TARGETS remain eligible. If exclusions ever did
+        // exhaust a flavor's pool entirely, the existing degrade ladder
+        // (EditorialTargetPoolError -> static fallback ->
+        // "daily_candidate_unavailable" -> the scheduled job's own backoff
+        // retry) still applies unmodified - this gate adds no new failure
+        // mode of its own.
+        const eligibleTargets = filterExcludedTargets(
           editorialTargets.filter(isUsableEditorialTarget),
+          request.excludedTargetTitles,
+          diagnostic,
+        );
+        const sampledTargets = stableSample(
+          eligibleTargets,
           MAX_TARGETS,
           `${request.dailyDate}:${request.flavor}:editorial-v1`,
         );
@@ -284,8 +328,17 @@ export function createDailyCandidateEvaluator(options: {
           Array.from({ length: MAX_STARTS }, (_unused, index) =>
             randomStart(index + 1, budget, endpoint, diagnostic)),
         );
+        // No-repeat exclusion gate for starts: filtered right after the
+        // cheap "random" query (title + pageId only) and before `loadStart`
+        // spends a full gateway render on it - same "cheapest first"
+        // ordering as the target gate above.
+        const eligibleRandomStarts = filterExcludedStarts(
+          randomStarts,
+          request.excludedStartTitles,
+          diagnostic,
+        );
         const starts = [] as EvaluatedStart[];
-        for (const random of randomStarts) {
+        for (const random of eligibleRandomStarts) {
           if (!random) continue;
           const start = await loadStart(random, budget, options.gateway, diagnostic);
           if (start) starts.push(start);
@@ -970,6 +1023,58 @@ function deduplicateTargets(targets: readonly CanonicalTarget[]): CanonicalTarge
 
 function isUsableEditorialTarget(target: EditorialTarget): boolean {
   return parseWikipediaArticleInput(target.title) !== null;
+}
+
+/**
+ * No-repeat exclusion gate for targets - see the `findCandidate` call site's
+ * own comment for why this runs before `stableSample` rather than after it.
+ * An absent or empty exclusion set is a no-op (the on-demand random-
+ * challenge path's request shape never sets this field).
+ */
+function filterExcludedTargets(
+  targets: readonly EditorialTarget[],
+  excludedTitles: ReadonlySet<string> | undefined,
+  diagnostic: (
+    event: DailyChallengeDiagnosticEvent,
+    fields: Record<string, string | number | boolean>,
+  ) => void,
+): EditorialTarget[] {
+  if (!excludedTitles || excludedTitles.size === 0) return [...targets];
+  const eligible: EditorialTarget[] = [];
+  for (const target of targets) {
+    if (excludedTitles.has(normalizeTitle(target.title))) {
+      diagnostic("excluded_target_discarded", { title: target.title });
+    } else {
+      eligible.push(target);
+    }
+  }
+  return eligible;
+}
+
+/**
+ * No-repeat exclusion gate for starts - see the `findCandidate` call site's
+ * own comment for why this runs right after the cheap "random" query and
+ * before the pricier `loadStart` gateway render. Preserves array shape
+ * (nulls stay null, unmatched attempts pass through) since callers just
+ * skip falsy entries; an absent or empty exclusion set is a no-op.
+ */
+function filterExcludedStarts(
+  randoms: readonly (RandomStart | null)[],
+  excludedTitles: ReadonlySet<string> | undefined,
+  diagnostic: (
+    event: DailyChallengeDiagnosticEvent,
+    fields: Record<string, string | number | boolean>,
+  ) => void,
+): (RandomStart | null)[] {
+  if (!excludedTitles || excludedTitles.size === 0) return [...randoms];
+  return randoms.map((random) => {
+    if (!random) return null;
+    if (excludedTitles.has(normalizeTitle(random.title))) {
+      diagnostic("excluded_start_discarded", { attempt: random.attempt, title: random.title });
+      return null;
+    }
+    return random;
+  });
 }
 
 function chunks<T>(values: readonly T[], size: number): T[][] {

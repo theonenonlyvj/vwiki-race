@@ -7,7 +7,11 @@ import type {
   DailyQueueEntry,
 } from "../domain/dailyEditorial";
 import { dailyFlavorForCentralDate } from "../domain/dailyEditorial";
-import { centralDateKey, previousCentralDate } from "../domain/challengeSelection";
+import {
+  centralDateDaysBefore,
+  centralDateKey,
+  previousCentralDate,
+} from "../domain/challengeSelection";
 import {
   DAILY_TREND_INCLUSION_FLOOR,
   dailyTrendWindowCreatedAtBounds,
@@ -603,6 +607,43 @@ export function createD1TrackingRepository(options: {
          LIMIT 1`,
       ).bind(flavor).first<DailyQueuedCandidateRow>();
       return row ? mapDailyQueuedCandidateRow(row) : null;
+    },
+
+    async getDailyExclusionSets(referenceDailyDate) {
+      const dailyDate = requireDailyDate(referenceDailyDate);
+      // 30-day rolling window for starts: pure calendar-date arithmetic on
+      // the `daily_date` label itself (same as `centralDateDaysBefore`'s
+      // other daily-editorial callers) - no real timezone conversion is
+      // needed here, since `daily_date` is already a Central calendar-date
+      // string, not a UTC timestamp.
+      const startWindowCutoff = centralDateDaysBefore(dailyDate, 30);
+      // One D1 round-trip: both exclusion sets come back from a single
+      // `UNION ALL`, split back apart in JS by the `kind` discriminator,
+      // rather than two separate prepared-statement round trips.
+      const { results } = await db.prepare(
+        `SELECT 'target' AS kind, title FROM (
+           SELECT c.target_title AS title
+           FROM daily_features f
+           JOIN challenges c ON c.id = f.challenge_id
+           UNION
+           SELECT c.target_title AS title
+           FROM challenges c
+           WHERE c.is_active = 1
+         )
+         UNION ALL
+         SELECT 'start' AS kind, c.start_title AS title
+         FROM daily_features f
+         JOIN challenges c ON c.id = f.challenge_id
+         WHERE f.daily_date >= ?`,
+      ).bind(startWindowCutoff).all<{ kind: "target" | "start"; title: string }>();
+
+      const excludedTargetTitles = new Set<string>();
+      const excludedStartTitles = new Set<string>();
+      for (const row of results) {
+        (row.kind === "target" ? excludedTargetTitles : excludedStartTitles)
+          .add(normalizeTitle(row.title));
+      }
+      return { excludedTargetTitles, excludedStartTitles };
     },
 
     async acceptDailyFeature(job, selection) {

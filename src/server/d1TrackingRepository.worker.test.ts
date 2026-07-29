@@ -3720,6 +3720,114 @@ describe("Task 4 D1 projections", () => {
   });
 });
 
+describe("getDailyExclusionSets (no-repeat exclusions, owner incident 2026-07-29 - a target is used once, ever)", () => {
+  it("includes every title ever used as a daily target, all-time - no 30-day window on targets", async () => {
+    await insertReadyChallenge({ id: "excl-old-daily", startPageId: 8001, targetPageId: 8002 });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, {
+      dailyDate: "2025-01-01",
+      challengeId: "excl-old-daily",
+      selectionSource: "automatic",
+    });
+    // Deactivating it afterward (e.g. a since-retired daily) must not drop
+    // it from the all-time target memory - that's the whole point of "used
+    // once, ever" versus the separate "currently active" arm below.
+    await env.VWIKI_RACE_DB.prepare(
+      "UPDATE challenges SET is_active = 0 WHERE id = 'excl-old-daily'",
+    ).run();
+    const { repository } = fixture();
+
+    const sets = await repository.getDailyExclusionSets("2026-07-29");
+
+    expect(sets.excludedTargetTitles.has("target 8002")).toBe(true);
+  });
+
+  it("includes the target of any currently-active catalog challenge, regardless of origin, even if it was never a daily", async () => {
+    await insertReadyChallenge({ id: "excl-live-manual", startPageId: 8101, targetPageId: 8102 });
+    const { repository } = fixture();
+
+    const sets = await repository.getDailyExclusionSets("2026-07-29");
+
+    expect(sets.excludedTargetTitles.has("target 8102")).toBe(true);
+  });
+
+  it("excludes an inactive, never-featured challenge's target from the target set", async () => {
+    await insertReadyChallenge({ id: "excl-inactive-never-daily", startPageId: 8201, targetPageId: 8202 });
+    await env.VWIKI_RACE_DB.prepare(
+      "UPDATE challenges SET is_active = 0 WHERE id = 'excl-inactive-never-daily'",
+    ).run();
+    const { repository } = fixture();
+
+    const sets = await repository.getDailyExclusionSets("2026-07-29");
+
+    expect(sets.excludedTargetTitles.has("target 8202")).toBe(false);
+  });
+
+  it("includes a daily's start only within the last 30 days, and excludes an older one", async () => {
+    await insertReadyChallenge({ id: "excl-start-recent", startPageId: 8301, targetPageId: 8302 });
+    await insertReadyChallenge({ id: "excl-start-stale", startPageId: 8401, targetPageId: 8402 });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, {
+      dailyDate: "2026-07-10",
+      challengeId: "excl-start-recent",
+      selectionSource: "automatic",
+    });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, {
+      dailyDate: "2026-05-01",
+      challengeId: "excl-start-stale",
+      selectionSource: "automatic",
+    });
+    const { repository } = fixture();
+
+    const sets = await repository.getDailyExclusionSets("2026-07-29");
+
+    expect(sets.excludedStartTitles.has("start 8301")).toBe(true);
+    expect(sets.excludedStartTitles.has("start 8401")).toBe(false);
+  });
+
+  it("includes a start exactly 30 days back (inclusive boundary)", async () => {
+    await insertReadyChallenge({ id: "excl-start-boundary", startPageId: 8501, targetPageId: 8502 });
+    await insertEditorialFeature(env.VWIKI_RACE_DB, {
+      dailyDate: "2026-06-29",
+      challengeId: "excl-start-boundary",
+      selectionSource: "automatic",
+    });
+    const { repository } = fixture();
+
+    const sets = await repository.getDailyExclusionSets("2026-07-29");
+
+    expect(sets.excludedStartTitles.has("start 8501")).toBe(true);
+  });
+
+  it("normalizes titles (case/underscore/whitespace-insensitive) the same way the evaluator compares them", async () => {
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO challenges
+         (id, label, start_title, target_title, start_page_id, target_page_id,
+          validation_status, ruleset, sort_order, is_active, created_at, origin, source)
+       VALUES ('excl-normalize', 'Normalize', 'Odd   Start', 'Odd_Target', 8601, 8602,
+               'ready', 'ranked_classic', 190, 1, '2026-07-14T01:00:00.000Z', 'manual', 'curated')`,
+    ).run();
+    await insertEditorialFeature(env.VWIKI_RACE_DB, {
+      dailyDate: "2026-07-10",
+      challengeId: "excl-normalize",
+      selectionSource: "automatic",
+    });
+    const { repository } = fixture();
+
+    const sets = await repository.getDailyExclusionSets("2026-07-29");
+
+    expect(sets.excludedTargetTitles.has("odd target")).toBe(true);
+    expect(sets.excludedStartTitles.has("odd start")).toBe(true);
+  });
+
+  it("rejects a malformed reference date the same way other daily-date entry points do", async () => {
+    const { repository } = fixture();
+
+    await expect(repository.getDailyExclusionSets("2026-13-40")).rejects.toMatchObject({
+      code: "invalid_daily_date",
+      status: 400,
+    });
+  });
+});
+
 describe("getChallengePaths (GR-1 \"View graph\")", () => {
   it("refuses when the viewer has no eligible completed run on this challenge (FB-4 guard, shared with getPublicRunPath)", async () => {
     await insertCompletedV2({

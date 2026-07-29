@@ -658,6 +658,33 @@ treat it as non-optional.
 Flavor-by-weekday: `dailyFlavorForCentralDate` — Monday-Wednesday
 `recognizable`, Thursday-Friday `weird`, Saturday-Sunday `hard`.
 
+**Swapping out an already-featured daily** (not "the scheduler never
+produced one" above, but "it produced one and it's bad" — e.g. the
+2026-07-29 incident: the auto-daily picked "Technology", already the
+07-20 daily's target) is a different operation, and it bit us today:
+`challenges.daily_date` carries a UNIQUE index
+(`challenges_daily_date_unique_idx`, migration 0004 — partial, enforced
+only where `daily_date IS NOT NULL`), so you cannot point a replacement
+challenge at today's date while the bad one still holds it. **`UPDATE`
+the old challenge's `daily_date` to `NULL` FIRST — a separate statement
+before (never in the same statement as, and ideally earlier in the same
+transaction than) the `INSERT`/`UPDATE` that gives the replacement that
+`daily_date`.** Doing it the other way around throws a UNIQUE constraint
+violation. The old challenge can stay in the catalog (set `is_active = 0`
+if it shouldn't remain playable, e.g. it was never actually the intended
+daily) — only its `daily_date` needs to go.
+
+The `daily_features` row for that date needs the same care:
+`daily_date` is its primary key (one row per date) and `challenge_id` is
+separately `UNIQUE`, so a swap `UPDATE`s the existing row's `challenge_id`
+(and `selected_score`/`classifier_version` as appropriate) to point at the
+replacement rather than trying to `INSERT` a second row for the same
+date. **Re-confirm the sequence-bump step above still applies**: if the
+replacement is a brand-new challenge row (not a challenge already sitting
+in the catalog), bump `challenge_number_sequence` in the same transaction
+— this is the same easy-to-forget, genuinely-bad-failure-mode step as the
+from-scratch procedure, not a new one.
+
 ### `zz*` test-account convention
 
 Any account whose current `account_profiles.public_name` starts with `zz` is

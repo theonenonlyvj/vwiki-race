@@ -271,7 +271,17 @@ describe("daily challenge D1 jobs", () => {
       }), env),
     ]);
 
-    expect(findCandidate).toHaveBeenCalledWith({ dailyDate: "2026-07-15", flavor: "recognizable" });
+    // No-repeat exclusions (2026-07-29 fix): `scheduled()` now always fetches
+    // real exclusion sets from D1 before calling the evaluator - asserted
+    // loosely here (any Set) since their exact contents are the baseline
+    // fixture challenges' target titles, not this test's own concern (see
+    // the dedicated "no-repeat exclusions" describe block below).
+    expect(findCandidate).toHaveBeenCalledWith({
+      dailyDate: "2026-07-15",
+      flavor: "recognizable",
+      excludedTargetTitles: expect.any(Set),
+      excludedStartTitles: expect.any(Set),
+    });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT id, daily_date FROM challenges WHERE daily_date = '2026-07-15'",
     ).first()).resolves.toEqual({ id: "challenge-0004", daily_date: "2026-07-15" });
@@ -307,7 +317,12 @@ describe("daily challenge D1 jobs", () => {
       cron: "0 10 * * *",
     }), env as unknown as WorkerEnv);
 
-    expect(findCandidate).toHaveBeenCalledWith({ dailyDate: "2026-07-16", flavor: "weird" });
+    expect(findCandidate).toHaveBeenCalledWith({
+      dailyDate: "2026-07-16",
+      flavor: "weird",
+      excludedTargetTitles: expect.any(Set),
+      excludedStartTitles: expect.any(Set),
+    });
   });
 
   it("uses the hourly retry trigger only to claim an existing due job", async () => {
@@ -345,7 +360,12 @@ describe("daily challenge D1 jobs", () => {
       cron: "17 * * * *",
     }), env as unknown as WorkerEnv);
 
-    expect(findCandidate).toHaveBeenCalledWith({ dailyDate: "2026-07-11", flavor: "hard" });
+    expect(findCandidate).toHaveBeenCalledWith({
+      dailyDate: "2026-07-11",
+      flavor: "hard",
+      excludedTargetTitles: expect.any(Set),
+      excludedStartTitles: expect.any(Set),
+    });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT daily_date FROM challenges WHERE start_title = 'Retry start'",
     ).first()).resolves.toEqual({ daily_date: "2026-07-11" });
@@ -570,7 +590,12 @@ describe("daily challenge D1 jobs", () => {
       cron: "0 10 * * *",
     }), env as unknown as WorkerEnv);
 
-    expect(findCandidate).toHaveBeenCalledWith({ dailyDate: "2026-07-16", flavor: "weird" });
+    expect(findCandidate).toHaveBeenCalledWith({
+      dailyDate: "2026-07-16",
+      flavor: "weird",
+      excludedTargetTitles: expect.any(Set),
+      excludedStartTitles: expect.any(Set),
+    });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT status FROM daily_queue_entries WHERE id = ?",
     ).bind(queued.id).first()).resolves.toEqual({ status: "invalid" });
@@ -812,6 +837,166 @@ describe("daily challenge D1 jobs", () => {
     }), env as unknown as WorkerEnv);
 
     expect(createTracking).not.toHaveBeenCalled();
+  });
+});
+
+describe("no-repeat exclusions (owner incident, 2026-07-29 - a target is used once, ever)", () => {
+  it("fetches real exclusion sets from a prior daily and forwards them to the evaluator", async () => {
+    const timestamp = "2026-07-29T10:00:00.000Z";
+    const repository = createD1TrackingRepository({
+      db: env.VWIKI_RACE_DB,
+      now: () => new Date(timestamp),
+    });
+    // A genuine prior daily (9 days back - inside the 30-day start window,
+    // and all-time for the target regardless of window) that the 07-29
+    // incident's fix must remember and never repeat.
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO challenges
+         (id, label, start_title, target_title, start_page_id, target_page_id,
+          validation_status, ruleset, sort_order, is_active, created_at,
+          origin, daily_date, source)
+       VALUES ('prior-daily-challenge', 'Prior daily', 'Prior Start', 'Prior Target',
+               9001, 9002, 'ready', 'ranked_classic', 50, 1, '2026-07-20T10:00:00.000Z',
+               'daily', '2026-07-20', 'wikipedia_random')`,
+    ).run();
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO daily_features
+         (daily_date, challenge_id, flavor, selection_source, classifier_version, created_at)
+       VALUES ('2026-07-20', 'prior-daily-challenge', 'recognizable', 'automatic', 'test-v1',
+               '2026-07-20T10:00:00.000Z')`,
+    ).run();
+    const findCandidate = vi.fn(async (_request: {
+      dailyDate: string;
+      flavor: string;
+      excludedTargetTitles?: ReadonlySet<string>;
+      excludedStartTitles?: ReadonlySet<string>;
+    }) => ({
+      startTitle: "Fresh start",
+      startPageId: 9101,
+      startAllowedLinkCount: 8,
+      targetTitle: "Fresh target",
+      targetPageId: 9102,
+      selectedScore: 70,
+    }));
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: {},
+        identity: {},
+        runProtocol: repository,
+        authorize: async () => { throw new Error("not used"); },
+      } as unknown as WorkerTracking),
+      createDailyCandidateSource: () => ({ findCandidate }),
+      now: () => new Date(timestamp),
+    });
+
+    await worker.scheduled(createScheduledController({
+      scheduledTime: new Date(timestamp),
+      cron: "0 10 * * *",
+    }), env as unknown as WorkerEnv);
+
+    expect(findCandidate).toHaveBeenCalledTimes(1);
+    const request = findCandidate.mock.calls[0]![0];
+    expect(request.dailyDate).toBe("2026-07-29");
+    expect(request.excludedTargetTitles?.has("prior target")).toBe(true);
+    expect(request.excludedStartTitles?.has("prior start")).toBe(true);
+  });
+
+  it("degrades to no exclusions (old behavior) and logs a diagnostic when loading exclusion sets fails, without failing the daily job", async () => {
+    const job = {
+      dailyDate: "2026-07-15",
+      attemptCount: 1,
+      leaseToken: "exclusions-failed-lease",
+      leaseExpiresAt: "2026-07-15T10:10:00.000Z",
+    };
+    const getDailyExclusionSets = vi.fn(async () => {
+      throw new Error("D1 unavailable");
+    });
+    const acceptDailyFeature = vi.fn(async () => ({ id: "challenge-degrade-path" }));
+    const findCandidate = vi.fn(async () => ({
+      startTitle: "Automatic start",
+      startPageId: 7501,
+      startAllowedLinkCount: 8,
+      targetTitle: "Automatic target",
+      targetPageId: 7502,
+      selectedScore: 79,
+    }));
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: {},
+        identity: {},
+        runProtocol: {
+          ensureDailyChallengeJob: vi.fn(async () => undefined),
+          claimDueDailyChallengeJob: vi.fn(async () => job),
+          failDailyChallengeJob: vi.fn(async () => undefined),
+          findQueuedDailyCandidate: vi.fn(async () => null),
+          getDailyExclusionSets,
+          acceptDailyFeature,
+        },
+        authorize: async () => { throw new Error("not used"); },
+      } as unknown as WorkerTracking),
+      createDailyCandidateSource: () => ({ findCandidate }),
+      now: () => new Date("2026-07-15T10:00:00.000Z"),
+    });
+
+    await worker.scheduled(createScheduledController({
+      scheduledTime: new Date("2026-07-15T10:00:00.000Z"),
+      cron: "0 10 * * *",
+    }), env as unknown as WorkerEnv);
+
+    expect(getDailyExclusionSets).toHaveBeenCalledWith("2026-07-15");
+    // Degrades to the pre-fix shape - no exclusion fields at all - not to
+    // empty Sets under those keys; `findCandidate` treats the two
+    // identically, but this proves the failure path never even attempts to
+    // fabricate a result out of the failed call.
+    expect(findCandidate).toHaveBeenCalledWith({ dailyDate: "2026-07-15", flavor: "recognizable" });
+    expect(acceptDailyFeature).toHaveBeenCalledTimes(1);
+    expect(consoleInfo.mock.calls.some(([, payload]) =>
+      typeof payload === "string" &&
+      payload.includes("\"event\":\"exclusion_sets_failed\"") &&
+      payload.includes("\"dailyDate\":\"2026-07-15\""))).toBe(true);
+
+    consoleInfo.mockRestore();
+  });
+
+  it("degrades the same way when the repository simply has no getDailyExclusionSets method at all (an older test double / partial mock)", async () => {
+    const job = {
+      dailyDate: "2026-07-15",
+      attemptCount: 1,
+      leaseToken: "no-method-lease",
+      leaseExpiresAt: "2026-07-15T10:10:00.000Z",
+    };
+    const findCandidate = vi.fn(async () => ({
+      startTitle: "Automatic start",
+      startPageId: 7601,
+      startAllowedLinkCount: 8,
+      targetTitle: "Automatic target",
+      targetPageId: 7602,
+      selectedScore: 79,
+    }));
+    const worker = createWorker({
+      createTracking: () => ({
+        handlers: {},
+        identity: {},
+        runProtocol: {
+          ensureDailyChallengeJob: vi.fn(async () => undefined),
+          claimDueDailyChallengeJob: vi.fn(async () => job),
+          failDailyChallengeJob: vi.fn(async () => undefined),
+          findQueuedDailyCandidate: vi.fn(async () => null),
+          acceptDailyFeature: vi.fn(async () => ({ id: "challenge-no-method" })),
+        },
+        authorize: async () => { throw new Error("not used"); },
+      } as unknown as WorkerTracking),
+      createDailyCandidateSource: () => ({ findCandidate }),
+      now: () => new Date("2026-07-15T10:00:00.000Z"),
+    });
+
+    await expect(worker.scheduled(createScheduledController({
+      scheduledTime: new Date("2026-07-15T10:00:00.000Z"),
+      cron: "0 10 * * *",
+    }), env as unknown as WorkerEnv)).resolves.toBeUndefined();
+
+    expect(findCandidate).toHaveBeenCalledWith({ dailyDate: "2026-07-15", flavor: "recognizable" });
   });
 });
 
