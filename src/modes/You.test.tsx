@@ -28,7 +28,7 @@ const zeroStats: AccountStats = {
   topTargets: [],
   mostVisited: [],
   dailyStreak: 0,
-  trend30: { ranked: false, avgPlacement: null, playedCount: 0, guard: 3 },
+  trend30: { ranked: false, avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, guard: 3 },
 };
 
 function renderYou(overrides: Partial<Parameters<typeof You>[0]> = {}) {

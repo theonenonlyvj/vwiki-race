@@ -829,7 +829,7 @@ describe("VWiki Race app", () => {
         },
         topStarts: [], topTargets: [], mostVisited: [],
         dailyStreak: 6,
-        trend30: { avgPlacement: null, playedCount: 0, ranked: false, guard: 10 },
+        trend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, ranked: false, guard: 10 },
       },
     }));
     await act(async () => {
@@ -7080,7 +7080,7 @@ describe("Home v2: guarded streak/trend chip (Increment 4)", () => {
     const fetchImpl = createFetchMock({
       challenges: [twoChallenges()[0]],
       accountDailyStreak: 5,
-      accountTrend30: { avgPlacement: null, playedCount: 4, ranked: false, guard: 10 },
+      accountTrend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 4, ranked: false, guard: 10 },
     });
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
@@ -7095,7 +7095,7 @@ describe("Home v2: guarded streak/trend chip (Increment 4)", () => {
     const fetchImpl = createFetchMock({
       challenges: [twoChallenges()[0]],
       accountDailyStreak: 0,
-      accountTrend30: { avgPlacement: null, playedCount: 4, ranked: false, guard: 10 },
+      accountTrend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 4, ranked: false, guard: 10 },
     });
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
@@ -7111,7 +7111,7 @@ describe("Home v2: guarded streak/trend chip (Increment 4)", () => {
         leaderboardRow({ rank: 2, runId: "run-1", accountId: "acc-1", displayName: "Vijay", elapsedMs: 42_000, clickCount: 6 }),
       ],
       accountDailyStreak: 12,
-      accountTrend30: { avgPlacement: 2.4, playedCount: 26, ranked: true, guard: 10 },
+      accountTrend30: { avgPlacement: 2.4, beatRate: 0.62, gradedCount: 20, playedCount: 26, ranked: true, guard: 10 },
     });
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
@@ -7120,27 +7120,27 @@ describe("Home v2: guarded streak/trend chip (Increment 4)", () => {
     // element grabbed during the transient pre-play frame can detach.
     expect(await screen.findByText(/done · you finished #2/i)).toBeVisible();
     expect(screen.getByText(/🔥 12-day streak/)).toBeVisible();
-    expect(screen.getByText(/30-day avg #2\.4 \(26 challenges\)/)).toBeVisible();
+    expect(screen.getByText(/30-day beat rate 62% \(26 challenges\)/)).toBeVisible();
   });
 
   it("omits the streak text at 0 but still shows the trend chip once ranked", async () => {
     const fetchImpl = createFetchMock({
       challenges: [twoChallenges()[0]],
       accountDailyStreak: 0,
-      accountTrend30: { avgPlacement: 3.1, playedCount: 15, ranked: true, guard: 10 },
+      accountTrend30: { avgPlacement: 3.1, beatRate: 0.55, gradedCount: 12, playedCount: 15, ranked: true, guard: 10 },
     });
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
     await screen.findByRole("button", { name: /▶ race/i });
     expect(screen.queryByText(/day streak/i)).toBeNull();
-    expect(screen.getByText(/30-day avg #3\.1 \(15 challenges\)/)).toBeVisible();
+    expect(screen.getByText(/30-day beat rate 55% \(15 challenges\)/)).toBeVisible();
   });
 
   it("renders no chip at all when the streak is 0 and the trend is unranked (guard inheritance)", async () => {
     const fetchImpl = createFetchMock({
       challenges: [twoChallenges()[0]],
       accountDailyStreak: 0,
-      accountTrend30: { avgPlacement: null, playedCount: 0, ranked: false, guard: 10 },
+      accountTrend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, ranked: false, guard: 10 },
     });
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
@@ -8490,10 +8490,10 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
           window: "7",
           guard: 3,
           ranked: [
-            { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3, avgElapsedMs: 277_000, avgClicks: 9.3 },
+            { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.75, gradedCount: 3, worstDropped: false, playedCount: 3, avgElapsedMs: 277_000, avgClicks: 9.3 },
           ],
           unranked: [
-            { accountId: "acc-2", displayName: "Ari", playedCount: 1 },
+            { accountId: "acc-2", displayName: "Ari", playedCount: 1, gradedCount: 0 },
           ],
         },
       },
@@ -8505,10 +8505,11 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     const board = screen.getByRole("region", { name: "Stats" });
     await user.click(within(board).getByRole("tab", { name: "7d" }));
 
-    expect(await within(board).findByText(/rolling 7 days · ranked by average placement · finish 3 races to rank/i)).toBeVisible();
+    expect(await within(board).findByText(/rolling 7 days · ranked by the share of racers you.ve finished ahead of/i)).toBeVisible();
+    expect(within(board).getByText(/finish 3 races to rank/i)).toBeVisible();
     expect(within(board).getByText("1.")).toBeVisible();
     expect(within(board).getByText(/vijay/i)).toBeVisible();
-    expect(within(board).getByText(/avg #1\.3 · 4:37 · 9\.3 clk/)).toBeVisible();
+    expect(within(board).getByText(/beat 75% of racers · 3 races \(3 graded\) · 4:37 · 9\.3 clk/)).toBeVisible();
     expect(within(board).getByText(/\(you\)/i)).toBeVisible();
 
     const unrankedSection = within(board).getByRole("region", { name: "Not yet ranked" });
@@ -8523,7 +8524,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
           window: "30",
           guard: 10,
           ranked: [],
-          unranked: [{ accountId: "acc-1", displayName: "Vijay", playedCount: 4 }],
+          unranked: [{ accountId: "acc-1", displayName: "Vijay", playedCount: 4, gradedCount: 0 }],
         },
       },
     });
@@ -8534,7 +8535,8 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     const board = screen.getByRole("region", { name: "Stats" });
     await user.click(within(board).getByRole("tab", { name: "30d" }));
 
-    expect(await within(board).findByText(/rolling 30 days · ranked by average placement · finish 10 races to rank/i)).toBeVisible();
+    expect(await within(board).findByText(/rolling 30 days · ranked by the share of racers you.ve finished ahead of/i)).toBeVisible();
+    expect(within(board).getByText(/finish 10 races to rank/i)).toBeVisible();
     expect(within(board).getByText(/finish 6 more races to rank/i)).toBeVisible();
   });
 
@@ -8548,7 +8550,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
         "7": {
           window: "7",
           guard: 3,
-          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1 }],
+          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 1, gradedCount: 3, worstDropped: false, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1 }],
           unranked: [],
         },
       },
@@ -8572,7 +8574,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     await user.click(await screen.findByRole("button", { name: "Stats" }));
     const board = screen.getByRole("region", { name: "Stats" });
     await user.click(within(board).getByRole("tab", { name: "7d" }));
-    await user.click(await within(board).findByRole("button", { name: /vijay.*avg #1\.3/i }));
+    await user.click(await within(board).findByRole("button", { name: /vijay.*beat 100% of racers/i }));
 
     expect(await within(board).findByText("2026-07-18")).toBeVisible();
     expect(within(board).getByText(/#1 · 0:05 · 2 clk/)).toBeVisible();
@@ -8590,11 +8592,11 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
           guard: 3,
           ranked: [
             // Lower avgPlacement than prevAvgPlacement -> improved -> ▲.
-            { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1, prevAvgPlacement: 2.1 },
+            { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.8, gradedCount: 3, worstDropped: false, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1, prevAvgPlacement: 2.1 },
             // Higher avgPlacement than prevAvgPlacement -> declined -> ▼.
-            { accountId: "acc-2", displayName: "Ari", avgPlacement: 3.0, playedCount: 4, avgElapsedMs: 6_000, avgClicks: 2, prevAvgPlacement: 1.5 },
+            { accountId: "acc-2", displayName: "Ari", avgPlacement: 3.0, beatRate: 0.4, gradedCount: 4, worstDropped: true, playedCount: 4, avgElapsedMs: 6_000, avgClicks: 2, prevAvgPlacement: 1.5 },
             // No previous window standing at all -> –.
-            { accountId: "acc-3", displayName: "Sam", avgPlacement: 2.0, playedCount: 3, avgElapsedMs: 7_000, avgClicks: 3, prevAvgPlacement: null },
+            { accountId: "acc-3", displayName: "Sam", avgPlacement: 2.0, beatRate: 0.6, gradedCount: 3, worstDropped: false, playedCount: 3, avgElapsedMs: 7_000, avgClicks: 3, prevAvgPlacement: null },
           ],
           unranked: [],
         },
@@ -8623,7 +8625,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
           window: "7",
           guard: 5,
           ranked: [],
-          unranked: [{ accountId: "acc-1", displayName: "Vijay", playedCount: 2 }],
+          unranked: [{ accountId: "acc-1", displayName: "Vijay", playedCount: 2, gradedCount: 0 }],
         },
       },
     });
@@ -8645,7 +8647,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
         "7": {
           window: "7",
           guard: 3,
-          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1 }],
+          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.75, gradedCount: 3, worstDropped: false, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1 }],
           unranked: [],
         },
       },
@@ -8678,7 +8680,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
         lifetime: {
           window: "lifetime",
           guard: 2,
-          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 4, avgElapsedMs: 5_667, avgClicks: 1 }],
+          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.75, gradedCount: 4, worstDropped: false, playedCount: 4, avgElapsedMs: 5_667, avgClicks: 1 }],
           unranked: [],
           roster: [
             { accountId: "acc-1", displayName: "Vijay", racesStarted: 4, finishes: 4, wins: 3 },
@@ -8814,7 +8816,14 @@ function createFetchMock(options?: {
   // Increment 4: Home's guarded streak/trend chip and Boards' trend
   // segments.
   accountDailyStreak?: number;
-  accountTrend30?: { avgPlacement: number | null; playedCount: number; ranked: boolean; guard: number };
+  accountTrend30?: {
+    avgPlacement: number | null;
+    beatRate: number | null;
+    gradedCount: number;
+    playedCount: number;
+    ranked: boolean;
+    guard: number;
+  };
   boardsTrendsByWindow?: Record<string, {
     window: string;
     guard: number;
@@ -8822,12 +8831,15 @@ function createFetchMock(options?: {
       accountId: string;
       displayName: string | null;
       avgPlacement: number;
+      beatRate: number;
+      gradedCount: number;
+      worstDropped: boolean;
       playedCount: number;
       avgElapsedMs: number;
       avgClicks: number;
       prevAvgPlacement?: number | null;
     }>;
-    unranked: Array<{ accountId: string; displayName: string | null; playedCount: number }>;
+    unranked: Array<{ accountId: string; displayName: string | null; playedCount: number; gradedCount: number }>;
     // PKG-14: Lifetime-only "Everyone who's played" roster - absent on
     // 7d/30d fixtures, same as the real server response.
     roster?: Array<{ accountId: string; displayName: string | null; racesStarted: number; finishes: number; wins: number }>;
@@ -9063,7 +9075,7 @@ function createFetchMock(options?: {
           },
           topStarts: [], topTargets: [], mostVisited: [],
           dailyStreak: options?.accountDailyStreak ?? 0,
-          trend30: options?.accountTrend30 ?? { avgPlacement: null, playedCount: 0, ranked: false, guard: 10 },
+          trend30: options?.accountTrend30 ?? { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, ranked: false, guard: 10 },
         },
       });
     }
@@ -9498,7 +9510,7 @@ function accountStatsFixture(attempts: number) {
     topTargets: [],
     mostVisited: [],
     dailyStreak: 0,
-    trend30: { avgPlacement: null, playedCount: 0, ranked: false, guard: 10 },
+    trend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, ranked: false, guard: 10 },
   };
 }
 

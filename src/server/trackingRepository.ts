@@ -303,7 +303,20 @@ export interface RunProtocolRepository extends TrackingRepository {
    * DNF-only) doesn't appear in either array at all. `avgElapsedMs`/
    * `avgClicks` on each ranked entry are that account's own average
    * time/clicks across those same counted completions - display-only info
-   * columns; the SORT stays `avgPlacement` (unchanged by this ruling).
+   * columns, unaffected by the ruling below.
+   *
+   * Ranking council (owner-picked Option 2, 2026-08-02, "beat-rate
+   * ranking"): the SORT and headline stat are now `beatRate` (share of a
+   * race's other finishers beaten, averaged across GRADED completions, worst
+   * one dropped once an account has >= 4 graded races in-window - see
+   * `beatRateForPlacement`/`aggregateBeatRate`, domain/dailyTrends.ts). A
+   * solo (field-of-one) completion still counts toward `playedCount`/the
+   * inclusion floor but is never graded; an account needs >= 1 graded race
+   * to rank at all, so an all-solo account that's otherwise cleared the
+   * floor is `unranked` instead (`gradedCount: 0` on that entry - see
+   * `trendUnrankedProgressCopy`). `avgPlacement` stays on ranked entries for
+   * one release (kept for the F3 trend-arrow comparison) but is no longer
+   * the sort or the client's headline number.
    *
    * Callers (apiHandlers' `getBoardsTrends`, `getAccountStats`'s `trend30`)
    * just echo this `guard` back out, same as before.

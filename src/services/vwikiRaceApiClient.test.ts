@@ -814,7 +814,7 @@ describe("VWiki Race API client", () => {
       topTargets: [],
       mostVisited: [],
       dailyStreak: 0,
-      trend30: { avgPlacement: null, playedCount: 0, ranked: false, guard: 10 },
+      trend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, ranked: false, guard: 10 },
     };
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const requestUrl = String(input);
@@ -928,10 +928,10 @@ describe("VWiki Race API client", () => {
       window: "7" as const,
       guard: 2,
       ranked: [
-        { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, playedCount: 3, avgElapsedMs: 5667, avgClicks: 4.3 },
+        { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.75, gradedCount: 3, worstDropped: false, playedCount: 3, avgElapsedMs: 5667, avgClicks: 4.3 },
       ],
       unranked: [
-        { accountId: "acc-2", displayName: "Casey", playedCount: 1 },
+        { accountId: "acc-2", displayName: "Casey", playedCount: 1, gradedCount: 0 },
       ],
     };
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
@@ -1753,7 +1753,7 @@ function accountStats(attempts: number) {
     topTargets: [],
     mostVisited: [],
     dailyStreak: 0,
-    trend30: { avgPlacement: null, playedCount: 0, ranked: false, guard: 10 },
+    trend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, ranked: false, guard: 10 },
   };
 }
 

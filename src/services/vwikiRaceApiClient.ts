@@ -846,6 +846,13 @@ function isDailyTrendRankedEntry(value: unknown): value is BoardsTrendsResponse[
     hasString(value, "accountId") &&
     (value.displayName === null || hasString(value, "displayName")) &&
     hasNumber(value, "avgPlacement") &&
+    // Ranking council (owner-picked Option 2, 2026-08-02, "beat-rate
+    // ranking"): the sort/headline stat - always present on a ranked entry
+    // (it has at least one graded race, per the "needs >= 1 graded race to
+    // rank" ruling - see `aggregateBeatRate`, domain/dailyTrends.ts).
+    hasNumber(value, "beatRate") &&
+    hasNumber(value, "gradedCount") &&
+    typeof value.worstDropped === "boolean" &&
     hasNumber(value, "playedCount") &&
     // Owner ruling, 2026-07-25 ("metric-independent ranking changes"): the
     // info columns alongside the placement - this account's own average
@@ -866,7 +873,11 @@ function isDailyTrendUnrankedEntry(value: unknown): value is BoardsTrendsRespons
   return isRecord(value) &&
     hasString(value, "accountId") &&
     (value.displayName === null || hasString(value, "displayName")) &&
-    hasNumber(value, "playedCount");
+    hasNumber(value, "playedCount") &&
+    // Ranking council (2026-08-02): lets the client pick the right runway
+    // copy via `trendUnrankedProgressCopy` (below-floor vs. floor-cleared-
+    // but-ungraded).
+    hasNumber(value, "gradedCount");
 }
 
 function isRunPathResponse(value: unknown): value is RunPathResponse {
@@ -1147,6 +1158,11 @@ function isAccountStats(value: unknown): value is AccountStats {
 function isAccountTrend30(value: unknown): value is AccountStats["trend30"] {
   return isRecord(value) &&
     (value.avgPlacement === null || hasNumber(value, "avgPlacement")) &&
+    // Ranking council (2026-08-02): mirrors `DailyTrendRankedEntry`'s own
+    // `beatRate`/`gradedCount` - `beatRate` is nullable (unranked), same
+    // nullability shape as `avgPlacement`.
+    (value.beatRate === null || hasNumber(value, "beatRate")) &&
+    hasNumber(value, "gradedCount") &&
     hasNumber(value, "playedCount") &&
     typeof value.ranked === "boolean" &&
     // PKG-14: reality-scaled, server-echoed guard - required, same as

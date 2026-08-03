@@ -303,23 +303,33 @@ export interface AccountStats {
    * Increment 4 (spec §Data requirements - "Rolling avg placement" +
    * §Boards - the 7d/30d/lifetime participation guard); generalized by
    * FB-10 (owner ruling, 2026-07-20) from daily-only to every challenge:
-   * this account's own 30-day rolling-placement standing across ALL
-   * challenges played (created within that window), guard-gated the same
-   * way Boards' trend segments are. `avgPlacement` is only meaningful when
-   * `ranked` is true; a below-guard account still gets `playedCount` so
-   * Home/You can render `trendGuardProgressCopy` (domain/dailyTrends.ts)
-   * instead of a bare rejection. Owner ruling, 2026-07-25 ("metric-
-   * independent ranking changes"): `guard` is now a flat, constant floor
+   * this account's own 30-day rolling standing across ALL challenges played
+   * (created within that window), guard-gated the same way Boards' trend
+   * segments are. `avgPlacement`/`beatRate` are only meaningful when
+   * `ranked` is true; a below-guard (or below-graded) account still gets
+   * `playedCount`/`gradedCount` so Home/You can render
+   * `trendUnrankedProgressCopy` (domain/dailyTrends.ts) instead of a bare
+   * rejection. Owner ruling, 2026-07-25 ("metric-independent ranking
+   * changes"): `guard` is now a flat, constant floor
    * (`DAILY_TREND_INCLUSION_FLOOR`, domain/dailyTrends.ts) - no longer
    * reality-scaled off how many ACTIVE challenges exist in the window - and
    * `playedCount` here means COUNTED COMPLETIONS only (a DNF no longer
    * contributes, unlike "played" everywhere else in this app - see
-   * `listDailyTrends`'s doc comment). Home reads `guard` off this field the
-   * same way Boards reads `BoardsTrendsResponse.guard` (F5 invariant: never
-   * re-derived client-side).
+   * `listDailyTrends`'s doc comment). Ranking council (owner-picked Option
+   * 2, 2026-08-02): `beatRate`/`gradedCount` mirror
+   * `DailyTrendRankedEntry`'s own fields exactly (this is the same
+   * `listDailyTrends` computation, read for one account) - `ranked` is now
+   * additionally gated on `gradedCount >= 1` ("needs >= 1 graded race to
+   * rank"), not completions alone. `avgPlacement` stays in this shape for
+   * one release (client stops displaying it) - see `DailyTrendRankedEntry`'s
+   * own doc comment. Home reads `guard` off this field the same way Boards
+   * reads `BoardsTrendsResponse.guard` (F5 invariant: never re-derived
+   * client-side).
    */
   trend30: {
     avgPlacement: number | null;
+    beatRate: number | null;
+    gradedCount: number;
     playedCount: number;
     ranked: boolean;
     guard: number;
@@ -345,20 +355,38 @@ export interface AccountStats {
  * counted completions to report. `avgElapsedMs`/`avgClicks` (added the same
  * ruling) are this account's own average time/clicks across those same
  * counted completions in the window - display-only info columns alongside
- * the placement; the SORT stays `avgPlacement` (a separate metric decision
- * is pending, per the owner - this ruling deliberately didn't touch it).
- * Accounts below the floor appear as `DailyTrendUnrankedEntry` instead (with
- * no `avgPlacement`/avg columns) ONLY when they have exactly
- * `DAILY_TREND_INCLUSION_FLOOR - 1` (i.e. 1, at the current floor of 2)
- * counted completions - the "runway": one finish away from ranking. A
+ * the ranking, unaffected by the beat-rate ruling below.
+ *
+ * Ranking council (owner-picked Option 2, 2026-08-02, "beat-rate ranking"):
+ * the SORT and headline stat are now `beatRate` - the share of a race's
+ * OTHER finishers this account beat (`beatRateForPlacement`,
+ * domain/dailyTrends.ts), averaged across the account's GRADED completions
+ * in the window (a solo, field-of-one completion still counts toward
+ * `playedCount`/the inclusion floor, but isn't graded - see
+ * `aggregateBeatRate`). `gradedCount` is the graded-race count BEFORE any
+ * drop; once it reaches `BEAT_RATE_DROP_WORST_THRESHOLD` (4), the single
+ * worst graded race is excluded from the `beatRate` mean and `worstDropped`
+ * is `true` - recomputed fresh per window (stateless), so a dropped worst
+ * race never "resurrects" as the window shifts. An account needs >= 1 graded
+ * race to rank at all, even once it clears the inclusion floor on
+ * completions alone (an all-solo account stays unranked - see
+ * `trendUnrankedProgressCopy`). `avgPlacement` stays on the wire for one
+ * release (kept for `BoardsTrendRankedEntry`'s F3 trend-arrow comparison,
+ * unaffected by this ruling) - the client no longer displays it as the
+ * headline number. Accounts below the floor, OR at/above the floor but with
+ * zero graded races, appear as `DailyTrendUnrankedEntry` instead - the
+ * "runway": either still short on completions, or short on a head-to-head
+ * result - see `trendUnrankedProgressCopy` for the copy this drives. A
  * zero-completion account (whether never played or DNF-only) doesn't appear
- * in `unranked` either - see `trendGuardProgressCopy` for the copy this
- * drives.
+ * in `unranked` either.
  */
 export interface DailyTrendRankedEntry {
   accountId: string;
   displayName: string | null;
   avgPlacement: number;
+  beatRate: number;
+  gradedCount: number;
+  worstDropped: boolean;
   playedCount: number;
   avgElapsedMs: number;
   avgClicks: number;
@@ -368,6 +396,16 @@ export interface DailyTrendUnrankedEntry {
   accountId: string;
   displayName: string | null;
   playedCount: number;
+  /**
+   * Beat-rate ruling (2026-08-02): graded-race count for this account in the
+   * window (see `DailyTrendRankedEntry`'s doc comment) - always `< 1` when
+   * `playedCount < DAILY_TREND_INCLUSION_FLOOR` isn't the reason for being
+   * unranked, i.e. this can be `0` even when `playedCount` has cleared the
+   * floor (an all-solo account). Lets the client pick the right runway copy
+   * via `trendUnrankedProgressCopy` instead of the plain completion-count
+   * one.
+   */
+  gradedCount: number;
 }
 
 /**

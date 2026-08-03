@@ -142,6 +142,12 @@ export type BoardsTrendWindow = "7" | "30" | "lifetime";
  * whenever `window` is `"lifetime"` (spec: "no arrow on lifetime" - lifetime
  * has no meaningful "previous window"). Lower `avgPlacement` is better, so a
  * lower current value than `prevAvgPlacement` is an improvement (▲).
+ *
+ * Ranking council (2026-08-02): `avgPlacement`/`prevAvgPlacement` stay on
+ * this shape unchanged - the beat-rate ruling only replaced the SORT and
+ * headline stat (see `DailyTrendRankedEntry`'s doc comment, domain/types.ts)
+ * and didn't touch the F3 arrow, which keeps comparing placement trend as
+ * before.
  */
 export interface BoardsTrendRankedEntry extends DailyTrendRankedEntry {
   prevAvgPlacement: number | null;

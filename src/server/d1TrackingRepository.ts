@@ -13,6 +13,8 @@ import {
   previousCentralDate,
 } from "../domain/challengeSelection";
 import {
+  aggregateBeatRate,
+  beatRateForPlacement,
   DAILY_TREND_INCLUSION_FLOOR,
   dailyTrendWindowCreatedAtBounds,
   partitionChallengesByTrendWindow,
@@ -2781,12 +2783,23 @@ export function createD1TrackingRepository(options: {
       // this query used to also union in board-visible DNF challenges
       // (`dnf_days`/`played_days`) so a DNF alone could count toward
       // `played_count` (F2, amended by FB-7) - that's gone. The base row set
-      // is now `placements` alone (completed + board_excluded = 0, best
-      // attempt per challenge), so `completed_count`/`avg_placement`/
-      // `avg_elapsed_ms`/`avg_click_count` are all the exact same
-      // denominator - an account with zero finishes in the window (never
+      // is `placements` alone (completed + board_excluded = 0, best attempt
+      // per challenge) - an account with zero finishes in the window (never
       // played, or DNF-only) produces no row here at all and is absent from
       // both `ranked` and `unranked`.
+      //
+      // Ranking council (owner-picked Option 2, 2026-08-02, "beat-rate
+      // ranking"): this now returns one row PER COUNTED COMPLETION (not
+      // pre-aggregated per account via SQL `avg()`/`count()`) plus each
+      // completion's own challenge `field_size` (`count(*) OVER (PARTITION
+      // BY challenge_id)`, computed in the same window-function pass as
+      // `placement` - free, no extra join). Per-account aggregation
+      // (avgPlacement/avgElapsedMs/avgClicks, AND the new beat-rate/
+      // graded-count/worst-dropped math, which needs the individual graded
+      // beat VALUES to drop the single worst one - not expressible as a
+      // single SQL aggregate) all happens in JS below, off this one flat
+      // result set - one source of truth instead of splitting the "old"
+      // stats into SQL and the "new" ones into JS.
       const { results } = await db
         .prepare(
           `WITH resolved AS (
@@ -2817,52 +2830,88 @@ export function createD1TrackingRepository(options: {
                     row_number() OVER (
                       PARTITION BY challenge_id
                       ORDER BY elapsed_ms ASC, click_count ASC, completed_at ASC, id
-                    ) placement
+                    ) placement,
+                    count(*) OVER (PARTITION BY challenge_id) field_size
              FROM best
              WHERE attempt_rank = 1
-           ), avgs AS (
-             SELECT account_id,
-                    avg(placement) avg_placement,
-                    count(*) completed_count,
-                    avg(elapsed_ms) avg_elapsed_ms,
-                    avg(click_count) avg_click_count
-             FROM placements
-             GROUP BY account_id
            )
-           SELECT avgs.account_id, avgs.avg_placement, avgs.completed_count,
-                  avgs.avg_elapsed_ms, avgs.avg_click_count,
+           SELECT placements.account_id, placements.elapsed_ms, placements.click_count,
+                  placements.placement, placements.field_size,
                   p.public_name AS display_name
-           FROM avgs
-           LEFT JOIN account_profiles p ON p.account_id = avgs.account_id`,
+           FROM placements
+           LEFT JOIN account_profiles p ON p.account_id = placements.account_id`,
         )
         .bind(...challengeFilterBindings)
-        .all<DailyTrendQueryRow>();
+        .all<DailyTrendCompletionQueryRow>();
+
+      interface AccountAccumulator {
+        displayName: string | null;
+        placements: number[];
+        elapsedMsList: number[];
+        clickCountList: number[];
+        beats: number[];
+      }
+      const byAccount = new Map<string, AccountAccumulator>();
+      for (const row of results) {
+        let accumulator = byAccount.get(row.account_id);
+        if (!accumulator) {
+          accumulator = {
+            displayName: row.display_name ?? null,
+            placements: [],
+            elapsedMsList: [],
+            clickCountList: [],
+            beats: [],
+          };
+          byAccount.set(row.account_id, accumulator);
+        }
+        const placement = Number(row.placement);
+        const fieldSize = Number(row.field_size);
+        accumulator.placements.push(placement);
+        accumulator.elapsedMsList.push(Number(row.elapsed_ms));
+        accumulator.clickCountList.push(Number(row.click_count));
+        const beat = beatRateForPlacement(placement, fieldSize);
+        if (beat !== null) accumulator.beats.push(beat);
+      }
+
+      const mean = (values: number[]) => values.reduce((total, value) => total + value, 0) / values.length;
 
       const ranked: DailyTrendRankedEntry[] = [];
       const unranked: DailyTrendUnrankedEntry[] = [];
-      for (const row of results) {
-        // `avgs` is built from `placements` alone, so every row here has at
-        // least one counted completion (`completed_count >= 1`) - there is
-        // no zero-completion row to handle.
-        const completedCount = Number(row.completed_count);
-        const displayName = row.display_name ?? null;
-        if (completedCount >= guard) {
+      for (const [accountId, accumulator] of byAccount) {
+        // Every account here has at least one counted completion (it only
+        // exists in `byAccount` because a `placements` row produced it) -
+        // there is no zero-completion entry to handle.
+        const completedCount = accumulator.placements.length;
+        const displayName = accumulator.displayName;
+        const beatAggregate = aggregateBeatRate(accumulator.beats);
+        if (completedCount >= guard && beatAggregate !== null) {
           ranked.push({
-            accountId: row.account_id,
+            accountId,
             displayName,
-            avgPlacement: Math.round(Number(row.avg_placement) * 10) / 10,
+            avgPlacement: Math.round(mean(accumulator.placements) * 10) / 10,
+            beatRate: beatAggregate.beatRate,
+            gradedCount: beatAggregate.gradedCount,
+            worstDropped: beatAggregate.worstDropped,
             playedCount: completedCount,
-            avgElapsedMs: Math.round(Number(row.avg_elapsed_ms)),
-            avgClicks: Math.round(Number(row.avg_click_count) * 10) / 10,
+            avgElapsedMs: Math.round(mean(accumulator.elapsedMsList)),
+            avgClicks: Math.round(mean(accumulator.clickCountList) * 10) / 10,
           });
         } else {
-          // The "runway" - below the floor, but with at least one real
-          // finish already banked (see `trendGuardProgressCopy`).
-          unranked.push({ accountId: row.account_id, displayName, playedCount: completedCount });
+          // The "runway" - either below the completion floor, or at/above it
+          // but with zero graded races (an all-solo account: needs >= 1
+          // graded race to rank per the ranking council's ruling) - see
+          // `trendUnrankedProgressCopy`.
+          unranked.push({
+            accountId,
+            displayName,
+            playedCount: completedCount,
+            gradedCount: beatAggregate?.gradedCount ?? 0,
+          });
         }
       }
       ranked.sort((left, right) =>
-        left.avgPlacement - right.avgPlacement ||
+        right.beatRate - left.beatRate ||
+        right.gradedCount - left.gradedCount ||
         right.playedCount - left.playedCount ||
         (left.displayName ?? "").localeCompare(right.displayName ?? ""));
       unranked.sort((left, right) =>
@@ -3422,10 +3471,26 @@ export function createD1TrackingRepository(options: {
       // PKG-14: `guard` comes straight off this same `listDailyTrends` call
       // (reality-scaled, not a fixed constant) - Home reads it the same way
       // Boards reads `BoardsTrendsResponse.guard` (F5: never re-derived
-      // client-side).
+      // client-side). Ranking council (2026-08-02): `beatRate`/`gradedCount`
+      // mirror `selfRanked`/`selfUnranked`'s own fields exactly - this is the
+      // same `listDailyTrends` computation, just read for one account.
       const trend30 = selfRanked
-        ? { avgPlacement: selfRanked.avgPlacement, playedCount: selfRanked.playedCount, ranked: true, guard: trend.guard }
-        : { avgPlacement: null, playedCount: selfUnranked?.playedCount ?? 0, ranked: false, guard: trend.guard };
+        ? {
+            avgPlacement: selfRanked.avgPlacement,
+            beatRate: selfRanked.beatRate,
+            gradedCount: selfRanked.gradedCount,
+            playedCount: selfRanked.playedCount,
+            ranked: true,
+            guard: trend.guard,
+          }
+        : {
+            avgPlacement: null,
+            beatRate: null,
+            gradedCount: selfUnranked?.gradedCount ?? 0,
+            playedCount: selfUnranked?.playedCount ?? 0,
+            ranked: false,
+            guard: trend.guard,
+          };
 
       return {
         totals: {
@@ -5907,14 +5972,19 @@ interface ChallengeOutcomeQueryRow {
   peeked: number | null;
 }
 
-interface DailyTrendQueryRow {
+/**
+ * One row per counted completion (ranking council, 2026-08-02 - see
+ * `listDailyTrends`'s doc comment for why this replaced the old
+ * per-account-pre-aggregated `DailyTrendQueryRow` shape). `field_size` is
+ * that completion's own challenge's total finisher count in-window - `1` for
+ * a solo finish (ungraded, per `beatRateForPlacement`), `>= 2` otherwise.
+ */
+interface DailyTrendCompletionQueryRow {
   account_id: string;
-  // Never null in practice - `avgs` (and this whole query) is built from
-  // `placements` alone, so every row has at least one counted completion.
-  avg_placement: number | null;
-  completed_count: number;
-  avg_elapsed_ms: number;
-  avg_click_count: number;
+  elapsed_ms: number;
+  click_count: number;
+  placement: number;
+  field_size: number;
   display_name?: string | null;
 }
 

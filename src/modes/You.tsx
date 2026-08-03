@@ -318,8 +318,9 @@ function StatsPanel({
             typed, and delivered on every AccountStats response - they were
             just never rendered. Same formatters as their "Best" siblings:
             formatElapsed for the ms field, and toFixed(1) for the
-            fractional-clicks field, matching Boards.tsx's avgPlacement
-            precedent. */}
+            fractional-clicks field, one decimal place - same precision
+            server-side avgClicks fields use throughout this app (e.g.
+            listDailyTrends' ranked rows). */}
         <div>
           <dt>Avg speed</dt>
           <dd>{totals ? formatElapsed(totals.averageElapsedMs) : NO_DATA_YET}</dd>

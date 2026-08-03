@@ -16,7 +16,7 @@ import {
   type HomeHeroSelection,
 } from "../domain/challengeSelection";
 import { dailyFlavorBadgeText } from "../domain/dailyEditorial";
-import { trendGuardProgressCopy } from "../domain/dailyTrends";
+import { trendGuardProgressCopy, trendUnrankedProgressCopy } from "../domain/dailyTrends";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { PlayAnotherSuggestionState } from "../domain/playAnother";
 import { pathStepsToChain } from "../domain/winningPath";
@@ -86,22 +86,33 @@ function isTrendSegment(segment: BoardsSegment): segment is TrendSegment {
  * Boards v1/v2 (Increments 3 + 4, UX redesign spec §Boards): a segmented
  * [Today][Yesterday][7d][30d][Lifetime] control. The first two are daily
  * views (Increment 3 - unchanged this increment); the last three are
- * rolling-placement trends (Increment 4), reading `GET
- * /api/v2/boards/trends` - ranked rows that have cleared the participation
- * guard, plus a muted "not yet ranked" runway section for accounts one
- * finish short of it ("Finish N more race(s) to rank", via
- * `trendGuardProgressCopy` - owner ruling, 2026-07-25, replaced the old
- * "M/{guard} challenges" played-OR-DNF progress fraction once the guard
- * became flat/completions-only), never a bare rejection (council note). All
- * trend copy (the guard number itself, and every progress line) reads off
- * the server-echoed `trends.guard` - never re-derived client-side (F5) - so
- * a future guard-formula change can't silently disagree between server and
- * client. Each ranked row also shows its own avg time/clicks across its
- * counted completions (display-only info columns, owner ruling 2026-07-25 -
- * the SORT stays `avgPlacement`) plus a muted ▲/▼/– trend arrow (F3)
- * comparing its `avgPlacement` against the immediately-preceding same-length
- * window (server-computed as `prevAvgPlacement`); lifetime never gets one
- * (no "previous window" to compare against). A failed trends fetch renders
+ * rolling trends (Increment 4), reading `GET /api/v2/boards/trends` - ranked
+ * rows that have cleared the participation guard, plus a muted "not yet
+ * ranked" runway section for accounts short of it (`trendUnrankedProgressCopy`
+ * - either "Finish N more race(s) to rank" for a below-floor account, per
+ * owner ruling 2026-07-25, or "Race someone head-to-head to rank" for an
+ * account that's cleared the completion floor but graded zero races - see
+ * below), never a bare rejection (council note). All trend copy (the guard
+ * number itself, and every progress line) reads off the server-echoed
+ * `trends.guard` - never re-derived client-side (F5) - so a future
+ * guard-formula change can't silently disagree between server and client.
+ *
+ * Ranking council (owner-picked Option 2, 2026-08-02, "beat-rate ranking"):
+ * each ranked row's headline is now its beat rate - the share of that race's
+ * other finishers it beat, averaged across graded (non-solo) completions in
+ * the window, worst one dropped once it has >= 4 graded races
+ * (`row.beatRate`/`row.gradedCount`/`row.worstDropped` - domain/types.ts'
+ * `DailyTrendRankedEntry` doc comment has the full rule) - this is also now
+ * the SORT (`avgPlacement` stays on the wire for one release for the F3
+ * arrow below, but the client no longer displays it as a number). Each
+ * ranked row also still shows its own avg time/clicks across its counted
+ * completions (display-only info columns, untouched by this ruling) plus a
+ * muted ▲/▼/– trend arrow (F3) comparing its `avgPlacement` against the
+ * immediately-preceding same-length window (server-computed as
+ * `prevAvgPlacement`) - the arrow's own placement-based comparison is
+ * unaffected by the beat-rate ruling (no equivalent "previous window" arrow
+ * for beat rate yet); lifetime never gets one (no "previous window" to
+ * compare against). A failed trends fetch renders
  * an error banner + Retry (F6), never the "no one has cleared the guard" empty
  * state - that empty state is reserved for a real zero-ranked response.
  *
@@ -611,7 +622,9 @@ export default function Boards({
         ) : (
           <>
             <p className="board-trend-subheader muted">
-              Rolling {TREND_PROSE_LABEL[segment]} · ranked by average placement · {trendGuardProgressCopy(0, guard)}.
+              Rolling {TREND_PROSE_LABEL[segment]} · Ranked by the share of racers you&apos;ve
+              finished ahead of — your worst race doesn&apos;t count against you.{" "}
+              {trendGuardProgressCopy(0, guard)}
             </p>
 
             <section className="board-snippet" aria-label={`${SEGMENT_LABEL[segment]} rolling trend`}>
@@ -634,7 +647,7 @@ export default function Boards({
                             {isYou ? <span className="muted"> (you)</span> : null}
                           </span>
                           <span className="trend-row-score">
-                            avg #{row.avgPlacement.toFixed(1)} · {formatTimeAndClicks(row.avgElapsedMs, row.avgClicks)}{" "}
+                            {trendBeatRateText(row)} · {formatTimeAndClicks(row.avgElapsedMs, row.avgClicks)}{" "}
                             <span aria-label={trendArrowLabel(row)} className="trend-arrow muted">
                               {trendArrowGlyph(row)}
                             </span>
@@ -676,13 +689,15 @@ export default function Boards({
 
             {unrankedRows.length ? (
               // Owner ruling, 2026-07-25 ("metric-independent ranking
-              // changes"): the "runway" - every row here has cleared 0 but
-              // not `guard` counted completions (only ever exactly `guard -
-              // 1` in practice, since the server never returns a
-              // zero-completion account in this list at all - see
-              // `listDailyTrends`). Replaces the old "{playedCount}/{guard}
-              // challenges" progress fraction with `trendGuardProgressCopy`'s
-              // "Finish N more race(s) to rank" - the same copy Home's
+              // changes"), extended by the ranking council (2026-08-02): the
+              // "runway" now covers two distinct short-of-ranked cases -
+              // below `guard` counted completions (the original case; copy
+              // "Finish N more race(s) to rank"), OR at/above `guard` but
+              // with zero GRADED races - an all-solo account (copy "Race
+              // someone head-to-head to rank" instead, since it already has
+              // enough completions). `trendUnrankedProgressCopy`
+              // (domain/dailyTrends.ts) picks the right one off each row's
+              // own `playedCount`/`gradedCount` - the same copy Home's
               // below-guard streak/trend chip uses, off the same numbers.
               <section className="board-snippet board-trend-unranked muted" aria-label="Not yet ranked">
                 <h3>Not yet ranked</h3>
@@ -695,7 +710,7 @@ export default function Boards({
                           {row.displayName ?? "Unknown"}
                           {isYou ? <span className="muted"> (you)</span> : null}
                         </span>
-                        <span>{trendGuardProgressCopy(row.playedCount, guard)}</span>
+                        <span>{trendUnrankedProgressCopy(row, guard)}</span>
                       </li>
                     );
                   })}
@@ -956,6 +971,21 @@ function recentDailyDetailText(detail: RecentDailyDetail): string {
     case "not-played":
       return "Not played";
   }
+}
+
+/**
+ * Ranking council (owner-picked Option 2, 2026-08-02, "beat-rate ranking"):
+ * a ranked row's headline text - "beat 75% of racers · 9 races (7 graded,
+ * worst dropped)" (spec's own worked example). `playedCount` is every
+ * counted completion in the window (solo finishes included); `gradedCount`
+ * is how many of those were graded (non-solo); `worstDropped` only ever
+ * shows once `gradedCount` has cleared `BEAT_RATE_DROP_WORST_THRESHOLD` (4).
+ */
+function trendBeatRateText(row: BoardsTrendRankedEntry): string {
+  const percent = Math.round(row.beatRate * 100);
+  const races = `${row.playedCount} ${row.playedCount === 1 ? "race" : "races"}`;
+  const graded = `${row.gradedCount} graded${row.worstDropped ? ", worst dropped" : ""}`;
+  return `beat ${percent}% of racers · ${races} (${graded})`;
 }
 
 /**

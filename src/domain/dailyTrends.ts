@@ -97,6 +97,102 @@ export function trendGuardProgressCopy(completedCount: number, guard: number): s
 }
 
 /**
+ * Beat-rate ranking (ranking council, owner-picked Option 2, 2026-08-02):
+ * one completed race's contribution to an account's beat-rate score - the
+ * share of that race's OTHER finishers this account beat, i.e. `(fieldSize -
+ * placement) / (fieldSize - 1)`. A solo finish (`fieldSize` 1, nobody else to
+ * beat) is deliberately NOT graded - returns `null` - even though it still
+ * counts toward `DAILY_TREND_INCLUSION_FLOOR` (the inclusion floor and the
+ * beat-rate grading are two independent gates; see `aggregateBeatRate`'s doc
+ * comment and the "needs >= 1 graded race to rank" ruling). A 2-player board
+ * grades to exactly 1.0 (won) or 0.0 (lost) - `(2 - 1) / (2 - 1) = 1`, `(2 -
+ * 2) / (2 - 1) = 0` - per the ruling's own worked example.
+ */
+export function beatRateForPlacement(placement: number, fieldSize: number): number | null {
+  if (fieldSize < 2) return null;
+  return (fieldSize - placement) / (fieldSize - 1);
+}
+
+/**
+ * Once an account has at least this many graded races in a window, its
+ * single worst one is dropped before averaging (ranking council spec:
+ * "exactly-4-graded triggers drop-worst"). Below this count, every graded
+ * race counts toward the mean.
+ */
+export const BEAT_RATE_DROP_WORST_THRESHOLD = 4;
+
+export interface BeatRateAggregate {
+  /** Mean of the counted (post-drop, if applicable) graded beats, 0-1. */
+  beatRate: number;
+  /** Total graded races in-window, BEFORE any drop - what the row displays. */
+  gradedCount: number;
+  /** Whether the single worst graded race was excluded from the mean. */
+  worstDropped: boolean;
+}
+
+/**
+ * Aggregates one account's in-window graded beat values (see
+ * `beatRateForPlacement` - solo finishes are already excluded from `beats`
+ * before this is called) into the window's beat-rate score. Returns `null`
+ * for zero graded races - an account can clear `DAILY_TREND_INCLUSION_FLOOR`
+ * on completions alone yet still have nothing to grade (e.g. an all-solo
+ * account), and the ranking council ruled that account stays unranked
+ * ("needs >= 1 graded race to rank") rather than rendering a meaningless
+ * beat rate. Stateless and per-window: called fresh for whichever window
+ * `listDailyTrends` is computing, so a previously dropped worst race never
+ * "resurrects" as the window shifts - it's simply never in scope, or back in
+ * scope and re-evaluated as any other race would be.
+ *
+ * Ties for "worst" (multiple races at the same minimum beat) drop exactly
+ * one instance - which one is arbitrary and doesn't change the resulting
+ * mean, since they're equal values.
+ */
+export function aggregateBeatRate(beats: number[]): BeatRateAggregate | null {
+  if (beats.length === 0) return null;
+  const gradedCount = beats.length;
+  let counted = beats;
+  let worstDropped = false;
+  if (gradedCount >= BEAT_RATE_DROP_WORST_THRESHOLD) {
+    const worstIndex = beats.reduce(
+      (worst, value, index) => (value < beats[worst] ? index : worst),
+      0,
+    );
+    counted = beats.slice(0, worstIndex).concat(beats.slice(worstIndex + 1));
+    worstDropped = true;
+  }
+  const sum = counted.reduce((total, value) => total + value, 0);
+  // Rounded to 4 decimal places (hundredths of a percentage point) - plenty
+  // of precision for the client's whole-percentage display
+  // (`Math.round(beatRate * 100)`) while keeping the wire payload free of
+  // long floating-point tails like 0.6666666666666666.
+  const beatRate = Math.round((sum / counted.length) * 10000) / 10000;
+  return { beatRate, gradedCount, worstDropped };
+}
+
+/**
+ * Boards' "Not yet ranked" runway copy (extends `trendGuardProgressCopy` for
+ * the beat-rate ruling's second gate): an account can clear
+ * `DAILY_TREND_INCLUSION_FLOOR` on raw completions alone yet still have zero
+ * GRADED races (every completion so far was a solo finish, nobody to beat) -
+ * the council's ruling is that this account needs a head-to-head result
+ * before it can rank, and `trendGuardProgressCopy`'s ordinary "Finish 0 more
+ * races to rank" would be actively wrong here (it already has enough
+ * completions; it just has nothing graded). Falls back to the ordinary
+ * completion-count copy for every other unranked case (below the floor, or
+ * below the floor AND ungraded - the floor message takes priority since
+ * finishing more races is the account's actual next step either way).
+ */
+export function trendUnrankedProgressCopy(
+  entry: { playedCount: number; gradedCount: number },
+  guard: number,
+): string {
+  if (entry.playedCount >= guard && entry.gradedCount === 0) {
+    return "Race someone head-to-head to rank";
+  }
+  return trendGuardProgressCopy(entry.playedCount, guard);
+}
+
+/**
  * The inclusive Central-date start of a fixed-size trend window ending at
  * `todayCentral` - e.g. a 7-day window ending today covers today and the 6
  * days before it. Lifetime (`windowDays: null`) has no start boundary and

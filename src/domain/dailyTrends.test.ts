@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  aggregateBeatRate,
+  BEAT_RATE_DROP_WORST_THRESHOLD,
+  beatRateForPlacement,
   DAILY_TREND_INCLUSION_FLOOR,
   dailyTrendGuard,
   dailyTrendPreviousWindowEnd,
@@ -7,6 +10,7 @@ import {
   dailyTrendWindowStart,
   partitionChallengesByTrendWindow,
   trendGuardProgressCopy,
+  trendUnrankedProgressCopy,
   type TrendChallengeCandidate,
 } from "./dailyTrends";
 
@@ -75,6 +79,114 @@ describe("trendGuardProgressCopy (owner ruling, 2026-07-25: replaces the old N/M
 
   it("clamps to zero remaining rather than going negative if ever called past the guard", () => {
     expect(trendGuardProgressCopy(5, 2)).toBe("Finish 0 more races to rank");
+  });
+});
+
+describe("beatRateForPlacement (ranking council, owner-picked Option 2, 2026-08-02: beat-rate ranking)", () => {
+  it("grades a solo (field-of-one) finish as null - nobody to beat", () => {
+    expect(beatRateForPlacement(1, 1)).toBeNull();
+  });
+
+  it("grades a 2-player board to exactly 1.0 (won) or 0.0 (lost) - the ruling's own worked example", () => {
+    expect(beatRateForPlacement(1, 2)).toBe(1);
+    expect(beatRateForPlacement(2, 2)).toBe(0);
+  });
+
+  it("grades the share of OTHER finishers beaten in a larger field", () => {
+    // Field of 4: 1st beats all 3 others (1.0); 2nd beats 2 of 3 (0.667);
+    // 3rd beats 1 of 3 (0.333); last beats none (0.0).
+    expect(beatRateForPlacement(1, 4)).toBe(1);
+    expect(beatRateForPlacement(2, 4)).toBeCloseTo(2 / 3);
+    expect(beatRateForPlacement(3, 4)).toBeCloseTo(1 / 3);
+    expect(beatRateForPlacement(4, 4)).toBe(0);
+  });
+});
+
+describe("aggregateBeatRate (ranking council, 2026-08-02)", () => {
+  it("returns null for zero graded races - an all-solo account needs >= 1 graded race to rank", () => {
+    expect(aggregateBeatRate([])).toBeNull();
+  });
+
+  it("averages every graded beat when below the drop-worst threshold", () => {
+    expect(aggregateBeatRate([1, 0])).toEqual({ beatRate: 0.5, gradedCount: 2, worstDropped: false });
+    expect(aggregateBeatRate([1, 1, 0.5])).toEqual({
+      beatRate: 0.8333,
+      gradedCount: 3,
+      worstDropped: false,
+    });
+  });
+
+  it("does NOT drop the worst race at exactly one below the threshold (3 graded)", () => {
+    expect(BEAT_RATE_DROP_WORST_THRESHOLD).toBe(4);
+    // Mean of all three: (1+1+0)/3 = 0.6666... -> rounds to 0.6667.
+    expect(aggregateBeatRate([1, 1, 0])).toEqual({ beatRate: 0.6667, gradedCount: 3, worstDropped: false });
+  });
+
+  it("drops the single worst race at exactly the threshold (4 graded) - 'exactly-4-graded triggers drop-worst'", () => {
+    // Worst is the 0; mean of the remaining three 1.0s is 1.0.
+    expect(aggregateBeatRate([1, 1, 1, 0])).toEqual({ beatRate: 1, gradedCount: 4, worstDropped: true });
+  });
+
+  it("keeps dropping only the single worst race well past the threshold", () => {
+    // Worst is 0.2; mean of the remaining four is (1+0.8+0.6+0.4)/4 = 0.7.
+    expect(aggregateBeatRate([1, 0.8, 0.6, 0.4, 0.2])).toEqual({
+      beatRate: 0.7,
+      gradedCount: 5,
+      worstDropped: true,
+    });
+  });
+
+  it("drops exactly one instance on a tie for worst - the mean is unaffected either way since the tied values are equal", () => {
+    // Two races tie at 0 (the worst); dropping either one leaves the same
+    // remaining set {1, 1, 0} -> mean (1+1+0)/3 = 0.6666... -> rounds to 0.6667.
+    expect(aggregateBeatRate([1, 1, 0, 0])).toEqual({ beatRate: 0.6667, gradedCount: 4, worstDropped: true });
+  });
+
+  it("rounds the mean to 4 decimal places, not a long floating-point tail", () => {
+    // (1 + 1 + 0) / 3 = 0.6666666... - the raw JS division has a long tail.
+    const raw = (1 + 1 + 0) / 3;
+    expect(String(raw).length).toBeGreaterThan(10);
+    expect(aggregateBeatRate([1, 1, 0])?.beatRate).toBe(0.6667);
+  });
+
+  it("recomputes fresh from whatever beats are passed in - a previously dropped worst race never 'resurrects' by construction (stateless, no memory across calls)", () => {
+    // A 5-race window that drops its worst race...
+    const fiveRaceWindow = aggregateBeatRate([1, 0.8, 0.6, 0.4, 0.2]);
+    expect(fiveRaceWindow).toMatchObject({ worstDropped: true, gradedCount: 5 });
+    // ...shifts down to a 4-race window (the oldest race - the 0.2 worst
+    // race - fell out of scope entirely, not "restored"): still >= the
+    // threshold, drops whatever's now the worst of the remaining four.
+    const fourRaceWindow = aggregateBeatRate([1, 0.8, 0.6, 0.4]);
+    expect(fourRaceWindow).toEqual({ beatRate: 0.8, gradedCount: 4, worstDropped: true });
+    // ...shifts down again to a 3-race window: now below the threshold, so
+    // nothing is dropped at all - every graded race counts.
+    const threeRaceWindow = aggregateBeatRate([1, 0.8, 0.6]);
+    expect(threeRaceWindow).toEqual({ beatRate: 0.8, gradedCount: 3, worstDropped: false });
+  });
+});
+
+describe("trendUnrankedProgressCopy (ranking council, 2026-08-02: extends trendGuardProgressCopy for the beat-rate ruling's second gate)", () => {
+  it("falls back to the ordinary completion-count copy below the inclusion floor", () => {
+    expect(trendUnrankedProgressCopy({ playedCount: 0, gradedCount: 0 }, 2)).toBe("Finish 2 races to rank");
+    expect(trendUnrankedProgressCopy({ playedCount: 1, gradedCount: 0 }, 2)).toBe("Finish 1 more race to rank");
+  });
+
+  it("gives the head-to-head copy once the floor is cleared but zero races are graded (an all-solo account)", () => {
+    expect(trendUnrankedProgressCopy({ playedCount: 2, gradedCount: 0 }, 2)).toBe(
+      "Race someone head-to-head to rank",
+    );
+    expect(trendUnrankedProgressCopy({ playedCount: 5, gradedCount: 0 }, 2)).toBe(
+      "Race someone head-to-head to rank",
+    );
+  });
+
+  it("falls back to the ordinary copy once at least one race is graded, even below the floor (a genuine below-floor account can still have a graded race)", () => {
+    // Below the floor (1 < 2) but that 1 completion was graded - the floor
+    // message takes priority since finishing more races is the actual next
+    // step either way (this account isn't unranked BECAUSE of grading).
+    expect(trendUnrankedProgressCopy({ playedCount: 1, gradedCount: 1 }, 2)).toBe(
+      "Finish 1 more race to rank",
+    );
   });
 });
 

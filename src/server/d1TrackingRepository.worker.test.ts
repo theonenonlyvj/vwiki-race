@@ -3724,7 +3724,9 @@ describe("Task 4 D1 projections", () => {
       // `guard` is now the flat `DAILY_TREND_INCLUSION_FLOOR` (2),
       // regardless of catalog size (was `ceil(0/3) = 1` under the old
       // reality-scaled formula, since this fixture is otherwise empty).
-      trend30: { avgPlacement: null, playedCount: 0, ranked: false, guard: 2 },
+      // Ranking council (2026-08-02): `beatRate`/`gradedCount` mirror the
+      // below-guard shape - null/0 with zero completions.
+      trend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, ranked: false, guard: 2 },
     });
   });
 
@@ -3786,8 +3788,9 @@ describe("Task 4 D1 projections", () => {
       // changes"): the guard is a flat 2 counted completions now (not
       // catalog-scaled) - this account's single completion stays below it,
       // so it's unranked with no avgPlacement, same shape the below-guard
-      // branch above uses.
-      trend30: { avgPlacement: null, playedCount: 1, ranked: false, guard: 2 },
+      // branch above uses. It's also a SOLO completion (nobody else raced
+      // `challenge-0001` in this fixture), so `gradedCount` is 0 regardless.
+      trend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 1, ranked: false, guard: 2 },
     });
     await expect(count("account_profiles")).resolves.toBe(0);
     await expect(count("account_aliases")).resolves.toBe(1);
@@ -5301,18 +5304,29 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     // A: placements 1, 2, 1 -> avg 1.333... rounded to 1 decimal -> 1.3;
     // 3 counted completions clears the flat floor (2) -> ranked. avg
     // elapsed = (5000+9000+3000)/3 = 5666.67ms -> rounds to 5667; avg clicks
-    // = 1 (insertCompletedV2 always writes click_count = 1).
+    // = 1 (insertCompletedV2 always writes click_count = 1). Ranking council
+    // (2026-08-02): A's beats are day 1 (2-player field, placed 1st -> beat
+    // 1.0) and day 2 (2-player field, placed 2nd -> beat 0.0); day 3 is solo
+    // (ungraded) - gradedCount 2, beatRate mean(1, 0) = 0.5, below the
+    // drop-worst threshold (4) so nothing is dropped.
     expect(ranked).toEqual([
-      { accountId: accountA, displayName: null, avgPlacement: 1.3, playedCount: 3, avgElapsedMs: 5667, avgClicks: 1 },
+      {
+        accountId: accountA, displayName: null, avgPlacement: 1.3,
+        beatRate: 0.5, gradedCount: 2, worstDropped: false,
+        playedCount: 3, avgElapsedMs: 5667, avgClicks: 1,
+      },
     ]);
     // B (1 completion) and C (1 completion) both stay one short of the
     // floor - neither DNFs nor a second challenge, just genuinely below it.
+    // Both ARE graded (each raced A head-to-head on their one shared day) -
+    // B lost (beat 0.0), C won (beat 1.0) - but the floor gate is checked
+    // first, so both land in `unranked` regardless.
     expect(unranked.map((entry) => entry.accountId).sort()).toEqual([accountB, accountC].sort());
     expect(unranked.find((entry) => entry.accountId === accountB)).toEqual(
-      { accountId: accountB, displayName: null, playedCount: 1 },
+      { accountId: accountB, displayName: null, playedCount: 1, gradedCount: 1 },
     );
     expect(unranked.find((entry) => entry.accountId === accountC)).toEqual(
-      { accountId: accountC, displayName: null, playedCount: 1 },
+      { accountId: accountC, displayName: null, playedCount: 1, gradedCount: 1 },
     );
   });
 
@@ -5327,14 +5341,30 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate: "2026-07-18", challengeId: "trend-avg-d2", selectionSource: "automatic" });
     await insertCompletedV2({ id: "trend-avg-d2-run", accountId, elapsedMs: 8_000, completedAt: "2026-07-18T01:00:08.000Z", challengeId: "trend-avg-d2" });
     await env.VWIKI_RACE_DB.prepare("UPDATE runs SET click_count = 10 WHERE id = ?").bind("trend-avg-d2-run").run();
+    // Ranking council (2026-08-02): "needs >= 1 graded race to rank" - a
+    // slower opponent on day 2 only, so this account still places 1st there
+    // (avgPlacement/avgElapsedMs/avgClicks below are all unaffected - they're
+    // this account's OWN completions only) but now has a real head-to-head
+    // result to grade, keeping it ranked instead of falling to the all-solo
+    // "needs a graded race" runway.
+    await insertCompletedV2({
+      id: "trend-avg-d2-opponent-run", accountId: "trend-avg-columns-opponent",
+      elapsedMs: 20_000, completedAt: "2026-07-18T01:00:20.000Z", challengeId: "trend-avg-d2",
+    });
 
     const { repository } = fixture();
     const { ranked } = await repository.listDailyTrends(7, "2026-07-18");
 
-    // Both solo -> avgPlacement 1; avg elapsed = (4000+8000)/2 = 6000ms;
-    // avg clicks = (4+10)/2 = 7 - display-only, doesn't affect the sort.
+    // Both of this account's own completions place 1st -> avgPlacement 1;
+    // avg elapsed = (4000+8000)/2 = 6000ms; avg clicks = (4+10)/2 = 7 -
+    // display-only, doesn't affect the sort. Day 1 is solo (ungraded); day 2
+    // is a graded 2-player win (beat 1.0) - gradedCount 1, beatRate 1.
     expect(ranked).toEqual([
-      { accountId, displayName: null, avgPlacement: 1, playedCount: 2, avgElapsedMs: 6000, avgClicks: 7 },
+      {
+        accountId, displayName: null, avgPlacement: 1,
+        beatRate: 1, gradedCount: 1, worstDropped: false,
+        playedCount: 2, avgElapsedMs: 6000, avgClicks: 7,
+      },
     ]);
   });
 
@@ -5359,14 +5389,27 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
       await insertCompletedV2({ id: runId, accountId, elapsedMs: day.elapsedMs, completedAt: day.completedAt, challengeId: day.id });
       await env.VWIKI_RACE_DB.prepare("UPDATE runs SET click_count = ? WHERE id = ?").bind(day.clickCount, runId).run();
     }
+    // Ranking council (2026-08-02): a slower opponent on day 3 only, so this
+    // account needs >= 1 graded race to rank at all - its own avg
+    // elapsed/clicks below are unaffected (its own completions only).
+    await insertCompletedV2({
+      id: "trend-avg-round-d3-opponent-run", accountId: "trend-avg-rounding-opponent",
+      elapsedMs: 9_000, completedAt: "2026-07-18T01:00:09.000Z", challengeId: "trend-avg-round-d3",
+    });
 
     const { repository } = fixture();
     const { ranked } = await repository.listDailyTrends(7, "2026-07-18");
 
     // avg elapsed = (1000+2000+2000)/3 = 1666.67 -> rounds to 1667ms;
-    // avg clicks = (1+2+2)/3 = 1.667 -> rounds to 1.7 (one decimal).
+    // avg clicks = (1+2+2)/3 = 1.667 -> rounds to 1.7 (one decimal). Day 3's
+    // 2-player field (this account placed 1st) is the only graded race -
+    // gradedCount 1, beatRate 1.
     expect(ranked).toEqual([
-      { accountId, displayName: null, avgPlacement: 1, playedCount: 3, avgElapsedMs: 1667, avgClicks: 1.7 },
+      {
+        accountId, displayName: null, avgPlacement: 1,
+        beatRate: 1, gradedCount: 1, worstDropped: false,
+        playedCount: 3, avgElapsedMs: 1667, avgClicks: 1.7,
+      },
     ]);
   });
 
@@ -5381,6 +5424,14 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     const accountId = "trend-window-account";
     await insertCompletedV2({ id: "window-inside-run", accountId, elapsedMs: 5_000, completedAt: "2026-07-18T01:00:05.000Z", challengeId: "trend-window-inside" });
     await insertCompletedV2({ id: "window-outside-run", accountId, elapsedMs: 5_000, completedAt: "2026-07-01T01:00:05.000Z", challengeId: "trend-window-outside" });
+    // Ranking council (2026-08-02): a slower opponent on the in-window
+    // challenge only, so lifetime's 2 completions include >= 1 graded race
+    // (needed to rank at all) - the outside-window challenge stays solo,
+    // irrelevant to this test's own window-boundary focus either way.
+    await insertCompletedV2({
+      id: "window-inside-opponent-run", accountId: "trend-window-opponent",
+      elapsedMs: 9_000, completedAt: "2026-07-18T01:00:09.000Z", challengeId: "trend-window-inside",
+    });
 
     const { repository } = fixture();
     const week = await repository.listDailyTrends(7, "2026-07-18");
@@ -5499,56 +5550,114 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     expect(ids).not.toContain(ghost);
   });
 
-  it("orders ranked entries by avgPlacement ascending, tying accounts by playedCount (more played first)", async () => {
-    const dana = "trend-order-dana";
-    const casey = "trend-order-casey";
-    await insertAccountProfile(dana, "Dana");
-    await insertAccountProfile(casey, "Casey");
-    const danaDailies = ["2026-07-15", "2026-07-16", "2026-07-17", "2026-07-18"];
-    const caseyDailies = ["2026-07-12", "2026-07-13", "2026-07-14"];
-    for (const [index, dailyDate] of danaDailies.entries()) {
-      const challengeId = `trend-order-dana-${index}`;
-      await insertDailyChallenge({ id: challengeId, sortOrder: 900 + index, createdAt: `${dailyDate}T12:00:00.000Z` });
-      await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate, challengeId, selectionSource: "automatic" });
-      await insertCompletedV2({ id: `${challengeId}-run`, accountId: dana, elapsedMs: 5_000, completedAt: `${dailyDate}T01:00:05.000Z`, challengeId });
-    }
-    for (const [index, dailyDate] of caseyDailies.entries()) {
-      const challengeId = `trend-order-casey-${index}`;
-      await insertDailyChallenge({ id: challengeId, sortOrder: 910 + index, createdAt: `${dailyDate}T12:00:00.000Z` });
-      await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate, challengeId, selectionSource: "automatic" });
-      await insertCompletedV2({ id: `${challengeId}-run`, accountId: casey, elapsedMs: 5_000, completedAt: `${dailyDate}T01:00:05.000Z`, challengeId });
+  it("sorts ranked entries by beat rate descending (ranking council, owner-picked Option 2, 2026-08-02: 'beat-rate ranking')", async () => {
+    const high = "trend-beatrate-high";
+    const low = "trend-beatrate-low";
+    await insertAccountProfile(high, "High");
+    await insertAccountProfile(low, "Low");
+    // Two head-to-head challenges, `high` always faster - it wins both
+    // (beat 1.0 each -> beatRate 1.0) and `low` loses both (beat 0.0 each ->
+    // beatRate 0.0). Neither is registered as a daily feature - window
+    // membership is by the challenge's own `created_at` (FB-10), not
+    // `daily_features`, so that's not needed here (see the sibling
+    // "FB-10: a non-daily (manual) challenge..." test above).
+    for (const [index, dailyDate] of ["2026-07-17", "2026-07-18"].entries()) {
+      const challengeId = `trend-beatrate-h2h-${index}`;
+      await insertDailyChallenge({ id: challengeId, sortOrder: 6000 + index, createdAt: `${dailyDate}T12:00:00.000Z` });
+      await insertCompletedV2({ id: `${challengeId}-high`, accountId: high, elapsedMs: 5_000, completedAt: `${dailyDate}T01:00:05.000Z`, challengeId });
+      await insertCompletedV2({ id: `${challengeId}-low`, accountId: low, elapsedMs: 9_000, completedAt: `${dailyDate}T01:00:09.000Z`, challengeId });
     }
 
     const { repository } = fixture();
     const { ranked } = await repository.listDailyTrends(7, "2026-07-18");
 
-    // Both solo every daily they played -> avg placement 1.0 for each (tied);
-    // Dana played 4, Casey 3 - more played must sort first on the tie.
-    expect(ranked.map((entry) => entry.accountId)).toEqual([dana, casey]);
+    expect(ranked.map((entry) => entry.accountId)).toEqual([high, low]);
+    expect(ranked.find((entry) => entry.accountId === high)).toMatchObject({ beatRate: 1, gradedCount: 2 });
+    expect(ranked.find((entry) => entry.accountId === low)).toMatchObject({ beatRate: 0, gradedCount: 2 });
   });
 
-  it("breaks an avgPlacement + playedCount tie alphabetically by display name", async () => {
+  it("tiebreaks an equal beat rate by more graded races (owner spec: 'tiebreak = more graded races')", async () => {
+    const moreGraded = "trend-beatrate-more-graded";
+    const fewerGraded = "trend-beatrate-fewer-graded";
+    await insertAccountProfile(moreGraded, "MoreGraded");
+    await insertAccountProfile(fewerGraded, "FewerGraded");
+    // moreGraded: 3 separate 2-player wins (beatRate 1.0, gradedCount 3) -
+    // each opponent solos nothing else, so they stay below the floor and out
+    // of `ranked` entirely (no effect on this test's own comparison).
+    for (const [index, dailyDate] of ["2026-07-16", "2026-07-17", "2026-07-18"].entries()) {
+      const challengeId = `trend-beatrate-more-${index}`;
+      await insertDailyChallenge({ id: challengeId, sortOrder: 6010 + index, createdAt: `${dailyDate}T12:00:00.000Z` });
+      await insertCompletedV2({ id: `${challengeId}-winner`, accountId: moreGraded, elapsedMs: 5_000, completedAt: `${dailyDate}T01:00:05.000Z`, challengeId });
+      await insertCompletedV2({ id: `${challengeId}-opponent`, accountId: `trend-beatrate-more-opp-${index}`, elapsedMs: 9_000, completedAt: `${dailyDate}T01:00:09.000Z`, challengeId });
+    }
+    // fewerGraded: 2 separate 2-player wins (beatRate 1.0, gradedCount 2) -
+    // the same perfect beat rate as moreGraded, but fewer graded races.
+    for (const [index, dailyDate] of ["2026-07-17", "2026-07-18"].entries()) {
+      const challengeId = `trend-beatrate-fewer-${index}`;
+      await insertDailyChallenge({ id: challengeId, sortOrder: 6020 + index, createdAt: `${dailyDate}T12:00:00.000Z` });
+      await insertCompletedV2({ id: `${challengeId}-winner`, accountId: fewerGraded, elapsedMs: 5_000, completedAt: `${dailyDate}T01:00:05.000Z`, challengeId });
+      await insertCompletedV2({ id: `${challengeId}-opponent`, accountId: `trend-beatrate-fewer-opp-${index}`, elapsedMs: 9_000, completedAt: `${dailyDate}T01:00:09.000Z`, challengeId });
+    }
+
+    const { repository } = fixture();
+    const { ranked } = await repository.listDailyTrends(7, "2026-07-18");
+
+    expect(ranked.map((entry) => entry.accountId)).toEqual([moreGraded, fewerGraded]);
+    expect(ranked.find((entry) => entry.accountId === moreGraded)).toMatchObject({ beatRate: 1, gradedCount: 3 });
+    expect(ranked.find((entry) => entry.accountId === fewerGraded)).toMatchObject({ beatRate: 1, gradedCount: 2 });
+  });
+
+  it("tiebreaks an equal beat rate AND graded-race count by more played races (existing tiebreak preserved)", async () => {
+    const morePlayed = "trend-beatrate-more-played";
+    const fewerPlayed = "trend-beatrate-fewer-played";
+    await insertAccountProfile(morePlayed, "MorePlayed");
+    await insertAccountProfile(fewerPlayed, "FewerPlayed");
+    // Both: 2 separate 2-player wins (beatRate 1.0, gradedCount 2).
+    for (const [index, dailyDate] of ["2026-07-17", "2026-07-18"].entries()) {
+      const morePlayedChallengeId = `trend-beatrate-moreplayed-h2h-${index}`;
+      await insertDailyChallenge({ id: morePlayedChallengeId, sortOrder: 6030 + index, createdAt: `${dailyDate}T12:00:00.000Z` });
+      await insertCompletedV2({ id: `${morePlayedChallengeId}-winner`, accountId: morePlayed, elapsedMs: 5_000, completedAt: `${dailyDate}T01:00:05.000Z`, challengeId: morePlayedChallengeId });
+      await insertCompletedV2({ id: `${morePlayedChallengeId}-opponent`, accountId: `trend-beatrate-moreplayed-opp-${index}`, elapsedMs: 9_000, completedAt: `${dailyDate}T01:00:09.000Z`, challengeId: morePlayedChallengeId });
+
+      const fewerPlayedChallengeId = `trend-beatrate-fewerplayed-h2h-${index}`;
+      await insertDailyChallenge({ id: fewerPlayedChallengeId, sortOrder: 6040 + index, createdAt: `${dailyDate}T12:00:00.000Z` });
+      await insertCompletedV2({ id: `${fewerPlayedChallengeId}-winner`, accountId: fewerPlayed, elapsedMs: 5_000, completedAt: `${dailyDate}T01:00:05.000Z`, challengeId: fewerPlayedChallengeId });
+      await insertCompletedV2({ id: `${fewerPlayedChallengeId}-opponent`, accountId: `trend-beatrate-fewerplayed-opp-${index}`, elapsedMs: 9_000, completedAt: `${dailyDate}T01:00:09.000Z`, challengeId: fewerPlayedChallengeId });
+    }
+    // `morePlayed` also banks an extra SOLO completion - solo, so it never
+    // touches gradedCount/beatRate, but it does bump playedCount to 3.
+    await insertDailyChallenge({ id: "trend-beatrate-moreplayed-solo", sortOrder: 6050, createdAt: "2026-07-16T12:00:00.000Z" });
+    await insertCompletedV2({ id: "trend-beatrate-moreplayed-solo-run", accountId: morePlayed, elapsedMs: 5_000, completedAt: "2026-07-16T01:00:05.000Z", challengeId: "trend-beatrate-moreplayed-solo" });
+
+    const { repository } = fixture();
+    const { ranked } = await repository.listDailyTrends(7, "2026-07-18");
+
+    expect(ranked.map((entry) => entry.accountId)).toEqual([morePlayed, fewerPlayed]);
+    expect(ranked.find((entry) => entry.accountId === morePlayed)).toMatchObject({ beatRate: 1, gradedCount: 2, playedCount: 3 });
+    expect(ranked.find((entry) => entry.accountId === fewerPlayed)).toMatchObject({ beatRate: 1, gradedCount: 2, playedCount: 2 });
+  });
+
+  it("breaks a full beat-rate/graded-count/played-count tie alphabetically by display name (existing tiebreak preserved)", async () => {
     const beta = "trend-order-beta";
     const alpha = "trend-order-alpha";
     await insertAccountProfile(beta, "Beta");
     await insertAccountProfile(alpha, "Alpha");
-    // `daily_features.daily_date` is a system-wide primary key (one daily
-    // per calendar date) - each account solos a distinct set of dates
-    // within the 7d window so neither ever competes with the other, and
-    // both land on the exact same avg placement (1.0) and played count (3).
+    // Both: 3 separate 2-player wins each (beatRate 1.0, gradedCount 3,
+    // playedCount 3) on disjoint calendar dates within the 7d window - a
+    // full tie across every ranked metric except display name.
     const betaDailies = ["2026-07-13", "2026-07-14", "2026-07-15"];
     const alphaDailies = ["2026-07-16", "2026-07-17", "2026-07-18"];
     for (const [index, dailyDate] of betaDailies.entries()) {
       const challengeId = `trend-order-beta-${index}`;
       await insertDailyChallenge({ id: challengeId, sortOrder: 920 + index, createdAt: `${dailyDate}T12:00:00.000Z` });
-      await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate, challengeId, selectionSource: "automatic" });
       await insertCompletedV2({ id: `${challengeId}-run`, accountId: beta, elapsedMs: 5_000, completedAt: `${dailyDate}T01:00:05.000Z`, challengeId });
+      await insertCompletedV2({ id: `${challengeId}-opponent`, accountId: `trend-order-beta-opp-${index}`, elapsedMs: 9_000, completedAt: `${dailyDate}T01:00:09.000Z`, challengeId });
     }
     for (const [index, dailyDate] of alphaDailies.entries()) {
       const challengeId = `trend-order-alpha-${index}`;
       await insertDailyChallenge({ id: challengeId, sortOrder: 930 + index, createdAt: `${dailyDate}T12:00:00.000Z` });
-      await insertEditorialFeature(env.VWIKI_RACE_DB, { dailyDate, challengeId, selectionSource: "automatic" });
       await insertCompletedV2({ id: `${challengeId}-run`, accountId: alpha, elapsedMs: 5_000, completedAt: `${dailyDate}T01:00:05.000Z`, challengeId });
+      await insertCompletedV2({ id: `${challengeId}-opponent`, accountId: `trend-order-alpha-opp-${index}`, elapsedMs: 9_000, completedAt: `${dailyDate}T01:00:09.000Z`, challengeId });
     }
 
     const { repository } = fixture();
@@ -5583,7 +5692,7 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     // below the flat floor of 2, unranked.
     expect(ranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
     expect(unranked.find((entry) => entry.accountId === accountId)).toEqual({
-      accountId, displayName: null, playedCount: 1,
+      accountId, displayName: null, playedCount: 1, gradedCount: 0,
     });
   });
 
@@ -5662,7 +5771,7 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     // reality-scaled off catalog size - 1 completion stays below it.
     expect(guard).toBe(2);
     expect(ranked).toEqual([]);
-    expect(unranked).toEqual([{ accountId, displayName: null, playedCount: 1 }]);
+    expect(unranked).toEqual([{ accountId, displayName: null, playedCount: 1, gradedCount: 0 }]);
   });
 
   it("FB-10: a challenge created OUTSIDE the 7d window doesn't count, even with an in-window run", async () => {
@@ -5692,6 +5801,13 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     // Played BOTH the still-active challenge and the now-retired one.
     await insertCompletedV2({ id: "active-run", accountId, elapsedMs: 4_000, completedAt: "2026-07-16T20:00:00.000Z", challengeId: playedChallengeId });
     await insertCompletedV2({ id: "retired-run", accountId, elapsedMs: 5_000, completedAt: "2026-07-17T20:00:00.000Z", challengeId: retiredChallengeId });
+    // Ranking council (2026-08-02): a slower opponent on the still-active
+    // challenge only, so this account has >= 1 graded race (needed to rank
+    // at all) - orthogonal to this test's own retired-challenge focus.
+    await insertCompletedV2({
+      id: "active-run-opponent", accountId: "trend-guard-retired-opponent",
+      elapsedMs: 9_000, completedAt: "2026-07-16T20:00:01.000Z", challengeId: playedChallengeId,
+    });
 
     const { repository } = fixture();
     const { ranked, guard } = await repository.listDailyTrends(7, "2026-07-18");
@@ -5725,6 +5841,162 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
 
     const thirtyDayEntry = [...thirtyDay.ranked, ...thirtyDay.unranked].find((entry) => entry.accountId === accountId);
     expect(thirtyDayEntry?.playedCount).toBe(1);
+  });
+
+  describe("beat-rate ranking (ranking council, owner-picked Option 2, 2026-08-02)", () => {
+    it("grades a 2-player board to exactly 1.0 (won) / 0.0 (lost) - the ruling's own worked example", async () => {
+      const winner = "trend-beatrate-2p-winner";
+      const loser = "trend-beatrate-2p-loser";
+      await insertDailyChallenge({ id: "trend-beatrate-2p", sortOrder: 6100, createdAt: "2026-07-18T12:00:00.000Z" });
+      await insertCompletedV2({ id: "trend-beatrate-2p-winner-run", accountId: winner, elapsedMs: 5_000, completedAt: "2026-07-18T01:00:05.000Z", challengeId: "trend-beatrate-2p" });
+      await insertCompletedV2({ id: "trend-beatrate-2p-loser-run", accountId: loser, elapsedMs: 9_000, completedAt: "2026-07-18T01:00:09.000Z", challengeId: "trend-beatrate-2p" });
+      // Both need a 2nd counted completion to clear the flat inclusion
+      // floor - solo, so it doesn't touch either account's beat rate.
+      await insertDailyChallenge({ id: "trend-beatrate-2p-solo-winner", sortOrder: 6101, createdAt: "2026-07-17T12:00:00.000Z" });
+      await insertCompletedV2({ id: "trend-beatrate-2p-winner-solo-run", accountId: winner, elapsedMs: 5_000, completedAt: "2026-07-17T01:00:05.000Z", challengeId: "trend-beatrate-2p-solo-winner" });
+      await insertDailyChallenge({ id: "trend-beatrate-2p-solo-loser", sortOrder: 6102, createdAt: "2026-07-17T12:00:00.000Z" });
+      await insertCompletedV2({ id: "trend-beatrate-2p-loser-solo-run", accountId: loser, elapsedMs: 5_000, completedAt: "2026-07-17T01:00:05.000Z", challengeId: "trend-beatrate-2p-solo-loser" });
+
+      const { repository } = fixture();
+      const { ranked } = await repository.listDailyTrends(7, "2026-07-18");
+
+      expect(ranked.find((entry) => entry.accountId === winner)).toMatchObject({ beatRate: 1, gradedCount: 1 });
+      expect(ranked.find((entry) => entry.accountId === loser)).toMatchObject({ beatRate: 0, gradedCount: 1 });
+    });
+
+    it("RULING: an all-solo account that clears the completion floor still needs >= 1 graded race to rank - it lands in `unranked` with `gradedCount: 0` instead", async () => {
+      const accountId = "trend-beatrate-all-solo";
+      await insertDailyChallenge({ id: "trend-beatrate-all-solo-1", sortOrder: 6110, createdAt: "2026-07-17T12:00:00.000Z" });
+      await insertCompletedV2({ id: "trend-beatrate-all-solo-1-run", accountId, elapsedMs: 4_000, completedAt: "2026-07-17T01:00:04.000Z", challengeId: "trend-beatrate-all-solo-1" });
+      await insertDailyChallenge({ id: "trend-beatrate-all-solo-2", sortOrder: 6111, createdAt: "2026-07-18T12:00:00.000Z" });
+      await insertCompletedV2({ id: "trend-beatrate-all-solo-2-run", accountId, elapsedMs: 4_000, completedAt: "2026-07-18T01:00:04.000Z", challengeId: "trend-beatrate-all-solo-2" });
+
+      const { repository } = fixture();
+      const { ranked, unranked, guard } = await repository.listDailyTrends(7, "2026-07-18");
+
+      expect(guard).toBe(2);
+      expect(ranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
+      expect(unranked.find((entry) => entry.accountId === accountId)).toEqual({
+        accountId, displayName: null, playedCount: 2, gradedCount: 0,
+      });
+    });
+
+    it("drops the single worst graded race once an account reaches exactly 4 graded races in-window ('exactly-4-graded triggers drop-worst')", async () => {
+      const accountId = "trend-beatrate-drop-worst";
+      // 3 wins (beat 1.0 each) + 1 loss (beat 0.0) = 4 graded races. Without
+      // the drop, the mean would be 0.75; with the worst (the 0.0 loss)
+      // dropped, the mean of the remaining three 1.0s is 1.0.
+      const races: Array<{ dailyDate: string; won: boolean }> = [
+        { dailyDate: "2026-07-15", won: true },
+        { dailyDate: "2026-07-16", won: true },
+        { dailyDate: "2026-07-17", won: true },
+        { dailyDate: "2026-07-18", won: false },
+      ];
+      for (const [index, race] of races.entries()) {
+        const challengeId = `trend-beatrate-drop-worst-${index}`;
+        await insertDailyChallenge({ id: challengeId, sortOrder: 6120 + index, createdAt: `${race.dailyDate}T12:00:00.000Z` });
+        await insertCompletedV2({
+          id: `${challengeId}-subject`, accountId,
+          elapsedMs: race.won ? 5_000 : 9_000,
+          completedAt: `${race.dailyDate}T01:00:0${race.won ? 5 : 9}.000Z`,
+          challengeId,
+        });
+        await insertCompletedV2({
+          id: `${challengeId}-opponent`, accountId: `trend-beatrate-drop-worst-opp-${index}`,
+          elapsedMs: race.won ? 9_000 : 5_000,
+          completedAt: `${race.dailyDate}T01:00:0${race.won ? 9 : 5}.000Z`,
+          challengeId,
+        });
+      }
+
+      const { repository } = fixture();
+      const { ranked } = await repository.listDailyTrends(7, "2026-07-18");
+
+      expect(ranked.find((entry) => entry.accountId === accountId)).toMatchObject({
+        beatRate: 1, gradedCount: 4, worstDropped: true, playedCount: 4,
+      });
+    });
+
+    it("does NOT drop a race at exactly one below the drop-worst threshold (3 graded)", async () => {
+      const accountId = "trend-beatrate-no-drop-at-3";
+      const races: Array<{ dailyDate: string; won: boolean }> = [
+        { dailyDate: "2026-07-16", won: true },
+        { dailyDate: "2026-07-17", won: true },
+        { dailyDate: "2026-07-18", won: false },
+      ];
+      for (const [index, race] of races.entries()) {
+        const challengeId = `trend-beatrate-no-drop-${index}`;
+        await insertDailyChallenge({ id: challengeId, sortOrder: 6130 + index, createdAt: `${race.dailyDate}T12:00:00.000Z` });
+        await insertCompletedV2({
+          id: `${challengeId}-subject`, accountId,
+          elapsedMs: race.won ? 5_000 : 9_000,
+          completedAt: `${race.dailyDate}T01:00:0${race.won ? 5 : 9}.000Z`,
+          challengeId,
+        });
+        await insertCompletedV2({
+          id: `${challengeId}-opponent`, accountId: `trend-beatrate-no-drop-opp-${index}`,
+          elapsedMs: race.won ? 9_000 : 5_000,
+          completedAt: `${race.dailyDate}T01:00:0${race.won ? 9 : 5}.000Z`,
+          challengeId,
+        });
+      }
+
+      const { repository } = fixture();
+      const { ranked } = await repository.listDailyTrends(7, "2026-07-18");
+
+      // Mean of all 3: (1 + 1 + 0) / 3 = 0.6666... -> rounds to 0.6667.
+      expect(ranked.find((entry) => entry.accountId === accountId)).toMatchObject({
+        beatRate: 0.6667, gradedCount: 3, worstDropped: false, playedCount: 3,
+      });
+    });
+
+    it("recomputes statelessly per window - a worst race dropped in a wider window never 'resurrects' once the window narrows past it; the same 4 races evaluated fresh over a wider window still drop the worst independently", async () => {
+      const accountId = "trend-beatrate-stateless";
+      // 4 graded races across the lifetime catalog: the oldest (outside the
+      // 7d window ending 2026-07-18, but inside 30d) is the worst (a loss);
+      // the 3 most recent (inside 7d) are all wins.
+      const races: Array<{ dailyDate: string; won: boolean }> = [
+        { dailyDate: "2026-06-25", won: false },
+        { dailyDate: "2026-07-16", won: true },
+        { dailyDate: "2026-07-17", won: true },
+        { dailyDate: "2026-07-18", won: true },
+      ];
+      for (const [index, race] of races.entries()) {
+        const challengeId = `trend-beatrate-stateless-${index}`;
+        await insertDailyChallenge({ id: challengeId, sortOrder: 6140 + index, createdAt: `${race.dailyDate}T12:00:00.000Z` });
+        await insertCompletedV2({
+          id: `${challengeId}-subject`, accountId,
+          elapsedMs: race.won ? 5_000 : 9_000,
+          completedAt: `${race.dailyDate}T01:00:0${race.won ? 5 : 9}.000Z`,
+          challengeId,
+        });
+        await insertCompletedV2({
+          id: `${challengeId}-opponent`, accountId: `trend-beatrate-stateless-opp-${index}`,
+          elapsedMs: race.won ? 9_000 : 5_000,
+          completedAt: `${race.dailyDate}T01:00:0${race.won ? 9 : 5}.000Z`,
+          challengeId,
+        });
+      }
+
+      const { repository } = fixture();
+      // 30d window: all 4 races in scope, exactly at the drop-worst
+      // threshold - the 2026-06-25 loss is dropped, mean of the remaining
+      // three wins is 1.0.
+      const thirtyDay = await repository.listDailyTrends(30, "2026-07-18");
+      expect(thirtyDay.ranked.find((entry) => entry.accountId === accountId)).toMatchObject({
+        beatRate: 1, gradedCount: 4, worstDropped: true, playedCount: 4,
+      });
+      // 7d window: the 2026-06-25 loss falls OUT of scope entirely (not
+      // "restored" from a drop - it was never counted here at all) - only 3
+      // graded races remain, below the threshold, so nothing is dropped.
+      // Recomputing fresh from this window's own races alone gives the same
+      // beatRate either way (all 3 in-window races are wins), proving there
+      // is no persisted "already dropped" state carried between calls.
+      const week = await repository.listDailyTrends(7, "2026-07-18");
+      expect(week.ranked.find((entry) => entry.accountId === accountId)).toMatchObject({
+        beatRate: 1, gradedCount: 3, worstDropped: false, playedCount: 3,
+      });
+    });
   });
 });
 
@@ -6421,7 +6693,7 @@ describe("GET /api/v2/boards/trends", () => {
       guard: 2,
       ranked: [],
       unranked: [
-        { accountId: "boards-trends-account", displayName: null, playedCount: 1 },
+        { accountId: "boards-trends-account", displayName: null, playedCount: 1, gradedCount: 0 },
       ],
     });
   });

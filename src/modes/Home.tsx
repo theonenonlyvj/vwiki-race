@@ -11,7 +11,7 @@ import {
   type HomeHeroSelection,
 } from "../domain/challengeSelection";
 import { dailyFlavorBadgeText } from "../domain/dailyEditorial";
-import { trendGuardProgressCopy } from "../domain/dailyTrends";
+import { trendUnrankedProgressCopy } from "../domain/dailyTrends";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { PlayAnotherSuggestionState } from "../domain/playAnother";
 import type { AccountStats, CatalogStatus, Challenge } from "../domain/types";
@@ -563,29 +563,36 @@ export default function Home({
 }
 
 /**
- * Home's guarded streak/avg-placement chip (Increment 4, UX redesign spec:
- * "slim stats row: 🔥 streak · '30-day avg #2.4 (26 dailies)'"; post-play:
+ * Home's guarded streak/trend chip (Increment 4, UX redesign spec: "slim
+ * stats row: 🔥 streak · '30-day avg #2.4 (26 dailies)'"; post-play:
  * "streak/trend row (inherits the Boards §7d/30d participation guard)").
  * The streak piece is omitted entirely at 0 (spec: "(omit when 0)"); the
  * streak itself stays daily-only (FB-10, owner ruling 2026-07-20, did not
  * change it - it's the daily-ritual metric).
  *
  * F4 (council acceptance): a below-guard trend no longer goes silent - it
- * shows the same muted `trendGuardProgressCopy` ("Finish N (more) race(s) to
- * rank", domain/dailyTrends.ts) progress framing Boards' own runway section
- * uses, so a below-guard account still sees *something* moving instead of a
- * chip that just isn't there. PKG-14, generalized by FB-10, amended by owner
- * ruling 2026-07-25 ("metric-independent ranking changes"): `trend30.guard`
- * is read straight off the server's response - now a flat constant
- * (`DAILY_TREND_INCLUSION_FLOOR`), not reality-scaled off catalog size - and
- * `trend30.playedCount` in the below-guard branch means COUNTED COMPLETIONS
- * only, same redefinition `listDailyTrends` applies. Never hardcoded or
- * re-derived here, same F5 discipline Boards' own guard copy follows.
- * `trend30` itself still aggregates every challenge a player raced in the
- * last 30 days (created within that window), not just dailies - FB-10,
- * unaffected by the 2026-07-25 ruling. The whole row still disappears when
- * there's truly nothing to show yet - no streak and zero challenges played,
- * ever (a brand-new account).
+ * shows the same muted `trendUnrankedProgressCopy` progress framing Boards'
+ * own runway section uses, so a below-guard account still sees *something*
+ * moving instead of a chip that just isn't there. PKG-14, generalized by
+ * FB-10, amended by owner ruling 2026-07-25 ("metric-independent ranking
+ * changes"): `trend30.guard` is read straight off the server's response -
+ * now a flat constant (`DAILY_TREND_INCLUSION_FLOOR`), not reality-scaled
+ * off catalog size - and `trend30.playedCount` in the below-guard branch
+ * means COUNTED COMPLETIONS only, same redefinition `listDailyTrends`
+ * applies. Never hardcoded or re-derived here, same F5 discipline Boards'
+ * own guard copy follows. `trend30` itself still aggregates every challenge
+ * a player raced in the last 30 days (created within that window), not just
+ * dailies - FB-10, unaffected by the 2026-07-25 ruling. The whole row still
+ * disappears when there's truly nothing to show yet - no streak and zero
+ * challenges played, ever (a brand-new account).
+ *
+ * Ranking council (owner-picked Option 2, 2026-08-02, "beat-rate ranking"):
+ * the ranked branch's number is now `trend30.beatRate` (a share, 0-1) rather
+ * than `trend30.avgPlacement` - `ranked` is `true` only once the account has
+ * cleared BOTH the completion floor AND >= 1 graded race (see
+ * `trend30`'s own doc comment, domain/types.ts), so an all-solo account that
+ * clears the floor lands in the unranked branch instead, with
+ * `trendUnrankedProgressCopy`'s "Race someone head-to-head to rank" copy.
  *
  * PKG-06 (council 2026-07-19, owner-proxy ruling, Judge A rescope): a guest
  * with no identified session at all (`stats === null` because there's
@@ -619,8 +626,8 @@ function StreakTrendRow({
       {dailyStreak > 0 ? `🔥 ${dailyStreak}-day streak` : null}
       {dailyStreak > 0 ? " · " : null}
       {trend30.ranked
-        ? `30-day avg #${trend30.avgPlacement?.toFixed(1)} (${trend30.playedCount} challenges)`
-        : trendGuardProgressCopy(trend30.playedCount, trend30.guard)}
+        ? `30-day beat rate ${Math.round((trend30.beatRate ?? 0) * 100)}% (${trend30.playedCount} challenges)`
+        : trendUnrankedProgressCopy(trend30, trend30.guard)}
     </p>
   );
 }
