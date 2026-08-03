@@ -12,6 +12,7 @@ import type {
   CreateChallengeV2Response,
   DailyAdminStateResponse,
   DailyCapabilitiesResponse,
+  GiveUpChallengeResponse,
   LeaderboardResponse,
   RunPathResponse,
 } from "../server/contracts";
@@ -194,6 +195,19 @@ export interface VWikiRaceApiClient extends VWikiRaceDailyAdminApiClient {
    * replay of one the caller gave up on.
    */
   createRandomChallenge(token: string): Promise<CreateChallengeV2Response>;
+  /**
+   * "I gave up" (owner spec, 2026-08-02, authenticated - `POST
+   * /api/v2/challenges/{id}/give-up`). Server re-validates the qualifying
+   * DNF itself (never trusts the caller's own gating) - rejects with
+   * `give_up_not_eligible`/`give_up_already_finished` when the account
+   * doesn't qualify. Idempotent/retryable: a fresh idempotency key per
+   * confirm-click (network retries of the SAME click are safe; the durable
+   * "has this account peeked" fact is a separate, account+challenge-scoped
+   * server-side record - see `giveUpChallenge`'s doc comment,
+   * trackingRepository.ts). Invalidates engagement caches on success so the
+   * next outcomes/board read reflects `peeked: true` immediately.
+   */
+  giveUpChallenge(challengeId: string, token: string): Promise<GiveUpChallengeResponse>;
 }
 
 export interface VWikiRaceApiClientOptions {
@@ -494,6 +508,21 @@ export function createVWikiRaceApiClient(
       invalidateChallengeEngagement(response.challenge.id);
       return response;
     },
+    async giveUpChallenge(challengeId, token) {
+      const response = await write(
+        urlPath.giveUp(challengeId),
+        {},
+        token,
+        isGiveUpChallengeResponse,
+        true,
+      );
+      // "peeked" flips the account's outcome/disclosure-guard state for
+      // THIS challenge - the same invalidation shape every other
+      // run-ending mutation already uses (see that helper's own doc
+      // comment), so the next outcomes/board/paths read is never stale.
+      invalidateEngagementCaches();
+      return response;
+    },
     async getCapabilities(token) {
       return authenticatedRead(urlPath.capabilities, token, isDailyCapabilitiesResponse);
     },
@@ -687,6 +716,8 @@ const urlPath = {
   accountChallengeOutcomes: "/api/v2/account/challenge-outcomes",
   challengeSuggestion: "/api/v2/challenges/suggestion",
   randomChallenge: "/api/v2/challenges/random",
+  giveUp: (challengeId: string) =>
+    `/api/v2/challenges/${encodeURIComponent(challengeId)}/give-up`,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -759,7 +790,17 @@ function isChallengeBoardDnfRow(value: unknown): value is ChallengeBoardResponse
 function isChallengePathsResponse(value: unknown): value is ChallengePathsResponse {
   return isRecord(value) &&
     Array.isArray(value.runs) && value.runs.every(isChallengePathRunEntry) &&
-    hasNumber(value, "totalRuns");
+    hasNumber(value, "totalRuns") &&
+    // "I gave up" solution view (owner spec, 2026-08-02): absent, `null`, or
+    // a non-empty array of strings - see `ChallengePathsResponse`'s doc
+    // comment (server/contracts.ts).
+    (value.referencePath === undefined || value.referencePath === null ||
+      (Array.isArray(value.referencePath) &&
+        value.referencePath.every((title: unknown) => typeof title === "string")));
+}
+
+function isGiveUpChallengeResponse(value: unknown): value is GiveUpChallengeResponse {
+  return isRecord(value) && hasString(value, "challengeId") && value.peeked === true;
 }
 
 function isChallengePathRunEntry(value: unknown): value is ChallengePathRunEntry {
@@ -870,7 +911,13 @@ function isChallengeOutcomeEntry(value: unknown): value is ChallengeOutcomeEntry
   }
   // Doc comment on ChallengeOutcomeEntry: "`best` is populated only for
   // `outcome: 'completed'`" - enforced here, not just documented.
-  return value.outcome === "completed" ? isBestTimeClicks(value.best) : value.best === null;
+  if (value.outcome === "completed" ? !isBestTimeClicks(value.best) : value.best !== null) {
+    return false;
+  }
+  // "I gave up" (owner spec, 2026-08-02): both optional, boolean when
+  // present - absence means false (see the field's own doc comment).
+  return (value.giveUpEligible === undefined || typeof value.giveUpEligible === "boolean") &&
+    (value.peeked === undefined || typeof value.peeked === "boolean");
 }
 
 function isChallengeSuggestionResponse(value: unknown): value is ChallengeSuggestionResponse {

@@ -64,6 +64,7 @@ function mockApiClient(overrides: Partial<VWikiRaceApiClient> = {}): VWikiRaceAp
     declineDailyNomination: vi.fn(),
     queueDailyChallenge: vi.fn(),
     removeDailyQueueEntry: vi.fn(),
+    giveUpChallenge: vi.fn(),
     ...overrides,
   };
 }

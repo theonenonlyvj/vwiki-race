@@ -1143,6 +1143,76 @@ describe("VWiki Race API client", () => {
     ).length).toBeGreaterThan(catalogCallsBefore);
   });
 
+  it("\"I gave up\" (owner spec, 2026-08-02): POSTs an empty body with a fresh idempotency key, and invalidates engagement caches on success", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      if (path === `${apiOrigin}/api/v2/challenges/challenge-0001/give-up`) {
+        expect(init?.method).toBe("POST");
+        expect(init?.body).toBe(JSON.stringify({}));
+        expect(init?.headers).toMatchObject({
+          Authorization: "Bearer jwt-claimed",
+          "Idempotency-Key": expect.any(String),
+        });
+        return Response.json({ challengeId: "challenge-0001", peeked: true });
+      }
+      if (path === `${apiOrigin}/api/v2/account/challenge-outcomes`) {
+        return Response.json({ outcomes: [] });
+      }
+      throw new Error(`Unexpected request ${path}`);
+    });
+    const client = createVWikiRaceApiClient(fetchImpl, { apiOrigin });
+
+    // Warm the outcomes cache so we can prove give-up invalidates it (same
+    // shape as the random-challenge cache-invalidation test above).
+    await client.getAccountChallengeOutcomes("jwt-claimed");
+    const outcomesCallsBefore = fetchImpl.mock.calls.filter(
+      ([reqInput]) => String(reqInput) === `${apiOrigin}/api/v2/account/challenge-outcomes`,
+    ).length;
+
+    await expect(client.giveUpChallenge("challenge-0001", "jwt-claimed")).resolves.toEqual({
+      challengeId: "challenge-0001",
+      peeked: true,
+    });
+
+    await client.getAccountChallengeOutcomes("jwt-claimed");
+    expect(fetchImpl.mock.calls.filter(
+      ([reqInput]) => String(reqInput) === `${apiOrigin}/api/v2/account/challenge-outcomes`,
+    ).length).toBeGreaterThan(outcomesCallsBefore);
+  });
+
+  it("uses a FRESH idempotency key per give-up call, never a stable per-challenge one (would collide across different accounts server-side)", async () => {
+    const keys: string[] = [];
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = init?.headers as Record<string, string> | undefined;
+      keys.push(headers?.["Idempotency-Key"] ?? "");
+      return Response.json({ challengeId: "challenge-0001", peeked: true });
+    });
+    const client = createVWikiRaceApiClient(fetchImpl, { apiOrigin });
+
+    await client.giveUpChallenge("challenge-0001", "jwt-claimed");
+    await client.giveUpChallenge("challenge-0001", "jwt-claimed");
+
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+    expect(keys[0]).toBeTruthy();
+  });
+
+  it("surfaces a 409 give_up_not_eligible/give_up_already_finished error from give-up", async () => {
+    const client = createVWikiRaceApiClient(
+      vi.fn(async () => new Response(
+        JSON.stringify({
+          error: { code: "give_up_not_eligible", message: "Give up unlocks after a real attempt on this challenge." },
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      )),
+      { apiOrigin },
+    );
+
+    await expect(client.giveUpChallenge("challenge-0001", "jwt-claimed")).rejects.toMatchObject({
+      code: "give_up_not_eligible",
+    });
+  });
+
   it("surfaces a 429 in-progress/quota error with Retry-After, and a 503 candidate-unavailable error, from random-challenge creation", async () => {
     const inProgress = createVWikiRaceApiClient(
       vi.fn(async () => new Response(

@@ -1,0 +1,15 @@
+-- Additive only ("I gave up" flow, owner spec 2026-08-02). Nullable JSON
+-- array of titles (start..target inclusive), populated best-effort at daily
+-- drop time by a bounded forward search reusing the evaluator's already-
+-- fetched start outlinks + target inbound-linkers (dailyCandidateEvaluator.ts
+-- findReferencePath). Never populated for manual/community/random-created
+-- challenges - only the automatic daily-drop path ever writes it. A failed
+-- or skipped search simply leaves this null; it never blocks a daily drop.
+--
+-- No new table for the "has this account peeked this challenge" fact -
+-- that's a durable operation_idempotency row (operation = 'solution_peek',
+-- idempotency_key = '<canonicalAccountId>:<challengeId>'), reusing the
+-- existing ledger table already indexed by (canonical_account_id,
+-- created_at) rather than standing up a dedicated table for one boolean fact
+-- per (account, challenge) pair.
+alter table challenges add column reference_path text;

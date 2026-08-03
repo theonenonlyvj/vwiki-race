@@ -786,6 +786,118 @@ describe("daily candidate evaluator: no-repeat exclusions (owner incident, 2026-
   });
 });
 
+describe("daily candidate evaluator: \"I gave up\" reference path (owner spec, 2026-08-02, dailies only)", () => {
+  it("never computes a reference path unless the caller opts in (the on-demand random-challenge path never does)", async () => {
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: wikipediaFetch({
+        targets: [target("Target", 1)],
+        starts: ["Start one", "Start two", "Start three"],
+      }) as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+    });
+
+    const result = await evaluator.findCandidate({ dailyDate: "2026-07-17", flavor: "recognizable" });
+
+    expect(result).not.toHaveProperty("referencePath");
+  });
+
+  it("depth 2, zero extra requests: a start first-hop title that's ALSO one of the target's already-fetched inbound-linkers", async () => {
+    const fetchImpl = wikipediaFetch({
+      targets: [target("Target", 1)],
+      starts: ["Start one", "Start two", "Start three"],
+      // >= the recognizable floor (150) so "Target" qualifies at all; one
+      // entry ("Move 3") deliberately overlaps the start's own first-hop
+      // titles ("Move 1".."Move 8", from the default `allowedLinks(8)`).
+      linkshereResponse: () => linkshereResponseWithTitles(["Move 3", ...inboundTitles(199)]),
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+    });
+
+    const result = await evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+      computeReferencePath: true,
+    });
+
+    // Whichever of the three (structurally-identical) starts wins the
+    // ranking tiebreak, the reference path must begin with THAT start.
+    expect(result.referencePath).toEqual([result.startTitle, "Move 3", "Target canonical"]);
+    // Depth 2 is a pure in-memory intersection of two lists the evaluator
+    // already fetched for other reasons (the start's own render, and the
+    // inbound-link floor check) - it must never cost an extra `prop=links`
+    // request.
+    expect(findActionCalls(fetchImpl, "links")).toHaveLength(0);
+  });
+
+  it("depth 3, budgeted: reconstructs start -> X -> Y -> target from a bounded prop=links search when depths 1-2 both miss", async () => {
+    const fetchImpl = wikipediaFetch({
+      targets: [target("Target", 1)],
+      starts: ["Start one", "Start two", "Start three"],
+      linkshereResponse: () => linkshereResponseWithTitles(inboundTitles(200)),
+      proxyResponse: pathProxyResponse("Move 5", "Inbound 7"),
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+    });
+
+    const result = await evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+      computeReferencePath: true,
+    });
+
+    expect(result.referencePath).toEqual([result.startTitle, "Move 5", "Inbound 7", "Target canonical"]);
+  });
+
+  it("degrades to null - never throws, never fails candidate selection - when the bounded depth-3 search finds nothing", async () => {
+    const fetchImpl = wikipediaFetch({
+      targets: [target("Target", 1)],
+      starts: ["Start one", "Start two", "Start three"],
+      linkshereResponse: () => linkshereResponseWithTitles(inboundTitles(200)),
+      // No overlap anywhere, and the proxy response never matches any
+      // queried title - a genuine "found nothing within budget" miss.
+      proxyResponse: () => linksResponse(null),
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+      computeReferencePath: true,
+    })).resolves.toMatchObject({ referencePath: null });
+  });
+
+  it("degrades to null on a malformed depth-3 response rather than failing the whole daily job", async () => {
+    const fetchImpl = wikipediaFetch({
+      targets: [target("Target", 1)],
+      starts: ["Start one", "Start two", "Start three"],
+      linkshereResponse: () => linkshereResponseWithTitles(inboundTitles(200)),
+      proxyResponse: () => new Response("not json", { status: 200 }),
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+      computeReferencePath: true,
+    })).resolves.toMatchObject({ referencePath: null, targetTitle: "Target canonical" });
+  });
+});
+
 function target(
   title: string,
   pageId: number,
@@ -979,6 +1091,57 @@ function linkshereResponse(count: number, title = "Hop"): Response {
 
 function findActionCalls(fetchImpl: ReturnType<typeof vi.fn>, prop: string) {
   return fetchImpl.mock.calls.filter(([input]) => new URL(String(input)).searchParams.get("prop") === prop);
+}
+
+/** "I gave up" reference path tests: `count` distinct "Inbound N" titles. */
+function inboundTitles(count: number): string[] {
+  return Array.from({ length: count }, (_unused, index) => `Inbound ${index + 1}`);
+}
+
+/**
+ * Like `linkshereResponse`, but with an explicit, caller-controlled title
+ * list (rather than always "Inbound 1..count") - the reference-path tests
+ * need to deliberately overlap (or not overlap) specific titles with the
+ * start's own first-hop links.
+ */
+function linkshereResponseWithTitles(titles: readonly string[]): Response {
+  return new Response(JSON.stringify({
+    query: {
+      pages: [{
+        pageid: 1,
+        ns: 0,
+        title: "Target",
+        linkshere: titles.map((title, index) => ({ pageid: index + 1, ns: 0, title })),
+      }],
+    },
+  }), { headers: { "Content-Type": "application/json" } });
+}
+
+/**
+ * `findReferencePath`'s depth-3 search issues one `prop=links` request per
+ * chunk of the start's first-hop titles, filtered (`pltitles`) to the
+ * target's inbound-linkers. This stub echoes back every REQUESTED source
+ * title as its own page, giving `matchSourceTitle` a single outgoing link to
+ * `matchDestinationTitle` and every other requested title no links at all -
+ * proving the search correctly attributes the match to the right (X, Y)
+ * pair rather than just "some page in the batch matched something".
+ */
+function pathProxyResponse(matchSourceTitle: string, matchDestinationTitle: string) {
+  return (url: URL): Response => {
+    const titles = (url.searchParams.get("titles") ?? "").split("|").filter(Boolean);
+    return new Response(JSON.stringify({
+      query: {
+        pages: titles.map((title) => ({
+          pageid: 1,
+          ns: 0,
+          title,
+          ...(title === matchSourceTitle
+            ? { links: [{ ns: 0, title: matchDestinationTitle }] }
+            : {}),
+        })),
+      },
+    }), { headers: { "Content-Type": "application/json" } });
+  };
 }
 
 function poolFetchCalls(fetchImpl: ReturnType<typeof vi.fn>) {

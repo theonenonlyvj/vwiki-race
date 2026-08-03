@@ -213,6 +213,12 @@ export function createWorker(options: WorkerOptions = {}) {
             dailyDate: job.dailyDate,
             flavor,
             ...exclusions,
+            // "I gave up" reference path (owner spec, 2026-08-02, dailies
+            // only): the on-demand random-challenge path
+            // (`findRandomCandidate` below) deliberately never sets this -
+            // see `DailyCandidateRequest.computeReferencePath`'s own doc
+            // comment.
+            computeReferencePath: true,
           });
           const challenge = await repository.acceptDailyFeature(job, {
             kind: "automatic",
@@ -585,6 +591,27 @@ async function dispatchV2(
     return json(
       await protocol(tracking).getChallengePaths(decodeURIComponent(pathsMatch[1]), account),
       { headers: noStoreHeaders() },
+      corsHeaders,
+    );
+  }
+
+  const giveUpMatch = url.pathname.match(
+    /^\/api\/v2\/challenges\/([^/]+)\/give-up$/,
+  );
+  if (request.method === "POST" && giveUpMatch?.[1]) {
+    // "I gave up" (owner spec, 2026-08-02): no in-race button, post-run
+    // only. Reuses the account-read limiter (no new rate-limiter binding
+    // for a rare, self-gating action - the real gate is the caller needing
+    // a genuine qualifying DNF first, re-validated server-side either way).
+    const account = await tracking.authorize(request);
+    await enforceAccountReadRateLimit(env, account.accountId, "give-up");
+    requireEmptyObject(await readJson(request));
+    return json(
+      await protocol(tracking).giveUpChallenge(account, {
+        challengeId: decodeURIComponent(giveUpMatch[1]),
+        idempotencyKey: requireIdempotencyKey(request),
+      }),
+      undefined,
       corsHeaders,
     );
   }
@@ -1294,7 +1321,8 @@ async function enforceAccountReadRateLimit(
     | "stats"
     | "capabilities"
     | "outcomes"
-    | "suggestion",
+    | "suggestion"
+    | "give-up",
 ): Promise<void> {
   if (!env.ACCOUNT_READ_RATE_LIMITER) {
     throw new ApiError(

@@ -129,6 +129,17 @@ export interface DailyChallengeCandidate {
   targetTitle: string;
   targetPageId: number;
   selectedScore: number;
+  /**
+   * "I gave up" reference path (owner spec, 2026-08-02): only ever computed
+   * when the caller opts in via `DailyCandidateRequest.computeReferencePath`
+   * (the daily scheduler; never the on-demand random-challenge path - see
+   * that field's own doc comment) - `undefined` otherwise, so every existing
+   * caller/fixture that doesn't ask for this is unaffected. `null` means the
+   * bounded search (`findReferencePath`) genuinely found nothing within
+   * budget; a real search failure degrades to `null` the same way, never a
+   * thrown error - this NEVER blocks candidate selection either way.
+   */
+  referencePath?: string[] | null;
 }
 
 export interface DailyCandidateRequest {
@@ -158,6 +169,17 @@ export interface DailyCandidateRequest {
    * absent/empty-means-no-exclusion contract.
    */
   excludedStartTitles?: ReadonlySet<string>;
+  /**
+   * "I gave up" reference path (owner spec, 2026-08-02, "dailies... forward-
+   * only"): opts into a bounded, best-effort reference-path search right
+   * after candidate selection - see `findReferencePath`'s own doc comment.
+   * Only the daily scheduler (`worker.ts`'s `scheduled()`) sets this `true`;
+   * the on-demand random-challenge path never does, so a random create never
+   * spends its own request budget on a search whose result would just be
+   * discarded (only the automatic-daily acceptance path persists it - see
+   * `DailyChallengeInput.referencePath`).
+   */
+  computeReferencePath?: boolean;
 }
 
 export class DailyChallengeCandidateError extends Error {
@@ -349,13 +371,21 @@ export function createDailyCandidateEvaluator(options: {
         if (ranked.length === 0) throw unavailable();
         if (request.flavor !== "hard") {
           emitSelectionDiagnostic(diagnostic, request, budget, ranked, ranked[0]!);
-          return toCandidate(ranked[0]!, request.flavor);
+          return toCandidate(
+            ranked[0]!,
+            request.flavor,
+            await maybeFindReferencePath(ranked[0]!, request, budget, endpoint),
+          );
         }
 
         for (const pair of ranked) {
           if (!(await hasTwoClickShortcut(pair.start, pair.target, budget, endpoint))) {
             emitSelectionDiagnostic(diagnostic, request, budget, ranked, pair);
-            return toCandidate(pair, request.flavor);
+            return toCandidate(
+              pair,
+              request.flavor,
+              await maybeFindReferencePath(pair, request, budget, endpoint),
+            );
           }
         }
         throw unavailable();
@@ -406,6 +436,17 @@ interface CanonicalTarget {
     recognizable: { vitalLevel?: 1 | 2 | 3 } | false;
     weird: boolean;
   };
+  /**
+   * "I gave up" reference path (owner spec, 2026-08-02): the same
+   * inbound-linker titles `meetsInboundLinkFloor` already fetches to prove
+   * the floor (capped at `floor + 1`, namespace-0 only) - captured here so a
+   * winning candidate's reference-path search can reuse them for free
+   * instead of re-fetching `linkshere` a second time. Absent/empty when the
+   * floor check itself degraded-passed without a clean answer (see that
+   * function's own doc comment) - `findReferencePath` treats that the same
+   * as "no reference path found", never a hard failure.
+   */
+  linkshereTitles?: string[];
 }
 
 interface EvaluatedStart {
@@ -545,8 +586,12 @@ async function filterTargetsByInboundLinkFloor(
   const floor = INBOUND_LINK_FLOOR[flavor];
   const qualified: CanonicalTarget[] = [];
   for (const target of targets) {
-    if (await meetsInboundLinkFloor(target.title, floor, budget, endpoint, diagnostic)) {
-      qualified.push(target);
+    const check = await meetsInboundLinkFloor(target.title, floor, budget, endpoint, diagnostic);
+    if (check.qualifies) {
+      // "I gave up" reference path: free capture of the same titles just
+      // fetched to prove the floor - see `CanonicalTarget.linkshereTitles`'s
+      // own doc comment.
+      qualified.push({ ...target, linkshereTitles: check.titles });
     } else {
       diagnostic("inbound_link_floor_discarded", { title: target.title, flavor, floor });
     }
@@ -583,7 +628,12 @@ async function meetsInboundLinkFloor(
     event: DailyChallengeDiagnosticEvent,
     fields: Record<string, string | number | boolean>,
   ) => void,
-): Promise<boolean> {
+): Promise<{ qualifies: boolean; titles: string[] }> {
+  // "I gave up" reference path: every degrade-to-pass branch below returns
+  // `titles: []` alongside `qualifies: true` - a target that cleared the
+  // floor on a degraded/unreadable answer has no real inbound-linker list to
+  // hand back, and `findReferencePath` already treats an empty list the same
+  // as "no reference path found," never a hard failure.
   try {
     const payload = await apiJson(budget, endpoint, {
       action: "query",
@@ -598,18 +648,22 @@ async function meetsInboundLinkFloor(
     const page = queryPages(payload)[0];
     if (!page || page.missing !== undefined) {
       diagnostic("inbound_link_check_failed", { title, code: "no_page", detail: "linkshere lookup returned no page" });
-      return true;
+      return { qualifies: true, titles: [] };
     }
     const linkshere = page.linkshere;
     // MediaWiki omits the `linkshere` key entirely for a page with zero
     // matching inbound links (rather than returning an empty array) - that
     // is a legitimate, countable zero, not a malformed response.
-    if (linkshere === undefined) return floor <= 0;
+    if (linkshere === undefined) return { qualifies: floor <= 0, titles: [] };
     if (!Array.isArray(linkshere)) {
       diagnostic("inbound_link_check_failed", { title, code: "malformed_response", detail: "linkshere was not an array" });
-      return true;
+      return { qualifies: true, titles: [] };
     }
-    return linkshere.length >= floor;
+    const titles = linkshere
+      .filter(isRecord)
+      .map((entry) => entry.title)
+      .filter((entryTitle): entryTitle is string => typeof entryTitle === "string");
+    return { qualifies: linkshere.length >= floor, titles };
   } catch (caught) {
     if (caught instanceof BudgetExhausted) throw caught;
     diagnostic("inbound_link_check_failed", {
@@ -617,7 +671,7 @@ async function meetsInboundLinkFloor(
       code: diagnosticErrorCode(caught),
       detail: diagnosticErrorDetail(caught),
     });
-    return true;
+    return { qualifies: true, titles: [] };
   }
 }
 
@@ -828,6 +882,119 @@ async function hasTwoClickShortcut(
   return false;
 }
 
+// "I gave up" reference path (owner spec, 2026-08-02): a bounded, forward-
+// only depth-3 search issued AFTER the extra requests spent on `hasTwoClickShortcut`
+// (hard flavor only) - a modest, fixed ceiling well inside the evaluator's
+// own 40-request/25s phase budget, and independent of the winning pair's
+// flavor.
+const REFERENCE_PATH_MAX_REQUESTS = 8;
+
+/**
+ * Entry point wired into `findCandidate`'s two return points - NEVER lets a
+ * reference-path failure (a thrown error, a budget/timeout exhaustion, a
+ * malformed Wikimedia response) escape and turn a successful candidate
+ * selection into a failed daily job. Only attempted at all when the caller
+ * opted in (`DailyCandidateRequest.computeReferencePath` - the daily
+ * scheduler only, never the on-demand random-challenge path).
+ */
+async function maybeFindReferencePath(
+  pair: CandidatePair,
+  request: DailyCandidateRequest,
+  budget: WikimediaBudget,
+  endpoint: string,
+): Promise<string[] | null | undefined> {
+  if (!request.computeReferencePath) return undefined;
+  try {
+    return await findReferencePath(pair.start, pair.target, budget, endpoint);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Bounded forward search, start -> target, depth <= 3 (at most 3 clicks: a
+ * direct edge, one intermediate hop, or two). Reuses data the evaluator
+ * already has in memory for depths 1-2 (zero extra requests); only depth 3
+ * spends real budget, capped at `REFERENCE_PATH_MAX_REQUESTS`. Best-effort
+ * and forward-only by design (owner spec) - a miss returns `null`, never an
+ * error, and never claims a stronger guarantee ("a" path, not "the shortest"
+ * or "the only" path).
+ *
+ * - Depth 1 (free): `target` is already one of `start`'s first-hop titles.
+ *   In practice, `findCandidate`'s own winning pair never hits this branch -
+ *   `scoreDailyCandidate` rejects `directEdge` pairs outright (too easy), so
+ *   a direct-edge pair never survives `rankPairs`' eligibility filter to
+ *   become the selected candidate this function is called with. Kept anyway
+ *   for correctness/defensiveness (a general start/target pair, not just
+ *   this one call site) rather than assuming that invariant holds forever.
+ * - Depth 2 (free): some first-hop title from `start` is ALSO one of
+ *   `target.linkshereTitles` (pages known to link directly to `target`,
+ *   already fetched by `meetsInboundLinkFloor`) - that title is both
+ *   reachable from `start` and a direct predecessor of `target`.
+ * - Depth 3 (budgeted): chunks `start`'s first-hop titles (`PROXY_BATCH_SIZE`
+ *   at a time, same shape as `hasTwoClickShortcut`) and asks Wikipedia which
+ *   of them link to any of `target.linkshereTitles` (`pltitles` accepts a
+ *   pipe-separated filter list, capped to one `PROXY_BATCH_SIZE`-sized slice
+ *   for URL-length sanity) - a hit names both real hops at once (the
+ *   queried source page X, and the specific matched destination Y among
+ *   `target`'s inbound-linkers), reconstructing start -> X -> Y -> target.
+ */
+async function findReferencePath(
+  start: EvaluatedStart,
+  target: CanonicalTarget,
+  budget: WikimediaBudget,
+  endpoint: string,
+): Promise<string[] | null> {
+  const targetNorm = normalizeTitle(target.title);
+  if (start.firstHopTitles.some((title) => normalizeTitle(title) === targetNorm)) {
+    return [start.title, target.title];
+  }
+
+  const linkshere = target.linkshereTitles ?? [];
+  if (linkshere.length === 0) return null;
+  const linkshereNorm = new Set(linkshere.map((title) => normalizeTitle(title)));
+  const directHop = start.firstHopTitles.find((title) => linkshereNorm.has(normalizeTitle(title)));
+  if (directHop) return [start.title, directHop, target.title];
+
+  const pltitles = linkshere.slice(0, PROXY_BATCH_SIZE).join("|");
+  let requestsUsed = 0;
+  for (const titles of chunks(start.firstHopTitles, PROXY_BATCH_SIZE)) {
+    if (requestsUsed >= REFERENCE_PATH_MAX_REQUESTS) break;
+    requestsUsed += 1;
+    let payload: unknown;
+    try {
+      payload = await apiJson(budget, endpoint, {
+        action: "query",
+        format: "json",
+        formatversion: "2",
+        origin: "*",
+        prop: "links",
+        titles: titles.join("|"),
+        pllimit: "max",
+        pltitles,
+      });
+    } catch (caught) {
+      if (caught instanceof BudgetExhausted) return null;
+      continue;
+    }
+    let pages: Record<string, unknown>[];
+    try {
+      pages = queryPages(payload);
+    } catch {
+      continue;
+    }
+    for (const page of pages) {
+      if (typeof page.title !== "string" || !Array.isArray(page.links)) continue;
+      const match = page.links.find(
+        (link): link is Record<string, unknown> & { title: string } =>
+          isRecord(link) && typeof link.title === "string",
+      );
+      if (match) return [start.title, page.title, match.title, target.title];
+    }
+  }
+  return null;
+}
+
 function rankPairs(
   starts: readonly EvaluatedStart[],
   targets: readonly CanonicalTarget[],
@@ -852,7 +1019,11 @@ function rankPairs(
   });
 }
 
-function toCandidate(pair: CandidatePair, flavor: DailyFlavor): DailyChallengeCandidate {
+function toCandidate(
+  pair: CandidatePair,
+  flavor: DailyFlavor,
+  referencePath?: string[] | null,
+): DailyChallengeCandidate {
   return {
     startTitle: pair.start.title,
     startPageId: pair.start.pageId,
@@ -860,6 +1031,7 @@ function toCandidate(pair: CandidatePair, flavor: DailyFlavor): DailyChallengeCa
     targetTitle: pair.target.title,
     targetPageId: pair.target.pageId,
     selectedScore: selectedFlavorScore(pair, flavor),
+    ...(referencePath !== undefined ? { referencePath } : {}),
   };
 }
 

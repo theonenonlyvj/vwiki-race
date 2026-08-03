@@ -10,6 +10,7 @@ import type {
   ChallengeSummaryEntry,
   DailyTrendRankedEntry,
   DailyTrendUnrankedEntry,
+  GiveUpChallengeResult,
   LeaderboardContext,
   RankedLeaderboardRow,
   RunTransition,
@@ -22,6 +23,7 @@ export type {
 } from "../domain/dailyEditorial";
 import type {
   AbandonRunV2Input,
+  GiveUpChallengeInput,
   RecordClickV2Input,
   StartRunV2Input,
 } from "./runProtocol";
@@ -103,6 +105,17 @@ export interface DailyChallengeInput {
   startPageId: number;
   targetTitle: string;
   targetPageId: number;
+  /**
+   * "I gave up" reference path (owner spec, 2026-08-02, dailies only):
+   * a bounded, best-effort forward search (`dailyCandidateEvaluator.ts`'s
+   * `findReferencePath`) computed right after automatic candidate
+   * selection, reusing the evaluator's already-in-memory start outlinks and
+   * target inbound-linkers. `undefined`/`null` when the search found nothing
+   * (or wasn't attempted at all - it never runs for the on-demand random-
+   * challenge path) - stores nothing and never blocks the drop either way.
+   * A plain title chain, start..target inclusive.
+   */
+  referencePath?: string[] | null;
 }
 
 export interface DailyAdminState {
@@ -499,4 +512,21 @@ export interface RunProtocolRepository extends TrackingRepository {
     outcome: "accepted" | "rejected",
     resourceId: string | null,
   ): Promise<void>;
+  /**
+   * "I gave up" flow (owner spec, 2026-08-02): `POST
+   * /api/v2/challenges/{id}/give-up`. Server-side re-validates eligibility
+   * from `runs` itself (never trusts the client's own gating) - the caller
+   * (alias-resolved) must have a qualifying counted DNF on this challenge
+   * (`MIN_GIVE_UP_CLICKS` clicks or `MIN_GIVE_UP_WALL_MS` wall-elapsed, any
+   * attempt) and no eligible completed run on it. Throws
+   * `give_up_already_finished` / `give_up_not_eligible` otherwise. On
+   * success, durably records the peek (`operation_idempotency` 'solution_peek'
+   * row keyed `${canonicalAccountId}:${challengeId}`) - idempotent: calling
+   * this again for an already-peeked account/challenge pair just re-confirms
+   * `{ peeked: true }` rather than erroring or double-recording.
+   */
+  giveUpChallenge(
+    account: AuthorizedAccount,
+    input: GiveUpChallengeInput,
+  ): Promise<GiveUpChallengeResult>;
 }

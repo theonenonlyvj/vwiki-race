@@ -61,6 +61,14 @@ beforeEach(async () => {
   await env.VWIKI_RACE_DB.prepare(
     "UPDATE challenge_number_sequence SET next_sort_order = 4 WHERE sequence_name = 'global'",
   ).run();
+  // "I gave up" (owner spec, 2026-08-02): reset the fixture challenges' own
+  // mutable `reference_path` column each test - a prior test setting it on
+  // challenge-0001 would otherwise leak into every later test in the file
+  // (this column isn't touched by the DELETE above, which only removes
+  // non-fixture challenge ROWS, not fixture-row column mutations).
+  await env.VWIKI_RACE_DB.prepare(
+    "UPDATE challenges SET reference_path = NULL WHERE id IN ('challenge-0001', 'challenge-0002', 'challenge-0003')",
+  ).run();
 });
 
 describe("hardening migration", () => {
@@ -2128,6 +2136,80 @@ describe("Task 4 D1 projections", () => {
     )).resolves.toBe(4);
   });
 
+  it("\"I gave up\" reference path (owner spec, 2026-08-02): stores the evaluator's computed candidate.referencePath on a brand-new automatic daily challenge", async () => {
+    const { repository } = fixture();
+    await repository.ensureDailyChallengeJob("2026-07-20");
+    const job = await repository.claimDueDailyChallengeJob();
+
+    const featured = await repository.acceptDailyFeature(job!, {
+      kind: "automatic",
+      candidate: {
+        startTitle: "Reference Path Start",
+        startPageId: 9001,
+        targetTitle: "Reference Path Target",
+        targetPageId: 9002,
+        referencePath: ["Reference Path Start", "Hop", "Reference Path Target"],
+      },
+      classifierVersion: "editorial-v1",
+      selectedScore: 80,
+    });
+
+    const stored = await env.VWIKI_RACE_DB.prepare(
+      "SELECT reference_path FROM challenges WHERE id = ?",
+    ).bind(featured.id).first<{ reference_path: string | null }>();
+    expect(JSON.parse(stored?.reference_path ?? "null")).toEqual([
+      "Reference Path Start", "Hop", "Reference Path Target",
+    ]);
+  });
+
+  it("\"I gave up\" reference path: degrades to a plain NULL column when the evaluator found nothing (never blocks the drop)", async () => {
+    const { repository } = fixture();
+    await repository.ensureDailyChallengeJob("2026-07-20");
+    const job = await repository.claimDueDailyChallengeJob();
+
+    const featured = await repository.acceptDailyFeature(job!, {
+      kind: "automatic",
+      candidate: {
+        startTitle: "No Reference Start",
+        startPageId: 9003,
+        targetTitle: "No Reference Target",
+        targetPageId: 9004,
+        referencePath: null,
+      },
+      classifierVersion: "editorial-v1",
+      selectedScore: 80,
+    });
+
+    const stored = await env.VWIKI_RACE_DB.prepare(
+      "SELECT reference_path FROM challenges WHERE id = ?",
+    ).bind(featured.id).first<{ reference_path: string | null }>();
+    expect(stored?.reference_path).toBeNull();
+  });
+
+  it("\"I gave up\" reference path: a queued (nominated) daily never writes one - candidate selection never ran for it", async () => {
+    const { repository } = fixture();
+    await insertReadyChallenge({ id: "queued-no-reference", startPageId: 9101, targetPageId: 9102 });
+    await insertEditorialQueue(env.VWIKI_RACE_DB, {
+      id: "queued-no-reference-entry",
+      challengeId: "queued-no-reference",
+      source: "admin",
+      flavor: "recognizable",
+    });
+    await repository.ensureDailyChallengeJob("2026-07-20");
+    const job = await repository.claimDueDailyChallengeJob();
+
+    await repository.acceptDailyFeature(job!, {
+      kind: "queued",
+      queueEntryId: "queued-no-reference-entry",
+      classifierVersion: "editorial-v1",
+    });
+
+    const stored = await env.VWIKI_RACE_DB.prepare(
+      "SELECT reference_path FROM challenges WHERE id = 'queued-no-reference'",
+    ).first<{ reference_path: string | null }>();
+    expect(stored?.reference_path).toBeNull();
+  });
+
   it("routes legacy creation through canonical validation and deterministic replay", async () => {
     const { repository } = fixture();
     const validateChallengeArticles = vi.fn(async () => ({
@@ -3005,6 +3087,28 @@ describe("Task 4 D1 projections", () => {
     // this challenge ("same-first", above).
     await expect(repository.getPublicRunPath("same-dnf", account)).resolves.toHaveLength(2);
     expect(rows.some((row) => row.runId === "zero-click-dnf")).toBe(false);
+  });
+
+  it("DT-1 (\"Your history\" lists EVERY counted attempt): TWO separate DNFs on the same challenge, no completion at all, both appear - no cap/dedup hides the second one", async () => {
+    await insertAbandonedV2({
+      id: "two-dnf-first", accountId: account.accountId, clickCount: 3,
+      elapsedMs: 8_000, abandonedAt: "2026-07-14T01:00:08.000Z",
+    });
+    await insertAbandonedV2({
+      id: "two-dnf-second", accountId: account.accountId, clickCount: 6,
+      elapsedMs: 15_000, abandonedAt: "2026-07-14T02:00:15.000Z",
+    });
+
+    const { repository } = fixture();
+    const rows = await repository.listLeaderboard("challenge-0001");
+    const mine = rows.filter((row) => row.accountId === account.accountId);
+
+    expect(mine.map((row) => row.runId).sort()).toEqual(["two-dnf-first", "two-dnf-second"]);
+    expect(mine.every((row) => row.status === "abandoned")).toBe(true);
+    // Both are counted attempts (DT-1/FB-7): the second one is a repeat
+    // attempt (`isRepeatRun`), not deduped away or capped to one DNF.
+    expect(mine.find((row) => row.runId === "two-dnf-first")?.isRepeatRun).toBe(false);
+    expect(mine.find((row) => row.runId === "two-dnf-second")?.isRepeatRun).toBe(true);
   });
 
   it("FB-7 (owner ruling, 2026-07-19): getPublicRunPath refuses a sub-threshold (1-click) DNF's path - it's no longer board-visible anywhere", async () => {
@@ -4057,6 +4161,261 @@ describe("getChallengePaths (GR-1 \"View graph\")", () => {
     expect(result.runs.some((r) => r.elapsedMs === 3_100)).toBe(false);
     expect(result.runs.some((r) => r.elapsedMs === 1_000)).toBe(true);
   });
+
+  describe("\"I gave up\" disclosure extension (owner spec, 2026-08-02)", () => {
+    it("a peeked (never-finished) viewer unlocks disclosure even with zero counted strands, falling back to the stored reference path", async () => {
+      await env.VWIKI_RACE_DB.prepare(
+        `UPDATE challenges SET reference_path = ? WHERE id = 'challenge-0001'`,
+      ).bind(JSON.stringify(["Moon", "Orbit", "Gravity"])).run();
+      await insertPeek(account.accountId, "challenge-0001");
+
+      const { repository } = fixture();
+      const result = await repository.getChallengePaths("challenge-0001", account);
+
+      expect(result.totalRuns).toBe(0);
+      expect(result.runs).toEqual([]);
+      expect(result.referencePath).toEqual(["Moon", "Orbit", "Gravity"]);
+    });
+
+    it("a peeked viewer with zero strands AND no stored reference path gets an honest null (\"no one's cracked it\")", async () => {
+      await insertPeek(account.accountId, "challenge-0001");
+
+      const { repository } = fixture();
+      const result = await repository.getChallengePaths("challenge-0001", account);
+
+      expect(result.totalRuns).toBe(0);
+      expect(result.runs).toEqual([]);
+      expect(result.referencePath).toBeNull();
+    });
+
+    it("a peeked viewer sees the reference path even when OTHER accounts have DNF strands but nobody has actually finished it yet", async () => {
+      await insertPeek(account.accountId, "challenge-0001");
+      await env.VWIKI_RACE_DB.prepare(
+        `UPDATE challenges SET reference_path = ? WHERE id = 'challenge-0001'`,
+      ).bind(JSON.stringify(["Moon", "Orbit", "Gravity"])).run();
+      await insertAbandonedV2({
+        id: "gr1-peek-dnf-only", accountId: "someone-else-dnf", clickCount: 6,
+        elapsedMs: 20_000, abandonedAt: "2026-07-14T01:00:05.000Z",
+      });
+
+      const { repository } = fixture();
+      const result = await repository.getChallengePaths("challenge-0001", account);
+
+      // Case (a) needs an actual completion, not just a counted attempt -
+      // other players' DNF strands don't count as "a solution," so the
+      // reference-path fallback applies exactly as if nobody had touched
+      // the challenge at all.
+      expect(result.totalRuns).toBe(0);
+      expect(result.runs).toEqual([]);
+      expect(result.referencePath).toEqual(["Moon", "Orbit", "Gravity"]);
+    });
+
+    it("a real finisher's path still wins over the reference path once one exists, even for a peeked viewer", async () => {
+      await insertPeek(account.accountId, "challenge-0001");
+      await env.VWIKI_RACE_DB.prepare(
+        `UPDATE challenges SET reference_path = ? WHERE id = 'challenge-0001'`,
+      ).bind(JSON.stringify(["Moon", "Reference", "Gravity"])).run();
+      await insertCompletedV2({
+        id: "gr1-peek-real-finisher", accountId: "someone-else", elapsedMs: 4_000,
+        completedAt: "2026-07-14T01:00:04.000Z",
+      });
+
+      const { repository } = fixture();
+      const result = await repository.getChallengePaths("challenge-0001", account);
+
+      expect(result.totalRuns).toBe(1);
+      expect(result.runs[0]).toMatchObject({ status: "completed", elapsedMs: 4_000 });
+      expect(result.referencePath).toBeUndefined();
+    });
+
+    it("a viewer who has neither finished nor peeked still gets the 404 (guard unchanged for the common case)", async () => {
+      const { repository } = fixture();
+      await expect(repository.getChallengePaths("challenge-0001", account)).rejects.toMatchObject({
+        code: "challenge_paths_not_found", status: 404,
+      });
+    });
+  });
+});
+
+describe("giveUpChallenge (\"I gave up\", owner spec 2026-08-02)", () => {
+  it("rejects an account that has never touched the challenge", async () => {
+    const { repository } = fixture();
+    await expect(repository.giveUpChallenge(account, {
+      challengeId: "challenge-0001",
+      idempotencyKey: "give-up-never-touched",
+    })).rejects.toMatchObject({ code: "give_up_not_eligible", status: 409 });
+  });
+
+  it("rejects a counted DNF that clears FB-7 but falls short of BOTH give-up thresholds", async () => {
+    // Counted (>= MIN_COUNTED_DNF_CLICKS = 2) but neither >= 5 clicks nor
+    // >= 180s wall-elapsed - a real-but-modest attempt, not yet a qualifying
+    // one for this specific affordance.
+    await insertAbandonedV2({
+      id: "give-up-short-dnf", accountId: account.accountId, clickCount: 3,
+      elapsedMs: 5_000, abandonedAt: "2026-07-14T01:00:05.000Z",
+    });
+    const { repository } = fixture();
+    await expect(repository.giveUpChallenge(account, {
+      challengeId: "challenge-0001",
+      idempotencyKey: "give-up-short-dnf-key",
+    })).rejects.toMatchObject({ code: "give_up_not_eligible", status: 409 });
+  });
+
+  it("rejects an account that has already finished the challenge, even alongside a qualifying DNF", async () => {
+    await insertAbandonedV2({
+      id: "give-up-finished-dnf", accountId: account.accountId, clickCount: 12,
+      elapsedMs: 30_000, abandonedAt: "2026-07-14T01:00:05.000Z",
+    });
+    await insertCompletedV2({
+      id: "give-up-finished-win", accountId: account.accountId, elapsedMs: 4_000,
+      completedAt: "2026-07-14T01:00:06.000Z",
+    });
+    const { repository } = fixture();
+    await expect(repository.giveUpChallenge(account, {
+      challengeId: "challenge-0001",
+      idempotencyKey: "give-up-already-finished-key",
+    })).rejects.toMatchObject({ code: "give_up_already_finished", status: 409 });
+  });
+
+  it("accepts via the click-count threshold (>= 5 clicks) and durably records the peek", async () => {
+    await insertAbandonedV2({
+      id: "give-up-clicks-dnf", accountId: account.accountId, clickCount: 6,
+      elapsedMs: 10_000, abandonedAt: "2026-07-14T01:00:05.000Z",
+    });
+    const { repository } = fixture();
+
+    await expect(repository.giveUpChallenge(account, {
+      challengeId: "challenge-0001",
+      idempotencyKey: "give-up-clicks-key",
+    })).resolves.toEqual({ challengeId: "challenge-0001", peeked: true });
+
+    const peek = await env.VWIKI_RACE_DB.prepare(
+      `SELECT canonical_account_id, resource_id, outcome_status FROM operation_idempotency
+       WHERE operation = 'solution_peek'`,
+    ).first<{ canonical_account_id: string; resource_id: string; outcome_status: string }>();
+    expect(peek).toEqual({
+      canonical_account_id: account.accountId,
+      resource_id: "challenge-0001",
+      outcome_status: "accepted",
+    });
+  });
+
+  it("accepts via the wall-elapsed threshold (>= 180s) even with very few clicks", async () => {
+    await insertAbandonedV2({
+      id: "give-up-wall-dnf", accountId: account.accountId, clickCount: 2,
+      elapsedMs: 200_000, abandonedAt: "2026-07-14T01:03:20.000Z",
+    });
+    const { repository } = fixture();
+
+    await expect(repository.giveUpChallenge(account, {
+      challengeId: "challenge-0001",
+      idempotencyKey: "give-up-wall-key",
+    })).resolves.toEqual({ challengeId: "challenge-0001", peeked: true });
+  });
+
+  it("\"any attempt\" - an earlier qualifying DNF still unlocks give-up even if a LATER retry on the same challenge was trivial", async () => {
+    await insertAbandonedV2({
+      id: "give-up-earlier-qualifying", accountId: account.accountId, clickCount: 8,
+      elapsedMs: 20_000, abandonedAt: "2026-07-14T01:00:05.000Z",
+    });
+    await insertAbandonedV2({
+      id: "give-up-later-trivial", accountId: account.accountId, clickCount: 2,
+      elapsedMs: 3_000, abandonedAt: "2026-07-14T02:00:05.000Z",
+    });
+    const { repository } = fixture();
+
+    await expect(repository.giveUpChallenge(account, {
+      challengeId: "challenge-0001",
+      idempotencyKey: "give-up-any-attempt-key",
+    })).resolves.toEqual({ challengeId: "challenge-0001", peeked: true });
+  });
+
+  it("is idempotent under the same idempotency key - a retry replays the original outcome without double-recording the peek", async () => {
+    await insertAbandonedV2({
+      id: "give-up-replay-dnf", accountId: account.accountId, clickCount: 6,
+      elapsedMs: 10_000, abandonedAt: "2026-07-14T01:00:05.000Z",
+    });
+    const { repository } = fixture();
+    const idempotencyKey = "give-up-replay-key";
+
+    const first = await repository.giveUpChallenge(account, { challengeId: "challenge-0001", idempotencyKey });
+    const second = await repository.giveUpChallenge(account, { challengeId: "challenge-0001", idempotencyKey });
+
+    expect(second).toEqual(first);
+    const peekCount = await env.VWIKI_RACE_DB.prepare(
+      `SELECT count(*) AS n FROM operation_idempotency WHERE operation = 'solution_peek'`,
+    ).first<{ n: number }>();
+    expect(Number(peekCount?.n)).toBe(1);
+  });
+
+  it("re-confirms with a FRESH idempotency key once already peeked, rather than erroring or double-recording", async () => {
+    await insertAbandonedV2({
+      id: "give-up-reconfirm-dnf", accountId: account.accountId, clickCount: 6,
+      elapsedMs: 10_000, abandonedAt: "2026-07-14T01:00:05.000Z",
+    });
+    const { repository } = fixture();
+    await repository.giveUpChallenge(account, {
+      challengeId: "challenge-0001", idempotencyKey: "give-up-reconfirm-first",
+    });
+
+    await expect(repository.giveUpChallenge(account, {
+      challengeId: "challenge-0001", idempotencyKey: "give-up-reconfirm-second",
+    })).resolves.toEqual({ challengeId: "challenge-0001", peeked: true });
+
+    const peekCount = await env.VWIKI_RACE_DB.prepare(
+      `SELECT count(*) AS n FROM operation_idempotency WHERE operation = 'solution_peek'`,
+    ).first<{ n: number }>();
+    expect(Number(peekCount?.n)).toBe(1);
+  });
+
+  it("closes ranked eligibility for the account's SUBSEQUENT completions on this challenge, from the very next run onward", async () => {
+    await insertAbandonedV2({
+      id: "give-up-ranked-closure-dnf", accountId: account.accountId, clickCount: 6,
+      elapsedMs: 10_000, abandonedAt: "2026-07-14T01:00:05.000Z",
+    });
+    const { repository } = fixture({ now: "2026-07-14T02:00:00.000Z" }, "give-up-ranked-closure-run");
+    await repository.giveUpChallenge(account, {
+      challengeId: "challenge-0001", idempotencyKey: "give-up-ranked-closure-key",
+    });
+
+    await repository.startRunV2(account, {
+      challengeId: "challenge-0001",
+      idempotencyKey: "give-up-ranked-closure-start",
+    });
+
+    const newRun = await env.VWIKI_RACE_DB.prepare(
+      `SELECT ranked_eligible FROM runs WHERE challenge_id = 'challenge-0001'
+         AND account_id = ? AND status = 'active'`,
+    ).bind(account.accountId).first<{ ranked_eligible: number }>();
+    expect(Number(newRun?.ranked_eligible)).toBe(0);
+
+    // The prior qualifying DNF itself is untouched by give-up - it was
+    // already ranked_eligible = 0 from its own abandon, and give-up never
+    // writes to `runs` at all.
+    const priorDnf = await env.VWIKI_RACE_DB.prepare(
+      `SELECT ranked_eligible, status FROM runs WHERE id = 'give-up-ranked-closure-dnf'`,
+    ).first<{ ranked_eligible: number; status: string }>();
+    expect(priorDnf).toEqual({ ranked_eligible: 0, status: "abandoned" });
+  });
+
+  it("resolves eligibility through account_aliases, same as every other viewer-identity guard in this file", async () => {
+    const canonical = "give-up-alias-canonical";
+    const ghost = "give-up-alias-ghost";
+    await insertAbandonedV2({
+      id: "give-up-alias-dnf", accountId: ghost, clickCount: 6,
+      elapsedMs: 10_000, abandonedAt: "2026-07-14T01:00:05.000Z",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO account_aliases (alias_account_id, canonical_account_id, updated_at)
+       VALUES (?, ?, '2026-07-14T01:00:00.000Z')`,
+    ).bind(ghost, canonical).run();
+    const { repository } = fixture();
+
+    await expect(repository.giveUpChallenge(
+      { accountId: canonical, displayName: "Casey", status: "claimed", aliases: [] },
+      { challengeId: "challenge-0001", idempotencyKey: "give-up-alias-key" },
+    )).resolves.toEqual({ challengeId: "challenge-0001", peeked: true });
+  });
 });
 
 describe("GET /api/v2/challenges/:id/paths", () => {
@@ -4826,6 +5185,83 @@ describe("getAccountChallengeOutcomes (Increment 5)", () => {
     const { repository } = fixture();
 
     await expect(repository.getAccountChallengeOutcomes(me)).resolves.toEqual([]);
+  });
+
+  describe("\"I gave up\" gating fields (owner spec, 2026-08-02)", () => {
+    it("omits giveUpEligible/peeked entirely for a plain 'completed' outcome", async () => {
+      const me: AuthorizedAccount = {
+        accountId: "outcomes-giveup-completed", displayName: "Casey", status: "claimed", aliases: [],
+      };
+      await insertCompletedV2({
+        id: "outcomes-giveup-completed-run", accountId: me.accountId, elapsedMs: 4_000,
+        completedAt: "2026-07-14T01:00:04.000Z",
+      });
+
+      const { repository } = fixture();
+      const outcomes = await repository.getAccountChallengeOutcomes(me);
+
+      expect(outcomes.find((o) => o.challengeId === "challenge-0001")).toEqual({
+        challengeId: "challenge-0001", outcome: "completed", best: { elapsedMs: 4_000, clickCount: 1 },
+      });
+    });
+
+    it("omits giveUpEligible for a counted DNF that falls short of both give-up thresholds", async () => {
+      const me: AuthorizedAccount = {
+        accountId: "outcomes-giveup-short", displayName: "Casey", status: "claimed", aliases: [],
+      };
+      await insertAbandonedV2({
+        id: "outcomes-giveup-short-run", accountId: me.accountId, clickCount: 3,
+        elapsedMs: 5_000, abandonedAt: "2026-07-14T01:00:05.000Z",
+      });
+
+      const { repository } = fixture();
+      const outcomes = await repository.getAccountChallengeOutcomes(me);
+
+      expect(outcomes.find((o) => o.challengeId === "challenge-0001")).toEqual({
+        challengeId: "challenge-0001", outcome: "dnf", best: null,
+      });
+    });
+
+    it("sets giveUpEligible: true for a DNF clearing the click-count threshold, via EITHER attempt (\"any attempt\")", async () => {
+      const me: AuthorizedAccount = {
+        accountId: "outcomes-giveup-eligible", displayName: "Casey", status: "claimed", aliases: [],
+      };
+      await insertAbandonedV2({
+        id: "outcomes-giveup-eligible-short", accountId: me.accountId, clickCount: 2,
+        elapsedMs: 3_000, abandonedAt: "2026-07-14T01:00:05.000Z",
+      });
+      await insertAbandonedV2({
+        id: "outcomes-giveup-eligible-qualifying", accountId: me.accountId, clickCount: 6,
+        elapsedMs: 10_000, abandonedAt: "2026-07-14T02:00:05.000Z",
+      });
+
+      const { repository } = fixture();
+      const outcomes = await repository.getAccountChallengeOutcomes(me);
+
+      expect(outcomes.find((o) => o.challengeId === "challenge-0001")).toEqual({
+        challengeId: "challenge-0001", outcome: "dnf", best: null, giveUpEligible: true,
+      });
+    });
+
+    it("sets peeked: true once the account has given up on this challenge - giveUpEligible stays true too (the server reports both raw facts; the CLIENT is what combines them into 'hide the button once peeked')", async () => {
+      const me: AuthorizedAccount = {
+        accountId: "outcomes-peeked", displayName: "Casey", status: "claimed", aliases: [],
+      };
+      await insertAbandonedV2({
+        id: "outcomes-peeked-run", accountId: me.accountId, clickCount: 6,
+        elapsedMs: 10_000, abandonedAt: "2026-07-14T01:00:05.000Z",
+      });
+      const { repository } = fixture();
+      await repository.giveUpChallenge(me, {
+        challengeId: "challenge-0001", idempotencyKey: "outcomes-peeked-key",
+      });
+
+      const outcomes = await repository.getAccountChallengeOutcomes(me);
+
+      expect(outcomes.find((o) => o.challengeId === "challenge-0001")).toEqual({
+        challengeId: "challenge-0001", outcome: "dnf", best: null, giveUpEligible: true, peeked: true,
+      });
+    });
   });
 });
 
@@ -6954,6 +7390,21 @@ async function insertAccountProfile(accountId: string, publicName: string): Prom
     `INSERT INTO account_profiles (account_id, public_name, identity_status, updated_at)
      VALUES (?, ?, 'claimed', '2026-07-14T00:00:00.000Z')`,
   ).bind(accountId, publicName).run();
+}
+
+/**
+ * "I gave up" (owner spec, 2026-08-02): directly seeds the durable
+ * `operation_idempotency` 'solution_peek' fact `giveUpChallenge` writes,
+ * without going through the give-up eligibility flow - lets disclosure-guard
+ * tests exercise "already peeked" independently of how a peek gets created.
+ */
+async function insertPeek(accountId: string, challengeId: string): Promise<void> {
+  await env.VWIKI_RACE_DB.prepare(
+    `INSERT INTO operation_idempotency
+       (operation, idempotency_key, canonical_account_id, request_fingerprint,
+        resource_id, outcome_status, created_at)
+     VALUES ('solution_peek', ?, ?, 'test-fingerprint', ?, 'accepted', '2026-07-14T01:00:00.000Z')`,
+  ).bind(`${accountId}:${challengeId}`, accountId, challengeId).run();
 }
 
 // GR-1: bulk-inserts a run's `run_path_steps` rows (source/destination

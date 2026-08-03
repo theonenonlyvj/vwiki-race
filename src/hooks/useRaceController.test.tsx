@@ -880,6 +880,7 @@ function apiClient(overrides: Partial<VWikiRaceApiClient> = {}): VWikiRaceApiCli
     declineDailyNomination: vi.fn(),
     queueDailyChallenge: vi.fn(),
     removeDailyQueueEntry: vi.fn(),
+    giveUpChallenge: vi.fn(),
     ...overrides,
   };
 }

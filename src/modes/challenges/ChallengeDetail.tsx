@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import ChallengePathGraphButton from "../../components/ChallengePathGraphButton";
+import GiveUpAffordance from "../../components/GiveUpAffordance";
 import LeaderboardList from "../../components/LeaderboardList";
 import StagedLoadingNotice from "../../components/StagedLoadingNotice";
+import TheSolution from "../../components/TheSolution";
 import WinningPathChain from "../../components/WinningPathChain";
 import { dailyBadgeLabel } from "../../domain/challengeSelection";
 import { formatTimeAndClicks } from "../../domain/formatting";
 import { pathStepsToChain } from "../../domain/winningPath";
-import type { Challenge, RankedLeaderboardRow, ServerPathStep } from "../../domain/types";
+import type { Challenge, ChallengeOutcomeEntry, RankedLeaderboardRow, ServerPathStep } from "../../domain/types";
 import type { ChallengeBoardResponse } from "../../server/contracts";
 import type { VWikiRaceApiClient } from "../../services/vwikiRaceApiClient";
 import { ChallengeShareButton } from "../../race/shared";
@@ -130,13 +132,48 @@ export default function ChallengeDetail({
     };
   }, [apiClient, challenge.id, boardRetryToken]);
 
+  // "I gave up" (owner spec, 2026-08-02): a small, self-fetched,
+  // best-effort read of the caller's own outcome on THIS challenge - the
+  // same bulk `getAccountChallengeOutcomes` endpoint Browse already calls
+  // (RC-03 cache-backed, so this rarely costs a real network round trip),
+  // filtered down to one entry. No dedicated loading/error UI: the give-up
+  // affordance and "The solution" panel are enhancements layered onto an
+  // already-fully-rendered screen, not load-bearing content - a failed
+  // fetch just means neither renders this pass, same as `outcome`
+  // defaulting to `undefined` (unauthenticated, or never touched).
+  const [outcome, setOutcome] = useState<ChallengeOutcomeEntry | undefined>(undefined);
+  const [outcomeRefreshToken, setOutcomeRefreshToken] = useState(0);
+  useEffect(() => {
+    if (!identityToken) {
+      setOutcome(undefined);
+      return;
+    }
+    let cancelled = false;
+    void apiClient.getAccountChallengeOutcomes(identityToken)
+      .then((outcomes) => {
+        if (!cancelled) {
+          setOutcome(outcomes.find((entry) => entry.challengeId === challenge.id));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, identityToken, challenge.id, outcomeRefreshToken]);
+  const peeked = Boolean(outcome?.peeked);
+  const showGiveUp = Boolean(outcome?.giveUpEligible) && !peeked;
+
   const yourRows = identityAccountId
     ? leaderboard.filter((row) => row.accountId === identityAccountId)
     : [];
   // Invariant 5 ("paths stay hidden until you've played... 'played' means
   // finished, not merely started/DNF'd"): a DNF-only history still keeps
   // the anti-spoiler copy up - only a completed row unlocks disclosure.
-  const pathsUnlocked = yourRows.some((row) => row.status === "completed");
+  // "I gave up" (owner spec, 2026-08-02): extends this to "finished OR
+  // peeked", matching the server's own extended disclosure guard
+  // (`viewerFinishedOrPeekedChallengeExistsSql`) - a peeked account earns
+  // the same "View path"/"View graph" access a finisher gets.
+  const pathsUnlocked = yourRows.some((row) => row.status === "completed") || peeked;
   // DT-1 (owner-proxy ruling, "anything else" (b)): a lone completed
   // attempt that's ALSO this account's placement on the main board above is
   // pure duplication - same rank/time/clicks shown twice, once per panel.
@@ -209,8 +246,27 @@ export default function ChallengeDetail({
           >
             {"▶"} Race
           </button>
+          {/* "I gave up" (owner spec, 2026-08-02): no in-race button - this
+              muted link-button is the ENTIRE affordance, next to the retry
+              CTA above, gated on a qualifying DNF and not yet peeked. */}
+          {showGiveUp ? (
+            <GiveUpAffordance
+              apiClient={apiClient}
+              challengeId={challenge.id}
+              identityToken={identityToken}
+              onPeeked={() => setOutcomeRefreshToken((value) => value + 1)}
+            />
+          ) : null}
         </div>
       </div>
+
+      {peeked && identityToken ? (
+        <TheSolution
+          apiClient={apiClient}
+          challengeId={challenge.id}
+          identityToken={identityToken}
+        />
+      ) : null}
 
       {/* PKG-04: was the only mode screen with no card chrome - now wrapped
           in the same `.leaderboard-panel` group Boards/Browse/You use

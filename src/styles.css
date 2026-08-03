@@ -2634,6 +2634,26 @@ h1 {
   margin-top: 8px;
 }
 
+/* "I gave up" (owner spec, 2026-08-02): the give-up affordance itself is
+   just `.link-button.muted` (no bespoke rule needed - `.give-up-link` exists
+   as a stable hook for that specific instance, not its own visual rule).
+   The confirm panel is a small inline block, never a full-bleed card - it
+   sits directly under the Race/Try-again CTA on both Challenge Detail and
+   the DNF Results screen. */
+.give-up-confirm {
+  margin-top: 10px;
+}
+
+.give-up-confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.the-solution .winning-path {
+  margin-top: 8px;
+}
+
 .share-result {
   display: flex;
   flex-wrap: wrap;

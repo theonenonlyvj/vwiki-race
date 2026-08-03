@@ -10,6 +10,7 @@ import {
 } from "react";
 import BoardSnippet from "../components/BoardSnippet";
 import ChallengePathGraphButton from "../components/ChallengePathGraphButton";
+import GiveUpAffordance from "../components/GiveUpAffordance";
 import WinningPathChain from "../components/WinningPathChain";
 import { boardSnippetRowsForResult, dedupedRankForJustFinished } from "../domain/boardSnippet";
 import PlayAnotherCard from "../components/PlayAnotherCard";
@@ -199,6 +200,38 @@ export default function RaceResults({
     };
   }, [apiClient, challenge.id]);
 
+  // "I gave up" (owner spec, 2026-08-02): only a DNF outcome could ever
+  // qualify (a completion has nothing to give up on), so the fetch is
+  // skipped entirely for a "completed" result - no wasted network call on
+  // the app's single most common Results outcome. "Any attempt" (see
+  // `MIN_GIVE_UP_CLICKS`/`MIN_GIVE_UP_WALL_MS`'s own doc comment) means
+  // eligibility is account-wide on this challenge, not just this literal
+  // just-ended run - a trivial "Try again" DNF's own Results screen can
+  // still show the affordance if an EARLIER attempt already qualified, so
+  // this reads the same bulk outcomes endpoint Challenge Detail does rather
+  // than deriving anything from `outcome` itself.
+  const [giveUpEligible, setGiveUpEligible] = useState(false);
+  const [peeked, setPeeked] = useState(false);
+  useEffect(() => {
+    if (outcome.status !== "dnf" || !identityToken) return;
+    let cancelled = false;
+    void apiClient.getAccountChallengeOutcomes(identityToken)
+      .then((outcomes) => {
+        if (cancelled) return;
+        const mine = outcomes.find((entry) => entry.challengeId === challenge.id);
+        setGiveUpEligible(Boolean(mine?.giveUpEligible));
+        setPeeked(Boolean(mine?.peeked));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only per
+    // outcome/challenge pair, matching this component's own established
+    // "RaceFlow always fully unmounts/remounts RaceResults between runs"
+    // contract (see the DNF-focus effect above).
+  }, [apiClient, identityToken, challenge.id, outcome.status]);
+
   // The literal run that just ended, in `boardSnippetRowsForResult` terms -
   // same source (`outcome`/`leaderboardContext`) the header above already
   // reads, so the two can never disagree (PKG-03 change 5's "one source of
@@ -342,6 +375,21 @@ export default function RaceResults({
             View leaderboard
           </button>
         </div>
+
+        {/* "I gave up" (owner spec, 2026-08-02): no in-race button - this
+            muted link-button is the entire affordance, next to the retry
+            CTA above. The solution VIEW itself is Detail-only (spec:
+            "Detail shows 'The solution'") - confirming here just jumps
+            straight to Challenge Detail, which will render it once the
+            peek has landed. */}
+        {outcome.status === "dnf" && giveUpEligible && !peeked ? (
+          <GiveUpAffordance
+            apiClient={apiClient}
+            challengeId={challenge.id}
+            identityToken={identityToken}
+            onPeeked={() => onOpenChallenge(challenge.id)}
+          />
+        ) : null}
 
         {outcome.status === "completed" ? (
           <PathRecap session={outcome.session} />

@@ -29,6 +29,7 @@ import type {
   ChallengePathsResult,
   DailyTrendRankedEntry,
   DailyTrendUnrankedEntry,
+  GiveUpChallengeResult,
   LeaderboardContext,
   RankedLeaderboardRow,
   RunTransition,
@@ -40,13 +41,17 @@ import {
   DECISION_TIME_GRACE_MS,
   fingerprintAbandonRun,
   fingerprintCreateChallenge,
+  fingerprintGiveUpChallenge,
   fingerprintRunClick,
   fingerprintStartRun,
   MAX_RUN_CLICKS,
   MIN_COUNTED_DNF_CLICKS,
+  MIN_GIVE_UP_CLICKS,
+  MIN_GIVE_UP_WALL_MS,
   MIN_RESUMABLE_CLICKS,
   RUN_EXPIRY_MS,
   type AbandonRunV2Input,
+  type GiveUpChallengeInput,
   type RecordClickV2Input,
   type StartRunV2Input,
 } from "./runProtocol";
@@ -764,12 +769,12 @@ export function createD1TrackingRepository(options: {
                (id, label, start_title, target_title, start_page_id, target_page_id,
                 validation_status, ruleset, sort_order, is_active, created_at,
                 created_by_account_id, created_by_display_name, created_by_identity_status,
-                origin, daily_date, source)
+                origin, daily_date, source, reference_path)
              SELECT printf('challenge-%04d', s.next_sort_order - 1),
                     'Challenge #' || (s.next_sort_order - 1), ?, ?, ?, ?,
                     'ready', 'ranked_classic', s.next_sort_order - 1, 1, ?,
                     'vwiki-race:daily', 'VWiki Race', 'claimed',
-                    'daily', ?, 'wikipedia_random'
+                    'daily', ?, 'wikipedia_random', ?
              FROM challenge_number_sequence s
              WHERE s.sequence_name = 'global'
                AND EXISTS (
@@ -784,6 +789,12 @@ export function createD1TrackingRepository(options: {
             candidate.targetPageId,
             at,
             normalizedJob.dailyDate,
+            // "I gave up" reference path (owner spec, 2026-08-02, dailies
+            // only): best-effort, computed by the evaluator right after
+            // automatic candidate selection - see `DailyChallengeInput`'s
+            // doc comment (trackingRepository.ts). `null` when the search
+            // found nothing; never blocks this INSERT either way.
+            candidate.referencePath ? JSON.stringify(candidate.referencePath) : null,
             normalizedJob.dailyDate,
             normalizedJob.leaseToken,
           ),
@@ -1416,7 +1427,23 @@ export function createD1TrackingRepository(options: {
               created_at, updated_at)
            SELECT ?, c.id, ?, ?, 'active', ?, 0, c.start_title, c.target_title,
                   c.start_page_id, c.target_page_id, c.start_page_id,
-                  c.start_title, ?, 0, 1, 2, ?, ?
+                  c.start_title, ?, 0,
+                  -- "I gave up" (owner spec, 2026-08-02): a run started by an
+                  -- account that already peeked THIS challenge is
+                  -- ranked_eligible = 0 from birth, not flipped after the
+                  -- fact - the only other place this column is written is
+                  -- abandon (already 0) and this very INSERT, so gating it
+                  -- here is the single, permanent hook for "post-peek
+                  -- completions never rank" (a completing click never
+                  -- touches ranked_eligible at all, see recordClickV2).
+                  CASE WHEN EXISTS (
+                    SELECT 1 FROM operation_idempotency peek
+                    WHERE peek.operation = 'solution_peek'
+                      AND peek.canonical_account_id = ?
+                      AND peek.resource_id = c.id
+                      AND peek.outcome_status = 'accepted'
+                  ) THEN 0 ELSE 1 END,
+                  2, ?, ?
            FROM challenges c
            JOIN operation_idempotency o
              ON o.operation = 'start' AND o.idempotency_key = ?
@@ -1445,6 +1472,7 @@ export function createD1TrackingRepository(options: {
           account.accountId,
           createdAt,
           expiresAt,
+          account.accountId,
           createdAt,
           createdAt,
           idempotencyKey,
@@ -2020,6 +2048,162 @@ export function createD1TrackingRepository(options: {
 
       const operation = await requireFinalizedOperation(db, "abandon", idempotencyKey);
       return replayAbandonOperation(db, account, operation, fingerprint, receivedAt);
+    },
+
+    async giveUpChallenge(accountInput, input) {
+      const account = normalizeAuthorizedAccount(accountInput);
+      const challengeId = requireValue(input.challengeId, "invalid_challenge_id");
+      const idempotencyKey = requireValue(input.idempotencyKey, "invalid_idempotency_key");
+      const receivedAt = timestamp();
+      await ingestAuthorizedAccount(db, account, receivedAt);
+
+      const fingerprint = await fingerprintGiveUpChallenge({ challengeId });
+      const existing = await loadOperation(db, "give_up", idempotencyKey);
+      if (existing) {
+        return replayGiveUpOperation(db, account, existing, fingerprint, receivedAt);
+      }
+
+      // Server-side re-validation, never the client's own gating (owner
+      // spec, 2026-08-02: "server validates the qualifying DNF itself from
+      // runs"). A plain read BEFORE the write batch, not folded into the
+      // write's own conditional INSERT like `startRunV2`'s pattern - a
+      // deliberate simplification: the actual side effect below (an
+      // idempotent give-up ledger row plus an idempotent durable peek row)
+      // is low-stakes enough that a vanishingly rare eligibility-changed-
+      // mid-request race is an acceptable tradeoff for a much more readable
+      // implementation than threading this same EXISTS pair into a
+      // multi-statement conditional batch.
+      const receipt = receiptIdsCte(account);
+      const eligibility = await db.prepare(
+        `WITH ${receipt.sql},
+           resolved AS (
+             SELECT r.status, r.click_count, r.wall_elapsed_ms, r.elapsed_ms,
+                    r.completed_at, r.abandoned_at, r.protocol_version, r.ranked_eligible,
+                    coalesce(a.canonical_account_id, r.canonical_account_id, r.account_id) account_id
+             FROM runs r
+             LEFT JOIN account_aliases a
+               ON a.alias_account_id = coalesce(r.canonical_account_id, r.account_id)
+             WHERE r.challenge_id = ? AND r.board_excluded = 0
+           )
+         SELECT
+           EXISTS (
+             SELECT 1 FROM resolved
+             WHERE account_id IN (SELECT account_id FROM receipt_ids)
+               AND status = 'completed' AND elapsed_ms IS NOT NULL
+               AND completed_at IS NOT NULL
+               AND ((protocol_version = 2 AND ranked_eligible = 1) OR protocol_version = 1)
+           ) AS has_finished,
+           EXISTS (
+             -- Qualifying DNF: a counted attempt (FB-7's
+             -- MIN_COUNTED_DNF_CLICKS floor) that ALSO clears one of the
+             -- give-up-specific "real attempt" thresholds - see
+             -- MIN_GIVE_UP_CLICKS/MIN_GIVE_UP_WALL_MS's own doc comment
+             -- (runProtocol.ts). "Any attempt", not just the most recent
+             -- one - a genuinely-earned qualifying DNF from earlier still
+             -- unlocks this even if a later retry only managed 1 click.
+             SELECT 1 FROM resolved
+             WHERE account_id IN (SELECT account_id FROM receipt_ids)
+               AND status = 'abandoned' AND abandoned_at IS NOT NULL
+               AND click_count >= ?
+               AND (click_count >= ? OR coalesce(wall_elapsed_ms, 0) >= ?)
+           ) AS has_qualifying_dnf`,
+      ).bind(
+        ...receipt.bindings,
+        challengeId,
+        MIN_COUNTED_DNF_CLICKS,
+        MIN_GIVE_UP_CLICKS,
+        MIN_GIVE_UP_WALL_MS,
+      ).first<{ has_finished: number | null; has_qualifying_dnf: number | null }>();
+
+      if (eligibility?.has_finished) {
+        throw new ApiError(
+          "give_up_already_finished",
+          "You've already finished this challenge - there's nothing to give up on.",
+          409,
+        );
+      }
+      if (!eligibility?.has_qualifying_dnf) {
+        throw new ApiError(
+          "give_up_not_eligible",
+          "Give up unlocks after a real attempt on this challenge.",
+          409,
+        );
+      }
+
+      // Durable peek fact (owner spec: "operation_idempotency row
+      // 'solution_peek' keyed account+challenge") - a SEPARATE row from the
+      // 'give_up' ledger row above: the ledger row protects THIS REQUEST
+      // (a fresh, random idempotency key per confirm-click) against a
+      // network retry double-firing side effects; this row is the durable,
+      // queryable "has this account ever peeked this challenge" fact the
+      // disclosure guard (`viewerFinishedOrPeekedChallengeExistsSql`) and
+      // `startRunV2`'s post-peek ranked-closure check both read. Keyed
+      // `${canonicalAccountId}:${challengeId}` so it's naturally one row per
+      // (account, challenge) pair via INSERT OR IGNORE - a repeat give-up
+      // call (already peeked) just re-confirms the same fact rather than
+      // erroring or double-recording.
+      const peekIdempotencyKey = `${account.accountId}:${challengeId}`;
+      const batch = requireBatch(db);
+      const results = await batch([
+        db.prepare(
+          `INSERT OR IGNORE INTO operation_idempotency
+             (operation, idempotency_key, canonical_account_id,
+              request_fingerprint, resource_id, outcome_status, created_at)
+           VALUES ('give_up', ?, ?, ?, ?, 'pending', ?)`,
+        ).bind(idempotencyKey, account.accountId, fingerprint, challengeId, receivedAt),
+        db.prepare(
+          `INSERT OR IGNORE INTO operation_idempotency
+             (operation, idempotency_key, canonical_account_id,
+              request_fingerprint, resource_id, outcome_status, created_at)
+           SELECT 'solution_peek', ?, ?, ?, ?, 'accepted', ?
+           WHERE EXISTS (
+             SELECT 1 FROM operation_idempotency
+             WHERE operation = 'give_up' AND idempotency_key = ?
+               AND canonical_account_id = ? AND request_fingerprint = ?
+               AND resource_id = ? AND outcome_status = 'pending'
+           )`,
+        ).bind(
+          peekIdempotencyKey,
+          account.accountId,
+          fingerprint,
+          challengeId,
+          receivedAt,
+          idempotencyKey,
+          account.accountId,
+          fingerprint,
+          challengeId,
+        ),
+        db.prepare(
+          `UPDATE operation_idempotency
+           SET outcome_status = 'accepted', response_json = ?
+           WHERE operation = 'give_up' AND idempotency_key = ?
+             AND canonical_account_id = ? AND request_fingerprint = ?
+             AND resource_id = ? AND outcome_status = 'pending'
+             AND EXISTS (
+               SELECT 1 FROM operation_idempotency
+               WHERE operation = 'solution_peek' AND idempotency_key = ?
+                 AND outcome_status = 'accepted'
+             )`,
+        ).bind(
+          JSON.stringify({ challengeId, peeked: true }),
+          idempotencyKey,
+          account.accountId,
+          fingerprint,
+          challengeId,
+          peekIdempotencyKey,
+        ),
+        db.prepare(
+          `UPDATE operation_idempotency
+           SET outcome_status = 'rejected', error_code = 'give_up_not_eligible'
+           WHERE operation = 'give_up' AND idempotency_key = ?
+             AND canonical_account_id = ? AND request_fingerprint = ?
+             AND resource_id = ? AND outcome_status = 'pending'`,
+        ).bind(idempotencyKey, account.accountId, fingerprint, challengeId),
+      ]);
+      inspectBatchResult(results[0]);
+
+      const operation = await requireFinalizedOperation(db, "give_up", idempotencyKey);
+      return replayGiveUpOperation(db, account, operation, fingerprint, receivedAt);
     },
 
     async findActiveRun(accountInput) {
@@ -2936,7 +3120,7 @@ export function createD1TrackingRepository(options: {
            OR (r.status = 'abandoned' AND r.click_count >= ?
              AND r.abandoned_at IS NOT NULL)
          )
-         AND ${viewerFinishedChallengeExistsSql("r.challenge_id")}
+         AND ${viewerFinishedOrPeekedChallengeExistsSql("r.challenge_id")}
          ORDER BY p.step_number`,
       ).bind(...receipt.bindings, runId, MIN_COUNTED_DNF_CLICKS).all<PathStepRow>();
       if (!results.length) {
@@ -2961,6 +3145,30 @@ export function createD1TrackingRepository(options: {
       const challengeId = requireValue(challengeIdInput, "invalid_challenge_id");
       const viewer = normalizeAuthorizedAccount(viewerAccountInput);
       const receipt = receiptIdsCte(viewer);
+
+      // "I gave up" (owner spec, 2026-08-02): the guard is now checked as
+      // its OWN preliminary query, separate from "are there any counted
+      // strands." Before peeking existed, a viewer who passed this guard was
+      // GUARANTEED to have their own eligible completed run on the
+      // challenge, which was itself always one of the rows the big query
+      // below returns - so "zero rows" and "guard failed" were the same
+      // case and could safely collapse into one 404. A peeked (but never
+      // finished) viewer breaks that guarantee: they can legitimately pass
+      // the guard on a challenge NOBODY has finished or DNF'd yet, and that
+      // case must return the solution-view fallback (reference path / "no
+      // one's cracked it"), not a 404.
+      const guardRow = await db.prepare(
+        `WITH ${receipt.sql}
+         SELECT ${viewerFinishedOrPeekedChallengeExistsSql("?")} AS allowed`,
+      ).bind(...receipt.bindings, challengeId, challengeId).first<{ allowed: number }>();
+      if (!guardRow?.allowed) {
+        throw new ApiError(
+          "challenge_paths_not_found",
+          "No viewable paths for this challenge.",
+          404,
+        );
+      }
+
       const { results } = await db.prepare(
         `WITH ${receipt.sql},
            resolved AS (
@@ -3040,28 +3248,33 @@ export function createD1TrackingRepository(options: {
          FROM ranked
          LEFT JOIN account_profiles p ON p.account_id = ranked.account_id
          WHERE ranked.rank <= ?
-           AND ${viewerFinishedChallengeExistsSql("?")}
          ORDER BY ranked.rank`,
       ).bind(
         ...receipt.bindings,
         challengeId,
         MIN_COUNTED_DNF_CLICKS,
         CHALLENGE_PATHS_LIMIT,
-        challengeId,
       ).all<ChallengePathsRunRow>();
 
-      // A guard failure and "genuinely zero counted runs" collapse into the
-      // identical outcome (same anti-enumeration shape `getPublicRunPath`
-      // already uses) - and in practice they're the same case here: a
-      // viewer who passes the guard has, by definition, their own eligible
-      // completed run on THIS challenge, which is itself always one of the
-      // rows above, so an empty result only happens when the guard failed.
-      if (!results.length) {
-        throw new ApiError(
-          "challenge_paths_not_found",
-          "No viewable paths for this challenge.",
-          404,
-        );
+      // "I gave up": the guard already ran above, so a result with no
+      // COMPLETED strand - whether `results` is empty (nobody's touched it)
+      // or has DNF strands only (people have tried and failed, nobody's
+      // finished) - is a genuine "no finisher's path exists yet," not a
+      // guard failure (that already threw 404 above). Case (a) ("best
+      // finisher's path") only ever applies once a real completion exists;
+      // otherwise fall back to the stored reference path, or the honest
+      // "nobody's cracked it" `null` - see `ChallengePathsResult`'s doc
+      // comment for the exact (a)/(b)/(c) contract.
+      const hasFinisher = results.some((row) => row.status === "completed");
+      if (!hasFinisher) {
+        const challengeRow = await db.prepare(
+          `SELECT reference_path FROM challenges WHERE id = ?`,
+        ).bind(challengeId).first<{ reference_path: string | null }>();
+        return {
+          runs: [],
+          totalRuns: 0,
+          referencePath: parseReferencePath(challengeRow?.reference_path ?? null),
+        };
       }
 
       const totalRuns = Number(results[0]?.total_runs ?? results.length);
@@ -3317,7 +3530,8 @@ export function createD1TrackingRepository(options: {
         .prepare(
           `WITH ${receipt.sql}, owner_runs AS (
              SELECT r.challenge_id, r.id, r.status, r.elapsed_ms, r.click_count,
-                    r.completed_at, r.abandoned_at, r.protocol_version, r.ranked_eligible
+                    r.completed_at, r.abandoned_at, r.protocol_version, r.ranked_eligible,
+                    r.wall_elapsed_ms
              FROM runs r
              LEFT JOIN account_aliases a ON a.alias_account_id = coalesce(r.canonical_account_id, r.account_id)
              WHERE r.board_excluded = 0
@@ -3347,21 +3561,50 @@ export function createD1TrackingRepository(options: {
            SELECT e.challenge_id challenge_id,
                   min(e.result_group) best_group,
                   bc.elapsed_ms best_elapsed_ms,
-                  bc.click_count best_click_count
+                  bc.click_count best_click_count,
+                  -- "I gave up" affordance gating (owner spec, 2026-08-02):
+                  -- "any attempt", not just the best/most-recent one - a
+                  -- genuinely-earned qualifying DNF still unlocks this even
+                  -- if the account's OTHER counted DNF on the same challenge
+                  -- fell short.
+                  max(CASE
+                    WHEN e.result_group = 1 AND (
+                      e.click_count >= ? OR coalesce(e.wall_elapsed_ms, 0) >= ?
+                    ) THEN 1 ELSE 0
+                  END) has_qualifying_dnf,
+                  (SELECT 1 FROM operation_idempotency peek
+                   LEFT JOIN account_aliases pa ON pa.alias_account_id = peek.canonical_account_id
+                   WHERE peek.operation = 'solution_peek'
+                     AND peek.outcome_status = 'accepted'
+                     AND peek.resource_id = e.challenge_id
+                     AND (
+                       peek.canonical_account_id IN (SELECT account_id FROM receipt_ids)
+                       OR pa.canonical_account_id IN (SELECT account_id FROM receipt_ids)
+                     )) peeked
            FROM eligible e
            LEFT JOIN best_completed bc ON bc.challenge_id = e.challenge_id AND bc.rn = 1
            GROUP BY e.challenge_id`,
         )
-        .bind(...receipt.bindings, MIN_COUNTED_DNF_CLICKS)
+        .bind(...receipt.bindings, MIN_COUNTED_DNF_CLICKS, MIN_GIVE_UP_CLICKS, MIN_GIVE_UP_WALL_MS)
         .all<ChallengeOutcomeQueryRow>();
       return results.map((row) => {
         const completed = Number(row.best_group) === 0;
+        const giveUpEligible = !completed && Number(row.has_qualifying_dnf) === 1;
+        const peeked = Number(row.peeked) === 1;
         return {
           challengeId: row.challenge_id,
           outcome: completed ? "completed" as const : "dnf" as const,
           best: completed
             ? { elapsedMs: Number(row.best_elapsed_ms), clickCount: Number(row.best_click_count) }
             : null,
+          // Omitted entirely (not `false`) when not applicable - keeps the
+          // wire payload minimal and, more importantly, keeps every
+          // pre-existing exact-shape (`toEqual`) fixture/test that predates
+          // this field passing unchanged (an ABSENT key, unlike an explicit
+          // `false`, is what `ChallengeOutcomeEntry`'s own "optional for
+          // wire back-compat" doc comment promises).
+          ...(giveUpEligible ? { giveUpEligible: true as const } : {}),
+          ...(peeked ? { peeked: true as const } : {}),
         };
       });
     },
@@ -3955,18 +4198,21 @@ function receiptIdsCte(account: AuthorizedAccount): {
 /**
  * FB-4 shared guard (council 2026-07-19, owner decision 10; shared with
  * GR-1's `getChallengePaths` below): an `EXISTS` SQL fragment - not a full
- * query, and it binds no parameters of its own - true only when the viewer
- * has an eligible completed run on the given challenge. Requires a
- * `receipt_ids` CTE (see `receiptIdsCte`) already in scope in the same
- * statement's `WITH` clause. `challengeIdExpr` lets callers compose it
- * either against a correlated column (`getPublicRunPath` passes
- * `"r.challenge_id"`, looked up per target run, no extra bind) or a bound
- * literal (`getChallengePaths` passes `"?"`, since it already knows the
- * fixed challenge id) - either way this stays the ONE place the guard's SQL
- * is written, so the two endpoints can't independently drift on it.
+ * query - true when the viewer has EITHER an eligible completed run on the
+ * given challenge OR has confirmed "I give up" on it (owner spec, 2026-08-02:
+ * extends this guard from "finished" to "finished OR peeked" - a peeked
+ * account earns the same disclosure a finisher gets, since they've already
+ * traded their own ranked eligibility on this challenge for the reveal).
+ * `challengeIdExpr` is used TWICE (once per branch), so callers using a
+ * literal bound param (`"?"`) must bind it twice; a correlated column
+ * expression (`getPublicRunPath` passes `"r.challenge_id"`) needs no extra
+ * bind either time. Requires a `receipt_ids` CTE (see `receiptIdsCte`)
+ * already in scope in the same statement's `WITH` clause - this stays the
+ * ONE place the guard's SQL is written, so the endpoints that share it can't
+ * independently drift on it.
  */
-function viewerFinishedChallengeExistsSql(challengeIdExpr: string): string {
-  return `EXISTS (
+function viewerFinishedOrPeekedChallengeExistsSql(challengeIdExpr: string): string {
+  return `(EXISTS (
     SELECT 1
     FROM runs vr
     LEFT JOIN account_aliases va
@@ -3981,7 +4227,18 @@ function viewerFinishedChallengeExistsSql(challengeIdExpr: string): string {
         coalesce(vr.canonical_account_id, vr.account_id) IN (SELECT account_id FROM receipt_ids)
         OR va.canonical_account_id IN (SELECT account_id FROM receipt_ids)
       )
-  )`;
+  ) OR EXISTS (
+    SELECT 1
+    FROM operation_idempotency op
+    LEFT JOIN account_aliases pa ON pa.alias_account_id = op.canonical_account_id
+    WHERE op.operation = 'solution_peek'
+      AND op.outcome_status = 'accepted'
+      AND op.resource_id = ${challengeIdExpr}
+      AND (
+        op.canonical_account_id IN (SELECT account_id FROM receipt_ids)
+        OR pa.canonical_account_id IN (SELECT account_id FROM receipt_ids)
+      )
+  ))`;
 }
 
 // GR-1: a sane cap on the merged-graph payload - a popular challenge could
@@ -3989,6 +4246,28 @@ function viewerFinishedChallengeExistsSql(challengeIdExpr: string): string {
 // it stops being valid data. `getChallengePaths` also returns the real,
 // uncapped `totalRuns` and logs whenever the cap actually bites.
 const CHALLENGE_PATHS_LIMIT = 12;
+
+/**
+ * "I gave up" solution view, case (b)/(c): `challenges.reference_path` is a
+ * plain JSON array of titles (migration 0007) - degrades to `null` (case
+ * (c), "no one has cracked it") on anything short of a clean, non-empty
+ * string array, exactly the same "never a hard error over a nice-to-have"
+ * posture `meetsInboundLinkFloor` and `loadRecentPageviews` already use for
+ * degradable Wikimedia signals in the daily evaluator.
+ */
+function parseReferencePath(value: string | null): string[] | null {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    if (!parsed.every((title): title is string => typeof title === "string" && title.length > 0)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 async function ingestAuthorizedAccount(
   db: D1DatabaseLike,
@@ -4327,6 +4606,17 @@ async function replayAbandonOperation(
 ): Promise<AbandonRunTransition> {
   await assertOperationReplay(db, account, row, fingerprint, at);
   return parseOperationJson<AbandonRunTransition>(row);
+}
+
+async function replayGiveUpOperation(
+  db: D1DatabaseLike,
+  account: AuthorizedAccount,
+  row: OperationRow,
+  fingerprint: string,
+  at: string,
+): Promise<GiveUpChallengeResult> {
+  await assertOperationReplay(db, account, row, fingerprint, at);
+  return parseOperationJson<GiveUpChallengeResult>(row);
 }
 
 function parseOperationJson<T>(row: OperationRow): T {
@@ -5346,7 +5636,18 @@ function normalizeDailyChallengeInput(input: DailyChallengeInput): DailyChalleng
       input.startPageId === input.targetPageId) {
     throw new ApiError("invalid_daily_candidate", "Daily challenge candidates must be distinct main articles.", 400);
   }
-  return { startTitle, startPageId: input.startPageId, targetTitle, targetPageId: input.targetPageId };
+  // "I gave up" reference path (owner spec, 2026-08-02): carried through
+  // as-is - a plain title array or null/undefined, never independently
+  // validated here (a malformed value degrades via `parseReferencePath` on
+  // the READ side, and this write path already treats it as best-effort -
+  // see `DailyChallengeInput`'s own doc comment).
+  return {
+    startTitle,
+    startPageId: input.startPageId,
+    targetTitle,
+    targetPageId: input.targetPageId,
+    referencePath: input.referencePath ?? null,
+  };
 }
 
 function normalizeApproveDailyNominationInput(
@@ -5543,7 +5844,9 @@ interface OperationRow {
     | "approve_daily_nomination"
     | "decline_daily_nomination"
     | "queue_daily_challenge"
-    | "remove_daily_queue_entry";
+    | "remove_daily_queue_entry"
+    | "give_up"
+    | "solution_peek";
   idempotency_key: string;
   canonical_account_id: string;
   request_fingerprint: string;
@@ -5600,6 +5903,8 @@ interface ChallengeOutcomeQueryRow {
   best_group: number;
   best_elapsed_ms: number | null;
   best_click_count: number | null;
+  has_qualifying_dnf: number;
+  peeked: number | null;
 }
 
 interface DailyTrendQueryRow {

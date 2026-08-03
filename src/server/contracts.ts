@@ -12,6 +12,7 @@ import type {
   ChallengeSummaryEntry,
   DailyTrendRankedEntry,
   DailyTrendUnrankedEntry,
+  GiveUpChallengeResult,
   LeaderboardContext,
   RankedLeaderboardRow,
   RunTransition,
@@ -174,7 +175,14 @@ export interface RunPathResponse {
 export interface ChallengePathsResponse {
   runs: ChallengePathRunEntry[];
   totalRuns: number;
+  // "I gave up" solution view case (b)/(c) - see `ChallengePathsResult`'s
+  // doc comment (domain/types.ts) for the exact contract.
+  referencePath?: string[] | null;
 }
+
+/** "I gave up" flow (owner spec, 2026-08-02): `POST
+ * /api/v2/challenges/{id}/give-up`'s response - see `GiveUpChallengeResult`. */
+export type GiveUpChallengeResponse = GiveUpChallengeResult;
 
 export interface ActiveRunResponse {
   run: RunRecordResponse | null;

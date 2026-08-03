@@ -281,6 +281,7 @@ describe("daily challenge D1 jobs", () => {
       flavor: "recognizable",
       excludedTargetTitles: expect.any(Set),
       excludedStartTitles: expect.any(Set),
+      computeReferencePath: true,
     });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT id, daily_date FROM challenges WHERE daily_date = '2026-07-15'",
@@ -322,6 +323,7 @@ describe("daily challenge D1 jobs", () => {
       flavor: "weird",
       excludedTargetTitles: expect.any(Set),
       excludedStartTitles: expect.any(Set),
+      computeReferencePath: true,
     });
   });
 
@@ -365,6 +367,7 @@ describe("daily challenge D1 jobs", () => {
       flavor: "hard",
       excludedTargetTitles: expect.any(Set),
       excludedStartTitles: expect.any(Set),
+      computeReferencePath: true,
     });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT daily_date FROM challenges WHERE start_title = 'Retry start'",
@@ -595,6 +598,7 @@ describe("daily challenge D1 jobs", () => {
       flavor: "weird",
       excludedTargetTitles: expect.any(Set),
       excludedStartTitles: expect.any(Set),
+      computeReferencePath: true,
     });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT status FROM daily_queue_entries WHERE id = ?",
@@ -949,7 +953,11 @@ describe("no-repeat exclusions (owner incident, 2026-07-29 - a target is used on
     // empty Sets under those keys; `findCandidate` treats the two
     // identically, but this proves the failure path never even attempts to
     // fabricate a result out of the failed call.
-    expect(findCandidate).toHaveBeenCalledWith({ dailyDate: "2026-07-15", flavor: "recognizable" });
+    expect(findCandidate).toHaveBeenCalledWith({
+      dailyDate: "2026-07-15",
+      flavor: "recognizable",
+      computeReferencePath: true,
+    });
     expect(acceptDailyFeature).toHaveBeenCalledTimes(1);
     expect(consoleInfo.mock.calls.some(([, payload]) =>
       typeof payload === "string" &&
@@ -996,7 +1004,11 @@ describe("no-repeat exclusions (owner incident, 2026-07-29 - a target is used on
       cron: "0 10 * * *",
     }), env as unknown as WorkerEnv)).resolves.toBeUndefined();
 
-    expect(findCandidate).toHaveBeenCalledWith({ dailyDate: "2026-07-15", flavor: "recognizable" });
+    expect(findCandidate).toHaveBeenCalledWith({
+      dailyDate: "2026-07-15",
+      flavor: "recognizable",
+      computeReferencePath: true,
+    });
   });
 });
 

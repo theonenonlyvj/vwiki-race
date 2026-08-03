@@ -235,6 +235,30 @@ export interface ChallengePathRunEntry {
 export interface ChallengePathsResult {
   runs: ChallengePathRunEntry[];
   totalRuns: number;
+  /**
+   * "I gave up" solution view, case (b)/(c) (owner spec, 2026-08-02): when
+   * `runs` is empty (nobody has a counted finish or DNF strand yet) but the
+   * viewer's own disclosure guard passed (finished OR peeked - see
+   * `viewerFinishedOrPeekedChallengeExistsSql`), this carries the challenge's
+   * stored `reference_path` (a bounded forward search computed at daily-drop
+   * time, `dailyCandidateEvaluator.ts`'s `findReferencePath`) as a plain
+   * title chain (start..target inclusive), or `null` when no reference path
+   * was ever computed/stored - the client's "No one - human or machine - has
+   * cracked this one yet." case. Always `undefined` when `runs` is
+   * non-empty: a real finisher's path always wins over the reference route
+   * (case (a) takes priority over (b)), so the field is only meaningful in
+   * the zero-strand branch.
+   */
+  referencePath?: string[] | null;
+}
+
+/** "I gave up" flow (owner spec, 2026-08-02): the durable outcome of
+ *  `POST /api/v2/challenges/{id}/give-up` - always `peeked: true` on
+ *  success (a rejection throws instead; see `give_up_not_eligible`/
+ *  `give_up_already_finished`). */
+export interface GiveUpChallengeResult {
+  challengeId: string;
+  peeked: true;
 }
 
 export interface ServerLeaderboardRow {
@@ -461,4 +485,26 @@ export interface ChallengeOutcomeEntry {
   challengeId: string;
   outcome: "completed" | "dnf";
   best: { elapsedMs: number; clickCount: number } | null;
+  /**
+   * "I gave up" affordance gating (owner spec, 2026-08-02): true only when
+   * `outcome === "dnf"` AND the account has at least one counted DNF on this
+   * challenge clearing `MIN_GIVE_UP_CLICKS` clicks or `MIN_GIVE_UP_WALL_MS`
+   * wall-elapsed ("any attempt" - not necessarily the account's most recent
+   * one). Always `false`/omitted for `outcome: "completed"` (a finisher has
+   * nothing to give up on) and for challenges absent from this response
+   * entirely (never attempted, or only sub-`MIN_COUNTED_DNF_CLICKS`
+   * accidental opens - neither is a real attempt). Optional for wire
+   * back-compat with older cached responses/fixtures.
+   */
+  giveUpEligible?: boolean;
+  /**
+   * True once this account has confirmed "I give up" on this challenge
+   * (durable - `operation_idempotency` 'solution_peek' row, never reverses).
+   * Once true, the give-up affordance itself stops rendering (redundant -
+   * see `GiveUpAffordance`) and Detail's "The solution" panel takes over
+   * instead. A peeked account's later completions on this same challenge are
+   * still possible but permanently `ranked_eligible = 0` - see
+   * `startRunV2`'s peek check.
+   */
+  peeked?: boolean;
 }

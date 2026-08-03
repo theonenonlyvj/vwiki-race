@@ -27,6 +27,26 @@ export const MIN_RESUMABLE_CLICKS = 2;
 // without silently coupling.
 export const MIN_COUNTED_DNF_CLICKS = 2;
 
+// "I gave up" affordance (owner spec, 2026-08-02: "I don't want to be
+// encouraging people to give up" - no in-race button; the affordance lives
+// POST-RUN, gated on a REAL attempt, not a cursory one). A DNF only
+// qualifies an account for the give-up affordance on a challenge once it
+// clears BOTH: FB-7's `MIN_COUNTED_DNF_CLICKS` floor (it must already be a
+// counted attempt) AND one of these two "real attempt" thresholds - a
+// player who genuinely worked the puzzle for a while (many clicks) or spent
+// real wall-clock time on it (even with few clicks - reading, thinking)
+// both count. Deliberately separate constants from `MIN_COUNTED_DNF_CLICKS`
+// (same distinct-constants-even-when-values-could-drift convention as
+// `MIN_RESUMABLE_CLICKS` above) - this gate answers "have they earned the
+// right to peek," not "does this count as playing at all."
+export const MIN_GIVE_UP_CLICKS = 5;
+export const MIN_GIVE_UP_WALL_MS = 180_000;
+
+export interface GiveUpChallengeInput {
+  challengeId: string;
+  idempotencyKey: string;
+}
+
 export interface StartRunV2Input {
   challengeId: string;
   idempotencyKey: string;
@@ -131,6 +151,12 @@ export function fingerprintAbandonRun(input: AbandonRunV2Input): Promise<string>
     runId: input.runId,
     recoveryProtocolVersion: input.recoveryProtocolVersion ?? null,
   }));
+}
+
+export function fingerprintGiveUpChallenge(
+  input: { challengeId: string },
+): Promise<string> {
+  return sha256(JSON.stringify({ challengeId: input.challengeId }));
 }
 
 export function clickOperationKey(runId: string, clientEventId: string): string {

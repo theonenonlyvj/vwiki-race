@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   clickOperationKey,
   fingerprintAbandonRun,
+  fingerprintGiveUpChallenge,
   fingerprintRunClick,
   fingerprintStartRun,
+  MIN_GIVE_UP_CLICKS,
+  MIN_GIVE_UP_WALL_MS,
 } from "./runProtocol";
 
 describe("run protocol fingerprints", () => {
@@ -54,5 +57,19 @@ describe("run protocol fingerprints", () => {
     });
 
     expect(recovery).not.toBe(normal);
+  });
+
+  it("\"I gave up\" (owner spec, 2026-08-02): fingerprints give-up requests by challenge only, deterministically", async () => {
+    const first = await fingerprintGiveUpChallenge({ challengeId: "challenge-0001" });
+    const second = await fingerprintGiveUpChallenge({ challengeId: "challenge-0001" });
+    const different = await fingerprintGiveUpChallenge({ challengeId: "challenge-0002" });
+
+    expect(first).toBe(second);
+    expect(first).not.toBe(different);
+  });
+
+  it("\"I gave up\" thresholds are distinct constants from FB-7's MIN_COUNTED_DNF_CLICKS, per the give-up-specific 'real attempt' bar", () => {
+    expect(MIN_GIVE_UP_CLICKS).toBe(5);
+    expect(MIN_GIVE_UP_WALL_MS).toBe(180_000);
   });
 });

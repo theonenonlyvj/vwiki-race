@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import ChallengeDetail from "./ChallengeDetail";
@@ -45,6 +45,7 @@ function mockApiClient(overrides: Partial<VWikiRaceApiClient> = {}): VWikiRaceAp
     declineDailyNomination: vi.fn(),
     queueDailyChallenge: vi.fn(),
     removeDailyQueueEntry: vi.fn(),
+    giveUpChallenge: vi.fn(),
     ...overrides,
   };
 }
@@ -180,5 +181,162 @@ describe("ChallengeDetail: RC-06 (one honest loading/error system)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("\"I gave up\" affordance + solution view (owner spec, 2026-08-02)", () => {
+  it("renders nothing when signed out - the affordance requires a real identity", () => {
+    renderDetail({ identityToken: null, identityAccountId: null });
+    expect(screen.queryByText(/i give up/i)).toBeNull();
+  });
+
+  it("renders nothing when the account has no qualifying DNF on this challenge", async () => {
+    const getAccountChallengeOutcomes = vi.fn(async () => [
+      { challengeId: challenge.id, outcome: "dnf" as const, best: null },
+    ]);
+    renderDetail({
+      identityToken: "jwt-1",
+      identityAccountId: "acc-1",
+      apiClient: mockApiClient({ getAccountChallengeOutcomes }),
+    });
+
+    await waitFor(() => expect(getAccountChallengeOutcomes).toHaveBeenCalled());
+    expect(screen.queryByText(/i give up/i)).toBeNull();
+  });
+
+  it("renders nothing once the account has finished the challenge (giveUpEligible is never set for a completed outcome)", async () => {
+    const getAccountChallengeOutcomes = vi.fn(async () => [
+      { challengeId: challenge.id, outcome: "completed" as const, best: { elapsedMs: 4000, clickCount: 3 } },
+    ]);
+    renderDetail({
+      identityToken: "jwt-1",
+      identityAccountId: "acc-1",
+      apiClient: mockApiClient({ getAccountChallengeOutcomes }),
+    });
+
+    await waitFor(() => expect(getAccountChallengeOutcomes).toHaveBeenCalled());
+    expect(screen.queryByText(/i give up/i)).toBeNull();
+  });
+
+  it("shows the muted 'I give up' link when eligible and not yet peeked, with the confirm copy behind it", async () => {
+    const user = userEvent.setup();
+    const getAccountChallengeOutcomes = vi.fn(async () => [
+      { challengeId: challenge.id, outcome: "dnf" as const, best: null, giveUpEligible: true },
+    ]);
+    renderDetail({
+      identityToken: "jwt-1",
+      identityAccountId: "acc-1",
+      apiClient: mockApiClient({ getAccountChallengeOutcomes }),
+    });
+
+    const giveUpButton = await screen.findByRole("button", { name: /i give up/i });
+    await user.click(giveUpButton);
+
+    expect(screen.getByText(/this challenge's boards close for you/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: /yes, show me/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeVisible();
+  });
+
+  it("hides the give-up link and shows 'The solution' once the account has already peeked", async () => {
+    const getAccountChallengeOutcomes = vi.fn(async () => [
+      { challengeId: challenge.id, outcome: "dnf" as const, best: null, giveUpEligible: true, peeked: true },
+    ]);
+    const getChallengePaths = vi.fn(async () => ({ runs: [], totalRuns: 0, referencePath: null }));
+    renderDetail({
+      identityToken: "jwt-1",
+      identityAccountId: "acc-1",
+      apiClient: mockApiClient({ getAccountChallengeOutcomes, getChallengePaths }),
+    });
+
+    await screen.findByRole("heading", { name: /the solution/i });
+    expect(screen.queryByText(/^i give up/i)).toBeNull();
+  });
+
+  it("confirming give-up calls the API and re-fetches outcomes", async () => {
+    const user = userEvent.setup();
+    const giveUpChallenge = vi.fn(async () => ({ challengeId: challenge.id, peeked: true as const }));
+    const getAccountChallengeOutcomes = vi.fn(async () => [
+      { challengeId: challenge.id, outcome: "dnf" as const, best: null, giveUpEligible: true },
+    ]);
+    renderDetail({
+      identityToken: "jwt-1",
+      identityAccountId: "acc-1",
+      apiClient: mockApiClient({ getAccountChallengeOutcomes, giveUpChallenge }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: /i give up/i }));
+    await user.click(screen.getByRole("button", { name: /yes, show me/i }));
+
+    await waitFor(() => expect(giveUpChallenge).toHaveBeenCalledWith(challenge.id, "jwt-1"));
+    await waitFor(() => expect(getAccountChallengeOutcomes).toHaveBeenCalledTimes(2));
+  });
+
+  describe("\"The solution\" panel", () => {
+    function peekedOutcomes() {
+      return vi.fn(async () => [
+        { challengeId: challenge.id, outcome: "dnf" as const, best: null, giveUpEligible: true, peeked: true },
+      ]);
+    }
+
+    it("case (a): shows the best finisher's real path when one exists", async () => {
+      const getChallengePaths = vi.fn(async () => ({
+        runs: [{
+          player: "Fast Runner",
+          status: "completed" as const,
+          elapsedMs: 3_000,
+          clicks: 2,
+          steps: [
+            { n: 1, from: "Moon", to: "Orbit" },
+            { n: 2, from: "Orbit", to: "Gravity" },
+          ],
+        }],
+        totalRuns: 1,
+      }));
+      renderDetail({
+        identityToken: "jwt-1",
+        identityAccountId: "acc-1",
+        apiClient: mockApiClient({ getAccountChallengeOutcomes: peekedOutcomes(), getChallengePaths }),
+      });
+
+      await screen.findByRole("heading", { name: /the solution/i });
+      const panel = within(screen.getByLabelText("The solution"));
+      expect(await panel.findByText("Moon")).toBeVisible();
+      expect(panel.getByText(/Orbit/)).toBeVisible();
+      expect(panel.getByText(/Gravity/)).toBeVisible();
+      expect(panel.queryByText(/no one.*cracked/i)).toBeNull();
+      expect(panel.queryByText(/reference route/i)).toBeNull();
+    });
+
+    it("case (b): labels the stored reference path 'Reference route' when nobody has finished it", async () => {
+      const getChallengePaths = vi.fn(async () => ({
+        runs: [],
+        totalRuns: 0,
+        referencePath: ["Moon", "Orbit", "Gravity"],
+      }));
+      renderDetail({
+        identityToken: "jwt-1",
+        identityAccountId: "acc-1",
+        apiClient: mockApiClient({ getAccountChallengeOutcomes: peekedOutcomes(), getChallengePaths }),
+      });
+
+      await screen.findByRole("heading", { name: /the solution/i });
+      const panel = within(screen.getByLabelText("The solution"));
+      expect(await panel.findByText(/reference route/i)).toBeVisible();
+      expect(panel.getByText("Moon")).toBeVisible();
+      expect(panel.getByText(/Gravity/)).toBeVisible();
+      expect(panel.queryByText(/no one.*cracked/i)).toBeNull();
+    });
+
+    it("case (c): shows the honest 'no one has cracked it' copy when neither a finisher nor a reference path exists", async () => {
+      const getChallengePaths = vi.fn(async () => ({ runs: [], totalRuns: 0, referencePath: null }));
+      renderDetail({
+        identityToken: "jwt-1",
+        identityAccountId: "acc-1",
+        apiClient: mockApiClient({ getAccountChallengeOutcomes: peekedOutcomes(), getChallengePaths }),
+      });
+
+      await screen.findByRole("heading", { name: /the solution/i });
+      expect(await screen.findByText(/no one.*human or machine.*cracked this one yet/i)).toBeVisible();
+    });
   });
 });
