@@ -13,6 +13,7 @@ describe("GiveUpAffordance (\"I gave up\", owner spec 2026-08-02)", () => {
     render(
       <GiveUpAffordance
         apiClient={mockApiClient(vi.fn())}
+        errorReporter={{ reportVisibleError: vi.fn() }}
         challengeId="challenge-0001"
         identityToken={null}
         onPeeked={vi.fn()}
@@ -25,6 +26,7 @@ describe("GiveUpAffordance (\"I gave up\", owner spec 2026-08-02)", () => {
     render(
       <GiveUpAffordance
         apiClient={mockApiClient(vi.fn())}
+        errorReporter={{ reportVisibleError: vi.fn() }}
         challengeId="challenge-0001"
         identityToken="jwt-1"
         onPeeked={vi.fn()}
@@ -43,6 +45,7 @@ describe("GiveUpAffordance (\"I gave up\", owner spec 2026-08-02)", () => {
     render(
       <GiveUpAffordance
         apiClient={mockApiClient(giveUpChallenge)}
+        errorReporter={{ reportVisibleError: vi.fn() }}
         challengeId="challenge-0001"
         identityToken="jwt-1"
         onPeeked={vi.fn()}
@@ -65,6 +68,7 @@ describe("GiveUpAffordance (\"I gave up\", owner spec 2026-08-02)", () => {
     render(
       <GiveUpAffordance
         apiClient={mockApiClient(giveUpChallenge)}
+        errorReporter={{ reportVisibleError: vi.fn() }}
         challengeId="challenge-0001"
         identityToken="jwt-1"
         onPeeked={vi.fn()}
@@ -86,6 +90,7 @@ describe("GiveUpAffordance (\"I gave up\", owner spec 2026-08-02)", () => {
     render(
       <GiveUpAffordance
         apiClient={mockApiClient(giveUpChallenge)}
+        errorReporter={{ reportVisibleError: vi.fn() }}
         challengeId="challenge-0001"
         identityToken="jwt-1"
         onPeeked={onPeeked}
@@ -108,6 +113,7 @@ describe("GiveUpAffordance (\"I gave up\", owner spec 2026-08-02)", () => {
     render(
       <GiveUpAffordance
         apiClient={mockApiClient(giveUpChallenge)}
+        errorReporter={{ reportVisibleError: vi.fn() }}
         challengeId="challenge-0001"
         identityToken="jwt-1"
         onPeeked={vi.fn()}
@@ -129,10 +135,12 @@ describe("GiveUpAffordance (\"I gave up\", owner spec 2026-08-02)", () => {
       .mockRejectedValueOnce(new Error("Give up unlocks after a real attempt on this challenge."))
       .mockResolvedValueOnce({ challengeId: "challenge-0001", peeked: true });
     const onPeeked = vi.fn();
+    const errorReporter = { reportVisibleError: vi.fn() };
     const user = userEvent.setup();
     render(
       <GiveUpAffordance
         apiClient={mockApiClient(giveUpChallenge)}
+        errorReporter={errorReporter}
         challengeId="challenge-0001"
         identityToken="jwt-1"
         onPeeked={onPeeked}
@@ -146,6 +154,13 @@ describe("GiveUpAffordance (\"I gave up\", owner spec 2026-08-02)", () => {
       "Give up unlocks after a real attempt on this challenge.",
     );
     expect(onPeeked).not.toHaveBeenCalled();
+    // This package: the rendered failure above beacons through the
+    // "give-up" surface.
+    expect(errorReporter.reportVisibleError).toHaveBeenCalledWith(
+      "give-up",
+      expect.any(String),
+      "Give up unlocks after a real attempt on this challenge.",
+    );
 
     // Retrying (still confirming) succeeds the second time.
     await user.click(screen.getByRole("button", { name: /yes, show me/i }));
@@ -158,6 +173,7 @@ describe("GiveUpAffordance (\"I gave up\", owner spec 2026-08-02)", () => {
     render(
       <GiveUpAffordance
         apiClient={mockApiClient(giveUpChallenge)}
+        errorReporter={{ reportVisibleError: vi.fn() }}
         challengeId="challenge-0001"
         identityToken="jwt-1"
         onPeeked={vi.fn()}
@@ -176,6 +192,7 @@ describe("GiveUpAffordance (\"I gave up\", owner spec 2026-08-02)", () => {
     render(
       <GiveUpAffordance
         apiClient={mockApiClient(giveUpChallenge)}
+        errorReporter={{ reportVisibleError: vi.fn() }}
         challengeId="challenge-0001"
         identityToken="jwt-1"
         onPeeked={vi.fn()}

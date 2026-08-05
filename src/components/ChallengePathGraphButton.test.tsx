@@ -39,6 +39,7 @@ describe("ChallengePathGraphButton", () => {
     render(
       <ChallengePathGraphButton
         apiClient={mockApiClient(vi.fn())}
+        errorReporter={{ reportVisibleError: vi.fn() }}
         challengeId="challenge-0001"
         identityToken="token-1"
         unlocked={false}
@@ -53,6 +54,7 @@ describe("ChallengePathGraphButton", () => {
     render(
       <ChallengePathGraphButton
         apiClient={mockApiClient(getChallengePaths)}
+        errorReporter={{ reportVisibleError: vi.fn() }}
         challengeId="challenge-0001"
         identityToken="viewer-token"
         unlocked
@@ -83,10 +85,12 @@ describe("ChallengePathGraphButton", () => {
     const getChallengePaths = vi.fn()
       .mockRejectedValueOnce(new Error("network down"))
       .mockResolvedValueOnce(fixture);
+    const errorReporter = { reportVisibleError: vi.fn() };
     const user = userEvent.setup();
     render(
       <ChallengePathGraphButton
         apiClient={mockApiClient(getChallengePaths)}
+        errorReporter={errorReporter}
         challengeId="challenge-0001"
         identityToken="viewer-token"
         unlocked
@@ -96,6 +100,13 @@ describe("ChallengePathGraphButton", () => {
     await user.click(screen.getByRole("button", { name: /^view graph$/i }));
     expect(await screen.findByText(/couldn't load the graph/i)).toBeVisible();
     expect(screen.queryByRole("button", { name: /^fast$/i })).toBeNull();
+    // This package: the rendered failure above beacons through the
+    // "path-graph" surface.
+    expect(errorReporter.reportVisibleError).toHaveBeenCalledWith(
+      "path-graph",
+      expect.any(String),
+      "Couldn't load the graph.",
+    );
 
     await user.click(screen.getByRole("button", { name: /try again/i }));
 
@@ -120,6 +131,7 @@ describe("ChallengePathGraphButton", () => {
       <div className="leaderboard-panel">
         <ChallengePathGraphButton
           apiClient={mockApiClient(getChallengePaths)}
+          errorReporter={{ reportVisibleError: vi.fn() }}
           challengeId="challenge-0001"
           identityToken="viewer-token"
           unlocked
@@ -145,6 +157,7 @@ describe("ChallengePathGraphButton", () => {
     render(
       <ChallengePathGraphButton
         apiClient={mockApiClient(getChallengePaths)}
+        errorReporter={{ reportVisibleError: vi.fn() }}
         challengeId="challenge-0001"
         identityToken="viewer-token"
         unlocked

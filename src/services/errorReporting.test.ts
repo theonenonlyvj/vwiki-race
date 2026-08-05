@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createErrorReporter } from "./errorReporting";
+import { apiErrorCode, createErrorReporter } from "./errorReporting";
 
 const apiOrigin = "https://vwikirace-api.example.workers.dev";
 
@@ -226,6 +226,142 @@ describe("createErrorReporter", () => {
       const body = jsonBody(fetchImpl);
       expect(body.url.length).toBeLessThanOrEqual(512);
       expect(body.userAgent.length).toBeLessThanOrEqual(512);
+    });
+  });
+
+  describe("reportVisibleError", () => {
+    it("beacons an unexpected error code with the surface, code, and message", async () => {
+      const fetchImpl = fetchMock();
+      const reporter = createErrorReporter({ apiOrigin, fetchImpl, bundleVersion: "abc123" });
+
+      reporter.reportVisibleError("identity-sheet", "not_ghost", "This device already has a VGames account.");
+      await Promise.resolve();
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      const body = jsonBody(fetchImpl);
+      expect(body.source).toBe("manual");
+      expect(body.name).toBe("not_ghost");
+      expect(body.message).toBe("This device already has a VGames account.");
+      expect(body.stack).toContain("visible-error surface=identity-sheet code=not_ghost");
+      expect(body.stack).toContain("bundle=abc123");
+    });
+
+    it("includes flow and accountId context in the beacon when provided", async () => {
+      const fetchImpl = fetchMock();
+      const reporter = createErrorReporter({ apiOrigin, fetchImpl });
+
+      reporter.reportVisibleError("race-flow", "network_error", "Could not sync that click.", {
+        flow: "click",
+        accountId: "acct-123",
+      });
+      await Promise.resolve();
+
+      const body = jsonBody(fetchImpl);
+      expect(body.stack).toContain("flow=click");
+      expect(body.stack).toContain("accountId=acct-123");
+    });
+
+    it("suppresses an expected validation-y user mistake (bad credentials)", async () => {
+      const fetchImpl = fetchMock();
+      const reporter = createErrorReporter({ apiOrigin, fetchImpl });
+
+      reporter.reportVisibleError("identity-sheet", "invalid_credentials", "That VGames username or password is incorrect.");
+      await Promise.resolve();
+
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it("suppresses every other allowlisted-expected code per surface (username taken, rate limits)", async () => {
+      const fetchImpl = fetchMock();
+      const reporter = createErrorReporter({ apiOrigin, fetchImpl });
+
+      reporter.reportVisibleError("identity-sheet", "username_taken", "That VGames username is already taken.");
+      reporter.reportVisibleError("random-challenge", "random_challenge_rate_limited", "Too many random challenges.");
+      await Promise.resolve();
+
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it("still beacons an unexpected code on a surface that also has expected codes", async () => {
+      const fetchImpl = fetchMock();
+      const reporter = createErrorReporter({ apiOrigin, fetchImpl });
+
+      reporter.reportVisibleError("identity-sheet", "internal_error", "Something went wrong.");
+      await Promise.resolve();
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it("dedupes repeat beacons of the same surface+code even with a different message", async () => {
+      const fetchImpl = fetchMock();
+      const reporter = createErrorReporter({ apiOrigin, fetchImpl });
+
+      reporter.reportVisibleError("catalog", "network_error", "Could not load challenges.");
+      reporter.reportVisibleError("catalog", "network_error", "Could not load challenges (retry).");
+      await Promise.resolve();
+
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it("still beacons the same code from a different surface (dedupe key is surface+code)", async () => {
+      const fetchImpl = fetchMock();
+      const reporter = createErrorReporter({ apiOrigin, fetchImpl });
+
+      reporter.reportVisibleError("catalog", "network_error", "Could not load challenges.");
+      reporter.reportVisibleError("the-solution", "network_error", "Couldn't load the solution.");
+      await Promise.resolve();
+
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it("never throws for a nullish message, substituting the fallback", async () => {
+      const fetchImpl = fetchMock();
+      const reporter = createErrorReporter({ apiOrigin, fetchImpl });
+
+      expect(() =>
+        reporter.reportVisibleError("catalog", "network_error", null as unknown as string),
+      ).not.toThrow();
+      await Promise.resolve();
+
+      const body = jsonBody(fetchImpl);
+      expect(body.message.length).toBeGreaterThan(0);
+    });
+
+    it("shares the page-load report cap with crash reports", async () => {
+      const fetchImpl = fetchMock();
+      const reporter = createErrorReporter({ apiOrigin, fetchImpl });
+
+      for (let i = 0; i < 15; i += 1) {
+        reporter.reportVisibleError("catalog", `code-${i}`, "Could not load challenges.");
+      }
+      await Promise.resolve();
+
+      expect(fetchImpl).toHaveBeenCalledTimes(10);
+    });
+  });
+
+  describe("apiErrorCode", () => {
+    it("reads .code off an ApiRequestError-shaped object", () => {
+      expect(apiErrorCode({ code: "not_ghost", message: "not_ghost", status: 409 })).toBe("not_ghost");
+    });
+
+    it("falls back to error:<name> for a plain Error with no .code", () => {
+      expect(apiErrorCode(new TypeError("boom"))).toBe("error:TypeError");
+    });
+
+    it("falls back to unknown for a non-Error, non-coded throwable", () => {
+      expect(apiErrorCode("just a string")).toBe("unknown");
+      expect(apiErrorCode(null)).toBe("unknown");
+      expect(apiErrorCode(undefined)).toBe("unknown");
+    });
+
+    it("never throws for a hostile getter", () => {
+      const hostile = {
+        get code(): string {
+          throw new Error("hostile getter");
+        },
+      };
+      expect(() => apiErrorCode(hostile)).not.toThrow();
     });
   });
 

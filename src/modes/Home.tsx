@@ -18,6 +18,7 @@ import type { AccountStats, CatalogStatus, Challenge } from "../domain/types";
 import type { ChallengeBoardResponse } from "../server/contracts";
 import { useDailyCountdown } from "../hooks/useDailyCountdown";
 import { ShareResultButton } from "../race/shared";
+import { apiErrorCode, type ErrorReporter } from "../services/errorReporting";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 
 // RC-05 part B (now unblocked by RC-03's shared read-cache, 96f1f6e): a
@@ -67,6 +68,7 @@ export default function Home({
   apiClient,
   catalogStatus,
   challenges,
+  errorReporter,
   hero,
   identityAccountId,
   identityToken,
@@ -98,6 +100,10 @@ export default function Home({
   // interrupts a working Home).
   catalogStatus: CatalogStatus;
   challenges: Challenge[];
+  // This package: beacons the hero/yesterday board fetch failures below
+  // (BoardSnippet's "Couldn't load this board." lines) and is threaded on
+  // to ChallengePathGraphButton for its own graph-fetch failure.
+  errorReporter: Pick<ErrorReporter, "reportVisibleError">;
   hero: HomeHeroSelection | null;
   identityAccountId: string | null;
   // GR-1 ("View graph"): the bearer token `ChallengePathGraphButton` needs.
@@ -180,8 +186,15 @@ export default function Home({
         setHeroBoard(response);
         setHeroBoardStatus("ready");
       })
-      .catch(() => {
-        if (!cancelled) setHeroBoardStatus("error");
+      .catch((caught) => {
+        if (cancelled) return;
+        errorReporter.reportVisibleError(
+          "home-hero-board",
+          apiErrorCode(caught),
+          "Couldn't load this board.",
+          { accountId: identityAccountId ?? undefined },
+        );
+        setHeroBoardStatus("error");
       });
     return () => {
       cancelled = true;
@@ -206,8 +219,15 @@ export default function Home({
         setIndependentYesterdayBoard(response);
         setIndependentYesterdayBoardStatus("ready");
       })
-      .catch(() => {
-        if (!cancelled) setIndependentYesterdayBoardStatus("error");
+      .catch((caught) => {
+        if (cancelled) return;
+        errorReporter.reportVisibleError(
+          "home-yesterday-board",
+          apiErrorCode(caught),
+          "Couldn't load this board.",
+          { accountId: identityAccountId ?? undefined },
+        );
+        setIndependentYesterdayBoardStatus("error");
       });
     return () => {
       cancelled = true;
@@ -465,6 +485,7 @@ export default function Home({
             <ChallengePathGraphButton
               apiClient={apiClient}
               challengeId={yesterdayBoard.challengeId}
+              errorReporter={errorReporter}
               identityToken={identityToken}
               unlocked={yesterdayPathsUnlocked}
             />

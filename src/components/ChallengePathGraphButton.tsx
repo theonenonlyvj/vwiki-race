@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import ChallengePathGraph from "./ChallengePathGraph";
 import ModalDialog from "./ModalDialog";
 import type { ChallengePathRunEntry } from "../domain/types";
+import { apiErrorCode, type ErrorReporter } from "../services/errorReporting";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 
 type LoadState =
@@ -27,11 +28,13 @@ type LoadState =
 export default function ChallengePathGraphButton({
   apiClient,
   challengeId,
+  errorReporter,
   identityToken,
   unlocked,
 }: {
   apiClient: VWikiRaceApiClient;
   challengeId: string;
+  errorReporter: Pick<ErrorReporter, "reportVisibleError">;
   // The bearer token backing the SAME client-side "has this viewer played"
   // knowledge that `unlocked` already encodes (ChallengeDetail's
   // `pathsUnlocked`, Boards' `Boolean(ownPlacement)`, Results'
@@ -61,6 +64,7 @@ export default function ChallengePathGraphButton({
         <ChallengePathGraphDialog
           apiClient={apiClient}
           challengeId={challengeId}
+          errorReporter={errorReporter}
           identityToken={identityToken}
           onClose={() => setOpen(false)}
           returnFocusRef={triggerRef}
@@ -73,12 +77,14 @@ export default function ChallengePathGraphButton({
 function ChallengePathGraphDialog({
   apiClient,
   challengeId,
+  errorReporter,
   identityToken,
   onClose,
   returnFocusRef,
 }: {
   apiClient: VWikiRaceApiClient;
   challengeId: string;
+  errorReporter: Pick<ErrorReporter, "reportVisibleError">;
   identityToken: string | null;
   onClose: () => void;
   returnFocusRef: RefObject<HTMLElement | null>;
@@ -93,6 +99,7 @@ function ChallengePathGraphDialog({
       // Shouldn't be reachable - `unlocked` implies a completed run, which
       // implies a session - but fails closed (an error state, not a silent
       // fetch of nothing) rather than assuming.
+      errorReporter.reportVisibleError("path-graph", "missing_identity_token", "Couldn't load the graph.");
       setState({ status: "error" });
       return;
     }
@@ -100,13 +107,15 @@ function ChallengePathGraphDialog({
       .then((response) => {
         if (!cancelled) setState({ status: "loaded", runs: response.runs });
       })
-      .catch(() => {
-        if (!cancelled) setState({ status: "error" });
+      .catch((caught) => {
+        if (cancelled) return;
+        errorReporter.reportVisibleError("path-graph", apiErrorCode(caught), "Couldn't load the graph.");
+        setState({ status: "error" });
       });
     return () => {
       cancelled = true;
     };
-  }, [apiClient, challengeId, identityToken, retryToken]);
+  }, [apiClient, challengeId, errorReporter, identityToken, retryToken]);
 
   return (
     <ModalDialog

@@ -15,6 +15,7 @@ describe("TheSolution (\"I gave up\" solution view, owner spec 2026-08-02)", () 
     render(
       <TheSolution
         apiClient={mockApiClient(getChallengePaths)}
+        errorReporter={{ reportVisibleError: vi.fn() }}
         challengeId="challenge-0007"
         identityToken="viewer-token"
       />,
@@ -29,16 +30,25 @@ describe("TheSolution (\"I gave up\" solution view, owner spec 2026-08-02)", () 
     const getChallengePaths = vi.fn<VWikiRaceApiClient["getChallengePaths"]>()
       .mockRejectedValueOnce(new Error("down"))
       .mockResolvedValueOnce({ runs: [], totalRuns: 0, referencePath: null });
+    const errorReporter = { reportVisibleError: vi.fn() };
     const user = userEvent.setup();
     render(
       <TheSolution
         apiClient={mockApiClient(getChallengePaths)}
+        errorReporter={errorReporter}
         challengeId="challenge-0001"
         identityToken="viewer-token"
       />,
     );
 
     expect(await screen.findByText(/couldn.t load the solution/i)).toBeVisible();
+    // This package: the rendered failure above beacons through the
+    // "the-solution" surface.
+    expect(errorReporter.reportVisibleError).toHaveBeenCalledWith(
+      "the-solution",
+      expect.any(String),
+      "Couldn't load the solution.",
+    );
     await user.click(screen.getByRole("button", { name: /retry/i }));
 
     expect(await screen.findByText(/no one/i)).toBeVisible();
@@ -59,6 +69,7 @@ describe("TheSolution (\"I gave up\" solution view, owner spec 2026-08-02)", () 
     const { rerender } = render(
       <TheSolution
         apiClient={mockApiClient(getChallengePaths)}
+        errorReporter={{ reportVisibleError: vi.fn() }}
         challengeId="challenge-0001"
         identityToken="viewer-token"
       />,
@@ -67,6 +78,7 @@ describe("TheSolution (\"I gave up\" solution view, owner spec 2026-08-02)", () 
     rerender(
       <TheSolution
         apiClient={mockApiClient(getChallengePaths)}
+        errorReporter={{ reportVisibleError: vi.fn() }}
         challengeId="challenge-0002"
         identityToken="viewer-token"
       />,

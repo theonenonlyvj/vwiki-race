@@ -1234,6 +1234,7 @@ describe("VWiki Race app", () => {
       report: vi.fn((_source: string, error: unknown, _context?: { detail?: string }) => {
         reportedErrors.push(error);
       }),
+      reportVisibleError: vi.fn(),
     };
     const user = userEvent.setup();
     render(
@@ -1287,7 +1288,7 @@ describe("VWiki Race app", () => {
         throw new ApiRequestError("invalid_credentials", "invalid_credentials", 401);
       }),
     };
-    const errorReporter = { report: vi.fn() };
+    const errorReporter = { report: vi.fn(), reportVisibleError: vi.fn() };
     const user = userEvent.setup();
     render(
       <App
@@ -1312,6 +1313,57 @@ describe("VWiki Race app", () => {
       await screen.findByText("That VGames username or password is incorrect."),
     ).toBeVisible();
     expect(errorReporter.report).not.toHaveBeenCalled();
+    // This package: the identity-sheet's own rendered error line now beacons
+    // through reportVisibleError too - with the real code the surface's own
+    // EXPECTED_VISIBLE_ERROR_CODES allowlist (errorReporting.ts) suppresses,
+    // so wiring this call site correctly is what makes that suppression
+    // actually take effect in production; a bare test-double reporter (like
+    // this one) can't itself prove suppression - see errorReporting.test.ts
+    // for that.
+    expect(errorReporter.reportVisibleError).toHaveBeenCalledWith(
+      "identity-sheet",
+      "invalid_credentials",
+      "That VGames username or password is incorrect.",
+      expect.objectContaining({ flow: "login" }),
+    );
+  });
+
+  it("beacons an identity-sheet error whose code ISN'T on the expected-user-mistake allowlist", async () => {
+    const identityClient = {
+      playAsGuest: vi.fn(),
+      secureGuest: vi.fn(),
+      login: vi.fn(async () => {
+        throw new ApiRequestError("internal_error", "Something went wrong.", 500);
+      }),
+    };
+    const errorReporter = { report: vi.fn(), reportVisibleError: vi.fn() };
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock()}
+        storage={memoryStorage()}
+        identityClient={identityClient}
+        errorReporter={errorReporter}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(screen.getByRole("button", { name: /^log in$/i }));
+    await user.type(screen.getByLabelText(/^username$/i), "vijay");
+    await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
+    fireEvent.submit(
+      screen.getByLabelText(/^password$/i).closest("form") as HTMLFormElement,
+    );
+
+    await screen.findByText("Something went wrong.");
+    expect(errorReporter.reportVisibleError).toHaveBeenCalledWith(
+      "identity-sheet",
+      "internal_error",
+      "Something went wrong.",
+      expect.objectContaining({ flow: "login" }),
+    );
   });
 
   // QF-07: continueAsGuest/createVGamesAccount had no synchronous guard of

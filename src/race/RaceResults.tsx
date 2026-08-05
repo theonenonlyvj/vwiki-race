@@ -22,6 +22,7 @@ import type { GameSession } from "../domain/gameSession";
 import type { PlayAnotherSuggestionState } from "../domain/playAnother";
 import type { Article, Challenge, LeaderboardContext } from "../domain/types";
 import type { ChallengeBoardResponse } from "../server/contracts";
+import type { ErrorReporter } from "../services/errorReporting";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 import type { VGamesIdentityStatus } from "../services/vgamesIdentity";
 import { WikipediaArticlePanel } from "./RaceMode";
@@ -63,6 +64,7 @@ export type RaceResultOutcome =
 export default function RaceResults({
   apiClient,
   article,
+  errorReporter,
   outcome,
   identityAccountId,
   identityToken,
@@ -91,6 +93,11 @@ export default function RaceResults({
   // here - see the doc comment above `boardSnippetRowsForResult`.
   apiClient: VWikiRaceApiClient;
   article: Article | null;
+  // This package: threaded to GiveUpAffordance/ChallengePathGraphButton for
+  // their own self-fetched failures (this file's own two fetches above -
+  // the board snippet and give-up eligibility - already degrade silently,
+  // never rendering an error string, so neither needs it directly).
+  errorReporter: Pick<ErrorReporter, "reportVisibleError">;
   outcome: RaceResultOutcome;
   identityAccountId: string | null;
   // GR-1 ("View graph"): the bearer token `ChallengePathGraphButton` needs.
@@ -386,6 +393,7 @@ export default function RaceResults({
           <GiveUpAffordance
             apiClient={apiClient}
             challengeId={challenge.id}
+            errorReporter={errorReporter}
             identityToken={identityToken}
             onPeeked={() => onOpenChallenge(challenge.id)}
           />
@@ -416,6 +424,7 @@ export default function RaceResults({
           <ChallengePathGraphButton
             apiClient={apiClient}
             challengeId={challenge.id}
+            errorReporter={errorReporter}
             identityToken={identityToken}
             unlocked={outcome.status === "completed"}
           />

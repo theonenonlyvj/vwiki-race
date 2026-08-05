@@ -812,12 +812,21 @@ describe("useRaceController", () => {
       }),
     });
     const gateway = wikiGateway({ Apple: apple });
-    const { result } = renderHook(() => useRaceController({ apiClient: api, gateway }));
+    const errorReporter = { reportVisibleError: vi.fn() };
+    const { result } = renderHook(() => useRaceController({ apiClient: api, gateway, errorReporter }));
 
     let outcome!: Awaited<ReturnType<typeof result.current.start>>;
     await act(async () => { outcome = await result.current.start(challenge, "token"); });
     expect(outcome).toEqual({ status: "failed", challengeId: challenge.id });
     expect(result.current.error).toBe("Could not start that challenge.");
+    // This package: the rendered failure above beacons through the
+    // "race-flow" surface, tagged with which protocol step failed.
+    expect(errorReporter.reportVisibleError).toHaveBeenCalledWith(
+      "race-flow",
+      "internal_error",
+      "Could not start that challenge.",
+      { flow: "start" },
+    );
   });
 
   it("RC-01: still surfaces a non-internal_error message verbatim (regression guard on the fix above)", async () => {

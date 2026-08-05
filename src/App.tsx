@@ -29,6 +29,7 @@ import {
   createVGamesIdentityRepository,
   isAccountAlreadySecuredFailure,
   isIdentityConnectivityFailure,
+  vgamesIdentityErrorCode,
   vgamesIdentityErrorMessage,
   type VGamesIdentityClient,
   type VGamesIdentityRepository,
@@ -40,7 +41,7 @@ import {
   type VWikiRaceApiClient,
 } from "./services/vwikiRaceApiClient";
 import { resolveApiOrigin } from "./services/apiOrigin";
-import { createErrorReporter, type ErrorReporter } from "./services/errorReporting";
+import { apiErrorCode, createErrorReporter, type ErrorReporter } from "./services/errorReporting";
 // FB-7 (owner ruling, 2026-07-19): shared with the server's DNF eligibility
 // threshold - see MIN_COUNTED_DNF_CLICKS's doc comment in runProtocol.ts.
 import { MIN_COUNTED_DNF_CLICKS } from "./server/runProtocol";
@@ -77,8 +78,10 @@ interface AppProps {
   // reportIdentityStall below) - defaults to a real beacon reporter so
   // production always names its own stalls; main.tsx injects the SAME
   // instance it already built for ErrorBoundary rather than standing up a
-  // second one.
-  errorReporter?: Pick<ErrorReporter, "report">;
+  // second one. Widened (this package) to also cover reportVisibleError -
+  // every HANDLED error this file renders to a player now beacons through
+  // the SAME instance, not a second reporter.
+  errorReporter?: Pick<ErrorReporter, "report" | "reportVisibleError">;
 }
 
 type AuthMode = "guest" | "create" | "login";
@@ -194,6 +197,30 @@ function reportIdentityStall(
     detail:
       `identity-retry-ladder flow=${flow} attempts=${retryAtMs.length + 1} ` +
       `retryAtMs=[${retryAtMs.join(",")}] totalMs=${Math.round(totalMs)}`,
+  });
+}
+
+/**
+ * Beacons the identity-sheet's own rendered error line (whatever
+ * vgamesIdentityErrorMessage just computed for `setError`) - the gap
+ * reportIdentityStall above doesn't cover, since that one only fires for a
+ * connectivity-class exhaustion. Every OTHER code (not_ghost reaching here,
+ * an unmapped/internal_error response, ...) is exactly the kind of thing a
+ * report requires guessing about today; reportVisibleError's own surface
+ * allowlist (errorReporting.ts) still suppresses the genuinely-expected
+ * validation codes (bad credentials, a taken username) so this never turns
+ * ordinary user mistakes into noise.
+ */
+function reportVisibleIdentityError(
+  errorReporter: Pick<ErrorReporter, "reportVisibleError">,
+  flow: "login" | "guest" | "create",
+  caught: unknown,
+  message: string,
+  accountId: string | null | undefined,
+): void {
+  errorReporter.reportVisibleError("identity-sheet", vgamesIdentityErrorCode(caught), message, {
+    flow,
+    accountId: accountId ?? undefined,
   });
 }
 
@@ -575,7 +602,7 @@ export default function App({
     () => createWikipediaGateway({ fetchImpl }),
     [fetchImpl],
   );
-  const race = useRaceController({ apiClient, gateway: wikipediaGateway, now });
+  const race = useRaceController({ apiClient, gateway: wikipediaGateway, now, errorReporter });
   const modeState = race.phase;
   const session = race.session;
   const article = race.article;
@@ -967,18 +994,26 @@ export default function App({
               request === catalogRequest.current &&
               leaderboardGeneration === leaderboardRequest.current
             ) {
+              const message = errorMessage(caught, "Couldn't load your history.");
+              errorReporter.reportVisibleError("leaderboard", apiErrorCode(caught), message, {
+                accountId: identitySession?.accountId,
+              });
               setLeaderboardProjection({
                 challengeId: nextChallenge.id,
                 rows: [],
                 status: "error",
-                message: errorMessage(caught, "Couldn't load your history."),
+                message,
               });
             }
           }
         }
       } catch (caught) {
         if (!cancelled && request === catalogRequest.current) {
-          setError(errorMessage(caught, "Could not load challenges."));
+          const message = errorMessage(caught, "Could not load challenges.");
+          errorReporter.reportVisibleError("catalog", apiErrorCode(caught), message, {
+            accountId: identitySession?.accountId,
+          });
+          setError(message);
           // Only the initial challenges fetch itself failing should release
           // the recovery gate - a later failure in this same pass (e.g. the
           // leaderboard fetch) doesn't leave recovery stuck, since
@@ -1200,7 +1235,19 @@ export default function App({
         setAccountStatsProjection(null);
         setAccountStatsFetchStatus("error");
         if (isUnauthorizedError(caught)) {
+          // An expired/invalidated session is an ordinary, expected
+          // condition here (clearStaleIdentity already recovers it below) -
+          // not a bug worth a beacon, same judgment every other
+          // isUnauthorizedError branch in this file already makes by
+          // returning before ever reaching its own reportVisibleError call.
           clearStaleIdentity();
+        } else {
+          errorReporter.reportVisibleError(
+            "account-stats",
+            apiErrorCode(caught),
+            "Couldn't load your stats.",
+            { accountId: identitySession?.accountId },
+          );
         }
       });
     return () => {
@@ -1295,11 +1342,15 @@ export default function App({
         // shipped App.test.tsx regressions) - a meaningful server message
         // ("Leaderboard unavailable.") still surfaces verbatim; only a
         // generic internal_error gets the friendly fallback substituted.
+        const message = errorMessage(caught, "Couldn't load your history.");
+        errorReporter.reportVisibleError("leaderboard", apiErrorCode(caught), message, {
+          accountId: identitySession?.accountId,
+        });
         setLeaderboardProjection({
           challengeId,
           rows: [],
           status: "error",
-          message: errorMessage(caught, "Couldn't load your history."),
+          message,
         });
       }
       throw caught;
@@ -1452,7 +1503,13 @@ export default function App({
         clearStaleIdentity({ type: "create", input });
         return;
       }
-      setError(errorMessage(caught, "Could not create that challenge."));
+      {
+        const message = errorMessage(caught, "Could not create that challenge.");
+        errorReporter.reportVisibleError("create-challenge", apiErrorCode(caught), message, {
+          accountId: identitySession?.accountId,
+        });
+        setError(message);
+      }
       throw caught;
     }
   }
@@ -1506,7 +1563,13 @@ export default function App({
         clearStaleIdentity({ type: "random-challenge" });
         return;
       }
-      setRandomChallengeError(describeRandomChallengeError(toRandomChallengeFailure(caught)));
+      {
+        const message = describeRandomChallengeError(toRandomChallengeFailure(caught));
+        errorReporter.reportVisibleError("random-challenge", apiErrorCode(caught), message, {
+          accountId: identitySession?.accountId,
+        });
+        setRandomChallengeError(message);
+      }
     } finally {
       randomChallengeLockRef.current = false;
       setRandomChallengeBusy(false);
@@ -1717,7 +1780,11 @@ export default function App({
             guestRetryAtMs,
             now() - guestCallStartedAt,
           );
-          setError(vgamesIdentityErrorMessage(caught, "Could not start a guest session."));
+          {
+            const message = vgamesIdentityErrorMessage(caught, "Could not start a guest session.");
+            reportVisibleIdentityError(errorReporter, "guest", caught, message, identitySession?.accountId);
+            setError(message);
+          }
           setAuthBusy(false);
           return;
         } finally {
@@ -1851,7 +1918,11 @@ export default function App({
         createRetryAtMs,
         now() - createCallStartedAt,
       );
-      setError(vgamesIdentityErrorMessage(caught, "Could not create that VGames account."));
+      {
+        const message = vgamesIdentityErrorMessage(caught, "Could not create that VGames account.");
+        reportVisibleIdentityError(errorReporter, "create", caught, message, identitySession?.accountId);
+        setError(message);
+      }
     } finally {
       createVGamesAccountLock.current = false;
       setAuthBusy(false);
@@ -1925,7 +1996,11 @@ export default function App({
         loginRetryAtMs,
         now() - loginCallStartedAt,
       );
-      setError(vgamesIdentityErrorMessage(caught, "Could not log in."));
+      {
+        const message = vgamesIdentityErrorMessage(caught, "Could not log in.");
+        reportVisibleIdentityError(errorReporter, "login", caught, message, identitySession?.accountId);
+        setError(message);
+      }
       // Login FAILURE (§2.2): the sheet re-opens on the Log in tab with
       // this error - `authPrompt` was never cleared, so it's already
       // showing. The guard stays waived for this entry for the rest of
@@ -2183,7 +2258,11 @@ export default function App({
       setRunPaths((current) => ({ ...current, [runId]: path }));
     } catch (caught) {
       requestedPaths.current.delete(runId);
-      setError(errorMessage(caught, "Could not load that winning path."));
+      const message = errorMessage(caught, "Could not load that winning path.");
+      errorReporter.reportVisibleError("run-path", apiErrorCode(caught), message, {
+        accountId: identitySession?.accountId,
+      });
+      setError(message);
     }
   }
 
@@ -2354,6 +2433,7 @@ export default function App({
         <RaceFlow
           screen={screen}
           apiClient={apiClient}
+          errorReporter={errorReporter}
           phase={race.phase}
           raceChallenge={race.challenge}
           recoveryRun={race.recoveryRun}
@@ -2430,6 +2510,7 @@ export default function App({
           catalogStatus={catalogStatus}
           challenges={challenges}
           challengesView={challengesView}
+          errorReporter={errorReporter}
           identitySession={identitySession}
           leaderboard={leaderboard}
           leaderboardErrorMessage={leaderboardErrorMessage}

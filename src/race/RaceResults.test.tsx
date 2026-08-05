@@ -41,6 +41,7 @@ function renderResults(overrides: Partial<Parameters<typeof RaceResults>[0]> = {
   const props = {
     apiClient: mockApiClient(),
     article: null,
+    errorReporter: { reportVisibleError: vi.fn() },
     outcome: dnfOutcome(),
     identityAccountId: "acc-1",
     identityToken: "jwt-1" as string | null,

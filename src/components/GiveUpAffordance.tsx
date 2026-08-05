@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { apiErrorCode, type ErrorReporter } from "../services/errorReporting";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 
 /**
@@ -23,11 +24,13 @@ import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 export default function GiveUpAffordance({
   apiClient,
   challengeId,
+  errorReporter,
   identityToken,
   onPeeked,
 }: {
   apiClient: VWikiRaceApiClient;
   challengeId: string;
+  errorReporter: Pick<ErrorReporter, "reportVisibleError">;
   identityToken: string | null;
   /** Fired once the server has durably recorded the peek. The caller (not
    *  this component) owns what happens next - re-fetching outcomes to
@@ -67,7 +70,9 @@ export default function GiveUpAffordance({
       // flash of the confirm panel reverting before that happens.
       onPeeked();
     } catch (caught) {
-      setError(errorMessage(caught, "Couldn't record that. Try again."));
+      const message = errorMessage(caught, "Couldn't record that. Try again.");
+      errorReporter.reportVisibleError("give-up", apiErrorCode(caught), message);
+      setError(message);
       setBusy(false);
     }
   }

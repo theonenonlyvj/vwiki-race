@@ -77,6 +77,7 @@ function renderHome(overrides: Partial<Parameters<typeof Home>[0]> = {}) {
     apiClient: mockApiClient(),
     catalogStatus: "ready" as const,
     challenges: [yesterdaysDaily, todaysDaily],
+    errorReporter: { reportVisibleError: vi.fn() },
     hero: { challenge: todaysDaily, kind: "today-daily" } as HomeHeroSelection,
     identityAccountId: null as string | null,
     identityToken: null as string | null,
@@ -107,12 +108,21 @@ describe("Home: RC-06 (one honest loading/error system) - 'Yesterday's results' 
         return { challengeId, placements: [], dnfs: [] };
       }),
     });
-    renderHome({ apiClient });
+    const errorReporter = { reportVisibleError: vi.fn() };
+    renderHome({ apiClient, errorReporter });
 
     expect(await screen.findByText(/couldn.t load this board/i)).toBeVisible();
     expect(screen.queryByText("No completed runs yet.")).toBeNull();
     // The "see full board" link (children) still renders alongside the error.
     expect(screen.getByRole("button", { name: /see full board/i })).toBeVisible();
+    // This package: the rendered failure above beacons through the
+    // "home-yesterday-board" surface.
+    expect(errorReporter.reportVisibleError).toHaveBeenCalledWith(
+      "home-yesterday-board",
+      expect.any(String),
+      "Couldn't load this board.",
+      expect.anything(),
+    );
   });
 
   it("Retry recovers the board in place once the fetch succeeds", async () => {

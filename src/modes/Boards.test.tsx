@@ -90,6 +90,7 @@ function renderBoards(overrides: Partial<Parameters<typeof Boards>[0]> = {}) {
   const props = {
     apiClient: mockApiClient(),
     challenges: [randomUserChallenge, yesterdaysDaily],
+    errorReporter: { reportVisibleError: vi.fn() },
     heroSelection: null as HomeHeroSelection | null,
     identityAccountId: null as string | null,
     identityToken: null as string | null,
@@ -279,15 +280,25 @@ describe("Boards: RC-06 (one honest loading/error system) - daily board tri-stat
         throw new Error("network down");
       }),
     });
+    const errorReporter = { reportVisibleError: vi.fn() };
     renderBoards({
       apiClient,
       challenges: [randomUserChallenge, yesterdaysDaily, todaysDaily],
+      errorReporter,
       heroSelection: { challenge: todaysDaily, kind: "today-daily" },
     });
 
     expect(await screen.findByText(/couldn.t load this board/i)).toBeVisible();
     expect(screen.getByRole("button", { name: /retry/i })).toBeVisible();
     expect(screen.queryByText("No completed runs yet.")).toBeNull();
+    // This package: the rendered failure above beacons through the
+    // "boards-board" surface.
+    expect(errorReporter.reportVisibleError).toHaveBeenCalledWith(
+      "boards-board",
+      expect.any(String),
+      "Couldn't load this board.",
+      expect.anything(),
+    );
   });
 
   it("Retry recovers the board in place once the fetch succeeds - no reload, no fresh navigation", async () => {

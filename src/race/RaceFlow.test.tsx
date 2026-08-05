@@ -118,6 +118,7 @@ function buildProps(overrides: Partial<Parameters<typeof RaceFlow>[0]>): Paramet
   return {
     screen: { kind: "race-preview" },
     apiClient: mockApiClient(),
+    errorReporter: { reportVisibleError: vi.fn() },
     phase: "idle",
     raceChallenge: null,
     recoveryRun: null,

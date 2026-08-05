@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import StagedLoadingNotice from "./StagedLoadingNotice";
 import WinningPathChain from "./WinningPathChain";
 import type { ChallengePathsResponse } from "../server/contracts";
+import { apiErrorCode, type ErrorReporter } from "../services/errorReporting";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 
 function emptyResult(): ChallengePathsResponse {
@@ -31,10 +32,12 @@ function emptyResult(): ChallengePathsResponse {
 export default function TheSolution({
   apiClient,
   challengeId,
+  errorReporter,
   identityToken,
 }: {
   apiClient: VWikiRaceApiClient;
   challengeId: string;
+  errorReporter: Pick<ErrorReporter, "reportVisibleError">;
   identityToken: string;
 }) {
   const [result, setResult] = useState<ChallengePathsResponse>(emptyResult);
@@ -52,13 +55,15 @@ export default function TheSolution({
           setStatus("ready");
         }
       })
-      .catch(() => {
-        if (!cancelled) setStatus("error");
+      .catch((caught) => {
+        if (cancelled) return;
+        errorReporter.reportVisibleError("the-solution", apiErrorCode(caught), "Couldn't load the solution.");
+        setStatus("error");
       });
     return () => {
       cancelled = true;
     };
-  }, [apiClient, challengeId, identityToken, retryToken]);
+  }, [apiClient, challengeId, errorReporter, identityToken, retryToken]);
 
   const finisher = result.runs[0];
 

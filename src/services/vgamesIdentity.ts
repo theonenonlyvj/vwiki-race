@@ -121,6 +121,31 @@ export const IDENTITY_CONNECTIVITY_FAILURE_MESSAGE =
 export const ACCOUNT_ALREADY_SECURED_MESSAGE =
   "This device already has a VGames account. Log in instead.";
 
+/**
+ * The short, stable discriminant vgamesIdentityErrorMessage's switch keys
+ * off - factored out (this package) so reportVisibleError call sites can
+ * beacon the SAME code the message was derived from, instead of duck-typing
+ * `.code` a second time and risking the two ever disagreeing. "identity_
+ * connectivity" and "not_ghost" are synthesized (not raw server codes) so
+ * callers get one flat code space covering every branch below, including
+ * the two special-cased ones above the switch.
+ */
+export function vgamesIdentityErrorCode(caught: unknown): string {
+  if (isIdentityConnectivityFailure(caught)) {
+    return "identity_connectivity";
+  }
+  if (isAccountAlreadySecuredFailure(caught)) {
+    return "not_ghost";
+  }
+  const code = caught !== null && typeof caught === "object" && "code" in caught &&
+      typeof caught.code === "string"
+    ? caught.code
+    : null;
+  const rawMessage = caught instanceof Error ? caught.message : null;
+  const identityCode = code === "vgames_identity_failed" ? rawMessage : code;
+  return identityCode || "unknown";
+}
+
 export function vgamesIdentityErrorMessage(caught: unknown, fallback: string): string {
   if (isIdentityConnectivityFailure(caught)) {
     return IDENTITY_CONNECTIVITY_FAILURE_MESSAGE;
@@ -134,14 +159,7 @@ export function vgamesIdentityErrorMessage(caught: unknown, fallback: string): s
     return ACCOUNT_ALREADY_SECURED_MESSAGE;
   }
 
-  const code = caught !== null && typeof caught === "object" && "code" in caught &&
-      typeof caught.code === "string"
-    ? caught.code
-    : null;
-  const rawMessage = caught instanceof Error ? caught.message : null;
-  const identityCode = code === "vgames_identity_failed" ? rawMessage : code;
-
-  switch (identityCode) {
+  switch (vgamesIdentityErrorCode(caught)) {
     case "username_taken":
       return "That VGames username is already taken.";
     case "name_reserved":
@@ -152,10 +170,12 @@ export function vgamesIdentityErrorMessage(caught: unknown, fallback: string): s
       return "Use 3-20 lowercase letters, numbers, or underscores for your VGames username.";
     case "invalid_password":
       return "Use a password between 6 and 128 characters.";
-    default:
+    default: {
+      const rawMessage = caught instanceof Error ? caught.message : null;
       return rawMessage && rawMessage !== "vgames_identity_failed"
         ? rawMessage
         : fallback;
+    }
   }
 }
 

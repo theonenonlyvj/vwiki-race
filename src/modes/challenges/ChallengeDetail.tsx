@@ -10,6 +10,7 @@ import { formatTimeAndClicks } from "../../domain/formatting";
 import { pathStepsToChain } from "../../domain/winningPath";
 import type { Challenge, ChallengeOutcomeEntry, RankedLeaderboardRow, ServerPathStep } from "../../domain/types";
 import type { ChallengeBoardResponse } from "../../server/contracts";
+import { apiErrorCode, type ErrorReporter } from "../../services/errorReporting";
 import type { VWikiRaceApiClient } from "../../services/vwikiRaceApiClient";
 import { ChallengeShareButton } from "../../race/shared";
 
@@ -53,6 +54,7 @@ function emptyBoard(challengeId: string): ChallengeBoardResponse {
 export default function ChallengeDetail({
   apiClient,
   challenge,
+  errorReporter,
   identityAccountId,
   identityToken,
   leaderboard,
@@ -69,6 +71,11 @@ export default function ChallengeDetail({
 }: {
   apiClient: VWikiRaceApiClient;
   challenge: Challenge;
+  // This package: beacons this file's own board-fetch failure below (feeds
+  // LeaderboardList's "Couldn't load the leaderboard.") and is threaded on
+  // to TheSolution, GiveUpAffordance, and ChallengePathGraphButton for their
+  // own self-fetched failures.
+  errorReporter: Pick<ErrorReporter, "reportVisibleError">;
   identityAccountId: string | null;
   // GR-1 ("View graph"): the bearer token `ChallengePathGraphButton` needs
   // to fetch the merged graph - see its own doc comment.
@@ -122,10 +129,17 @@ export default function ChallengeDetail({
           setBoardStatus("ready");
         }
       })
-      .catch(() => {
+      .catch((caught) => {
         // RC-06 (Judge A amendment 1): an honest error + Retry, never the
         // silent empty-board fallback this used to reset to.
-        if (!cancelled) setBoardStatus("error");
+        if (cancelled) return;
+        errorReporter.reportVisibleError(
+          "challenge-detail-board",
+          apiErrorCode(caught),
+          "Couldn't load the leaderboard.",
+          { accountId: identityAccountId ?? undefined },
+        );
+        setBoardStatus("error");
       });
     return () => {
       cancelled = true;
@@ -253,6 +267,7 @@ export default function ChallengeDetail({
             <GiveUpAffordance
               apiClient={apiClient}
               challengeId={challenge.id}
+              errorReporter={errorReporter}
               identityToken={identityToken}
               onPeeked={() => setOutcomeRefreshToken((value) => value + 1)}
             />
@@ -264,6 +279,7 @@ export default function ChallengeDetail({
         <TheSolution
           apiClient={apiClient}
           challengeId={challenge.id}
+          errorReporter={errorReporter}
           identityToken={identityToken}
         />
       ) : null}
@@ -283,6 +299,7 @@ export default function ChallengeDetail({
             <ChallengePathGraphButton
               apiClient={apiClient}
               challengeId={challenge.id}
+              errorReporter={errorReporter}
               identityToken={identityToken}
               unlocked={pathsUnlocked}
             />

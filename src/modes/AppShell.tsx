@@ -6,6 +6,7 @@ import type { PlayAnotherSuggestionState } from "../domain/playAnother";
 import { shouldShowTeachingGate } from "../domain/teachingGate";
 import type { CreateChallengeInput } from "./challenges/Browse";
 import type { AccountStats, CatalogStatus, Challenge, RankedLeaderboardRow, ServerPathStep } from "../domain/types";
+import type { ErrorReporter } from "../services/errorReporting";
 import { isAdminDailiesRoute } from "../services/urlRouting";
 import type { VGamesIdentitySession } from "../services/vgamesIdentity";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
@@ -72,6 +73,7 @@ export default function AppShell({
   catalogStatus,
   challenges,
   challengesView,
+  errorReporter,
   identitySession,
   leaderboard,
   leaderboardErrorMessage,
@@ -128,6 +130,12 @@ export default function AppShell({
   catalogStatus: CatalogStatus;
   challenges: Challenge[];
   challengesView: ChallengesView;
+  // This package: threaded straight through to Home/Boards/ChallengeDetail
+  // (and their own self-fetching children - TheSolution, GiveUpAffordance,
+  // ChallengePathGraphButton) so every one of THEIR own catch blocks can
+  // beacon the error they're about to render, through the SAME instance
+  // App.tsx already built - never a second reporter per mode.
+  errorReporter: Pick<ErrorReporter, "reportVisibleError">;
   identitySession: VGamesIdentitySession | null;
   leaderboard: RankedLeaderboardRow[];
   // RC-06: the specific server message for a "error" `leaderboardStatus` -
@@ -370,6 +378,7 @@ export default function AppShell({
             apiClient={apiClient}
             catalogStatus={catalogStatus}
             challenges={challenges}
+            errorReporter={errorReporter}
             hero={homeHero}
             identityAccountId={identitySession?.accountId ?? null}
             identityToken={identitySession?.token ?? null}
@@ -393,6 +402,7 @@ export default function AppShell({
           <Boards
             apiClient={apiClient}
             challenges={challenges}
+            errorReporter={errorReporter}
             heroSelection={homeHero}
             identityAccountId={identitySession?.accountId ?? null}
             identityToken={identitySession?.token ?? null}
@@ -412,6 +422,7 @@ export default function AppShell({
             <ChallengeDetail
               apiClient={apiClient}
               challenge={selectedChallenge}
+              errorReporter={errorReporter}
               identityAccountId={identitySession?.accountId ?? null}
               identityToken={identitySession?.token ?? null}
               leaderboard={leaderboard}

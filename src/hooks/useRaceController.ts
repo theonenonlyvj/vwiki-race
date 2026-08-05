@@ -3,6 +3,7 @@ import { createGameSession, followResolvedLink, type GameSession } from "../doma
 import { normalizeTitle } from "../domain/rules";
 import type { Article, Challenge, LeaderboardContext, ServerPathStep } from "../domain/types";
 import type { ActiveRunRecord } from "../server/trackingRepository";
+import { apiErrorCode, type ErrorReporter } from "../services/errorReporting";
 import type { RecordTrackedClickRequest, VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 import type { WikipediaGateway } from "../services/wikipediaGateway";
 import { useElapsedDecisionTime } from "./useElapsedDecisionTime";
@@ -62,6 +63,13 @@ export interface RaceControllerOptions {
   now?: () => number;
   observedAt?: () => string;
   createEventId?: () => string;
+  // This package: RaceFlow.tsx renders `error` (below) verbatim as the
+  // race-takeover's error banner - every commitState({ error: errorMessage
+  // (...) }) call site in this file is a real, user-visible failure and now
+  // beacons through this SAME reporter App.tsx already built (never a
+  // second instance). Optional so every existing test double that doesn't
+  // care about telemetry keeps compiling unchanged.
+  errorReporter?: Pick<ErrorReporter, "reportVisibleError">;
 }
 
 interface PendingClick {
@@ -223,7 +231,9 @@ export function useRaceController(options: RaceControllerOptions) {
           }
         }
       }
-      commitState({ ...initialState, challenge, error: errorMessage(caught, "Could not start that challenge.") });
+      const startErrorMessage = errorMessage(caught, "Could not start that challenge.");
+      reportVisibleRaceError(options, "start", caught, startErrorMessage);
+      commitState({ ...initialState, challenge, error: startErrorMessage });
       return { status: "failed", challengeId: challenge.id };
     }
   }, [beginOperation, commitState, now, options.apiClient, options.gateway, timer]);
@@ -291,12 +301,14 @@ export function useRaceController(options: RaceControllerOptions) {
         return { status: "unauthorized", challengeId: pending.challengeId };
       }
       const retryable = isRecoverable(caught);
+      const clickErrorMessage = errorMessage(caught, "Could not sync that click.");
+      reportVisibleRaceError(options, "click", caught, clickErrorMessage);
       commitState({
         ...source,
         phase: "active",
         pendingClick: retryable ? pending : null,
         pendingNavigationTitle: null,
-        error: errorMessage(caught, "Could not sync that click."),
+        error: clickErrorMessage,
       });
       return { status: retryable ? "retryable" : "failed", challengeId: pending.challengeId };
     }
@@ -368,11 +380,13 @@ export function useRaceController(options: RaceControllerOptions) {
       return await acceptClick(pending, token, operation, () => setNavigationRetrying(true));
     } catch (caught) {
       if (!isCurrent(operation, requestGeneration, mounted)) return { status: "stale" };
+      const articleErrorMessage = errorMessage(caught, "Could not load that article.");
+      reportVisibleRaceError(options, "article", caught, articleErrorMessage);
       commitState({
         ...snapshot,
         phase: "active",
         pendingNavigationTitle: null,
-        error: errorMessage(caught, "Could not load that article."),
+        error: articleErrorMessage,
       });
       return { status: "failed", challengeId: snapshot.challenge.id };
     } finally {
@@ -485,10 +499,12 @@ export function useRaceController(options: RaceControllerOptions) {
         commitState({ ...snapshot, phase: "idle", error: null });
         return { status: "unauthorized" };
       }
+      const recoveryErrorMessage = errorMessage(caught, "Could not recover the active run.");
+      reportVisibleRaceError(options, "recovery", caught, recoveryErrorMessage);
       commitState({
         ...snapshot,
         phase: "idle",
-        error: errorMessage(caught, "Could not recover the active run."),
+        error: recoveryErrorMessage,
       });
       return { status: "failed" };
     }
@@ -593,11 +609,13 @@ export function useRaceController(options: RaceControllerOptions) {
         commitState({ ...snapshot, phase: snapshot.recoveryRun ? "idle" : "active", pendingNavigationTitle: null });
         return { status: "unauthorized" };
       }
+      const endRunErrorMessage = errorMessage(caught, "Could not end the active run.");
+      reportVisibleRaceError(options, "end-run", caught, endRunErrorMessage);
       commitState({
         ...snapshot,
         phase: snapshot.recoveryRun ? "idle" : "active",
         pendingNavigationTitle: null,
-        error: errorMessage(caught, "Could not end the active run."),
+        error: endRunErrorMessage,
       });
       return { status: "failed" };
     }
@@ -749,4 +767,21 @@ function errorCode(caught: unknown): string | null {
 function errorMessage(caught: unknown, fallback: string) {
   if (errorCode(caught) === "internal_error") return fallback;
   return caught instanceof Error ? caught.message : fallback;
+}
+
+/**
+ * Beacons one of this file's five race-flow failures (start/click/article/
+ * recovery/end-run) - every one renders verbatim as RaceFlow.tsx's error
+ * banner, so `message` here is exactly what the player just saw. `flow`
+ * distinguishes which protocol step failed since all five share the single
+ * "race-flow" surface (one rendered error banner). A no-op when no reporter
+ * was injected (test doubles that don't care about telemetry).
+ */
+function reportVisibleRaceError(
+  options: RaceControllerOptions,
+  flow: "start" | "click" | "article" | "recovery" | "end-run",
+  caught: unknown,
+  message: string,
+): void {
+  options.errorReporter?.reportVisibleError("race-flow", apiErrorCode(caught), message, { flow });
 }

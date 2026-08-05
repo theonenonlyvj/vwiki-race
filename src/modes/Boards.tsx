@@ -27,6 +27,7 @@ import type {
   BoardsTrendWindow,
   ChallengeBoardResponse,
 } from "../server/contracts";
+import { apiErrorCode, type ErrorReporter } from "../services/errorReporting";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 
 export type BoardsSegment = "today" | "yesterday" | "7d" | "30d" | "lifetime";
@@ -176,6 +177,7 @@ function isTrendSegment(segment: BoardsSegment): segment is TrendSegment {
 export default function Boards({
   apiClient,
   challenges,
+  errorReporter,
   heroSelection,
   identityAccountId,
   identityToken,
@@ -190,6 +192,10 @@ export default function Boards({
 }: {
   apiClient: VWikiRaceApiClient;
   challenges: Challenge[];
+  // This package: beacons this file's own board/trend fetch failures below
+  // (the F6 error-banner branches) and is threaded on to
+  // ChallengePathGraphButton for its own graph-fetch failure.
+  errorReporter: Pick<ErrorReporter, "reportVisibleError">;
   // PKG-01: AppShell's `homeHero` - the same kind-aware selection Home's
   // hero reads, not a Boards-local re-derivation. `null` while the catalog
   // is still loading (or is genuinely empty).
@@ -349,12 +355,19 @@ export default function Boards({
       .then((response) => {
         if (!cancelled) setBoard(response);
       })
-      .catch(() => {
+      .catch((caught) => {
         // RC-06 (Judge A amendment 1): an honest error + Retry, matching the
         // exact F6 pattern trends already ships below - never silently
         // reused as "No completed runs yet.", which is reserved for a
         // genuinely-resolved empty board.
-        if (!cancelled) setBoardFetchError({ segment, challengeId: activeChallenge.id });
+        if (cancelled) return;
+        errorReporter.reportVisibleError(
+          "boards-board",
+          apiErrorCode(caught),
+          "Couldn't load this board.",
+          { flow: segment, accountId: identityAccountId ?? undefined },
+        );
+        setBoardFetchError({ segment, challengeId: activeChallenge.id });
       });
     return () => {
       cancelled = true;
@@ -369,11 +382,18 @@ export default function Boards({
       .then((response) => {
         if (!cancelled) setTrends(response);
       })
-      .catch(() => {
+      .catch((caught) => {
         // F6: an honest error state + Retry, never the fake "no one has
         // cleared the guard" empty state - that reads as real board data
         // when it's actually a fetch failure.
-        if (!cancelled) setTrendsErrorSegment(segment);
+        if (cancelled) return;
+        errorReporter.reportVisibleError(
+          "boards-trend",
+          apiErrorCode(caught),
+          "Couldn't load this trend.",
+          { flow: segment, accountId: identityAccountId ?? undefined },
+        );
+        setTrendsErrorSegment(segment);
       });
     return () => {
       cancelled = true;
@@ -914,6 +934,7 @@ export default function Boards({
             <ChallengePathGraphButton
               apiClient={apiClient}
               challengeId={activeChallenge.id}
+              errorReporter={errorReporter}
               identityToken={identityToken}
               unlocked={pathsUnlocked}
             />

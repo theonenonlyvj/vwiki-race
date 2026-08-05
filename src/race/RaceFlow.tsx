@@ -5,6 +5,7 @@ import type { Article, Challenge, LeaderboardContext } from "../domain/types";
 import type { DnfResultSnapshot, RacePhase } from "../hooks/useRaceController";
 import type { TargetPreviewState } from "../hooks/useTargetPreview";
 import type { PlayAnotherSuggestionState } from "../domain/playAnother";
+import type { ErrorReporter } from "../services/errorReporting";
 import type { VGamesIdentityStatus } from "../services/vgamesIdentity";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 import type { ActiveRunRecord } from "../server/trackingRepository";
@@ -46,6 +47,7 @@ export type { DnfResultSnapshot };
 export default function RaceFlow({
   screen,
   apiClient,
+  errorReporter,
   phase,
   raceChallenge,
   recoveryRun,
@@ -96,6 +98,12 @@ export default function RaceFlow({
   // PKG-03: Results self-fetches its own deduped board (see RaceResults.tsx)
   // instead of reading the app shell's raw per-attempt leaderboard.
   apiClient: VWikiRaceApiClient;
+  // This package: threaded to RaceResults for GiveUpAffordance/
+  // ChallengePathGraphButton's own self-fetched failures - never used
+  // directly by this file (useRaceController.ts already beacons `error`
+  // below through the SAME reporter, via App.tsx's own options.errorReporter
+  // wiring).
+  errorReporter: Pick<ErrorReporter, "reportVisibleError">;
   phase: RacePhase;
   // The race hook's own current challenge - null throughout
   // recoverActiveRun's initial "preparing" tick (see checkingActiveRun
@@ -211,6 +219,7 @@ export default function RaceFlow({
       body = session ? (
         <RaceResults
           apiClient={apiClient}
+          errorReporter={errorReporter}
           article={article}
           outcome={{ status: "completed", session, elapsedMs, leaderboardContext, runId }}
           identityAccountId={identityAccountId}
@@ -242,6 +251,7 @@ export default function RaceFlow({
       body = dnfResult ? (
         <RaceResults
           apiClient={apiClient}
+          errorReporter={errorReporter}
           article={null}
           outcome={{
             status: "dnf",

@@ -58,6 +58,7 @@ function renderDetail(overrides: Partial<Parameters<typeof ChallengeDetail>[0]> 
   const props = {
     apiClient: mockApiClient(),
     challenge,
+    errorReporter: { reportVisibleError: vi.fn() },
     identityAccountId: null as string | null,
     identityToken: null as string | null,
     leaderboard: [] as RankedLeaderboardRow[],
@@ -82,10 +83,19 @@ describe("ChallengeDetail: RC-06 (one honest loading/error system)", () => {
         throw new Error("down");
       }),
     });
-    renderDetail({ apiClient });
+    const errorReporter = { reportVisibleError: vi.fn() };
+    renderDetail({ apiClient, errorReporter });
 
     expect(await screen.findByText(/couldn.t load the leaderboard/i)).toBeVisible();
     expect(screen.queryByText("No completed runs yet.")).toBeNull();
+    // This package: the rendered failure above now beacons through the
+    // "challenge-detail-board" surface.
+    expect(errorReporter.reportVisibleError).toHaveBeenCalledWith(
+      "challenge-detail-board",
+      expect.any(String),
+      "Couldn't load the leaderboard.",
+      expect.anything(),
+    );
   });
 
   it("Leaderboard panel: Retry recovers the board in place via a NEW fetch, without any navigation callback firing", async () => {
