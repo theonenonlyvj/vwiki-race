@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createVGamesIdentityClient,
   createVGamesIdentityRepository,
+  isAccountAlreadySecuredFailure,
   type StorageLike,
   vgamesIdentityErrorMessage,
 } from "./vgamesIdentity";
@@ -533,6 +534,24 @@ describe("VGames identity error copy", () => {
       ).toBe("VGames identity is having a moment — try once more.");
     },
   );
+
+  // P0 fix (2026-08-05, live report "Rob couldn't create an account"):
+  // confirmed live against prod that replaying a successful secureGuest
+  // call (same token/username/password) answers viota's own `not_ghost`
+  // rejection, not a repeat success - and with no case for it, that raw
+  // code used to reach the player verbatim. App.tsx's createVGamesAccount
+  // now intercepts this and attempts a login-recovery first (see its own
+  // doc comment); this mapping is the defense-in-depth fallback for if that
+  // recovery is ever bypassed.
+  it("maps the already-secured code to an actionable message instead of the raw 'not_ghost' string", () => {
+    expect(isAccountAlreadySecuredFailure(new ApiRequestError("not_ghost", "not_ghost", 409)))
+      .toBe(true);
+    expect(isAccountAlreadySecuredFailure(new ApiRequestError("invalid_credentials", "invalid_credentials", 401)))
+      .toBe(false);
+    expect(
+      vgamesIdentityErrorMessage(new ApiRequestError("not_ghost", "not_ghost", 409), "fallback"),
+    ).toBe("This device already has a VGames account. Log in instead.");
+  });
 
   it("still surfaces the fallback for an unrecognized failed-identity code with no message", () => {
     expect(

@@ -27,6 +27,7 @@ import type {
 import {
   createVGamesIdentityClient,
   createVGamesIdentityRepository,
+  isAccountAlreadySecuredFailure,
   isIdentityConnectivityFailure,
   vgamesIdentityErrorMessage,
   type VGamesIdentityClient,
@@ -1791,12 +1792,54 @@ export default function App({
         );
       }
 
-      const claimedSession = await identityClient.secureGuest({
-        deviceCredential: identityRepository.getDeviceCredential(),
-        token: guestSession.token,
-        username,
-        password,
-      });
+      let claimedSession: VGamesIdentitySession;
+      try {
+        claimedSession = await identityClient.secureGuest({
+          deviceCredential: identityRepository.getDeviceCredential(),
+          token: guestSession.token,
+          username,
+          password,
+        });
+      } catch (secureCaught) {
+        // P0 fix (2026-08-05, live report "Rob couldn't create an
+        // account"): playAsGuest's own bootstrap session ALWAYS reports
+        // status "ghost" (server/vgamesIdentityClient.ts's `quick()` hard-
+        // codes it, regardless of the account's real state - confirmed live
+        // against prod), so this is the only point that can ever learn the
+        // guest we just bootstrapped was actually already secured - most
+        // likely by an earlier attempt whose secureGuest call (single,
+        // non-retryable - see the non-goal comment above) timed out on the
+        // CLIENT after the mutation had already landed server-side. Calling
+        // secureGuest again here always fails the same way (viota's
+        // `/auth/set-credentials` correctly rejects a non-ghost token with
+        // `not_ghost`, confirmed live) - a resubmit of the identical form
+        // reproduces it forever, a genuine dead end. Recovering with
+        // `login` is safe to attempt: it's a read-only auth check (not a
+        // blind replay of the non-idempotent secure mutation), it's already
+        // laddered/retried on its own, and if this really is the same
+        // account from a lost response, the just-typed credentials log
+        // straight in with no extra step. If they don't match (a different
+        // username, or the password was retyped differently on this
+        // attempt), it fails exactly like the Log In tab's own "incorrect"
+        // case - a real, actionable answer instead of the raw "not_ghost"
+        // code.
+        if (!isAccountAlreadySecuredFailure(secureCaught)) {
+          throw secureCaught;
+        }
+        claimedSession = await identityClient.login(
+          {
+            deviceCredential: identityRepository.getDeviceCredential(),
+            username,
+            password,
+          },
+          {
+            onRetry: (attempt) => {
+              createRetryAtMs.push(now() - createCallStartedAt);
+              setCreateRetryAttempt(attempt);
+            },
+          },
+        );
+      }
       persistIdentitySession(claimedSession);
       closeAuthPrompt();
       await resumeAfterIdentity(prompt, claimedSession);

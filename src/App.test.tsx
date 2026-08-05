@@ -1496,6 +1496,115 @@ describe("VWiki Race app", () => {
     expect(identityClient.secureGuest).toHaveBeenCalledTimes(1);
   });
 
+  // P0 fix (2026-08-05, live report "Rob couldn't create an account"):
+  // playAsGuest's bootstrap session always reports status "ghost" even when
+  // the account is already secured (server/vgamesIdentityClient.ts's
+  // `quick()` hardcodes it - confirmed live against prod), so create-account
+  // can't tell ahead of time that a retry's guest bootstrap landed on an
+  // already-claimed account. secureGuest then fails with viota's own
+  // `not_ghost` rejection (also confirmed live: replaying a successful
+  // secure call answers `not_ghost`, not a repeat success) - this is exactly
+  // what happens when secureGuest's single, non-retryable attempt (LR-2
+  // non-goal) times out on the CLIENT after the mutation already landed
+  // server-side, and the player resubmits the identical form. Recovering
+  // via `login` with the just-typed credentials turns that into a silent
+  // success instead of a dead end.
+  it("recovers a create-account resubmit whose earlier attempt already secured the account", async () => {
+    const claimedSession: VGamesIdentitySession = {
+      accountId: "acc-guest-3",
+      displayName: "vijay",
+      token: "jwt-claimed-3",
+      status: "claimed",
+    };
+    const identityClient = {
+      playAsGuest: vi.fn(async () => ({
+        accountId: "acc-guest-3",
+        displayName: "vijay",
+        token: "jwt-guest-3",
+        status: "ghost" as const,
+      })),
+      secureGuest: vi.fn(async () => {
+        throw new ApiRequestError("not_ghost", "not_ghost", 409);
+      }),
+      login: vi.fn(async () => claimedSession),
+    };
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock()}
+        storage={memoryStorage()}
+        identityClient={identityClient}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(screen.getByRole("button", { name: /^create account$/i }));
+    await user.type(screen.getByLabelText(/vgames username/i), "vijay");
+    await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
+    await user.type(screen.getByLabelText(/confirm password/i), "secret-pass");
+    const form = screen.getByLabelText(/vgames username/i).closest("form") as HTMLFormElement;
+    fireEvent.submit(form);
+
+    expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
+    expect(identityClient.login).toHaveBeenCalledWith(
+      expect.objectContaining({ username: "vijay", password: "secret-pass" }),
+      expect.anything(),
+    );
+    expect(screen.queryByText("not_ghost")).toBeNull();
+  });
+
+  // Companion to the recovery test above: when the login-recovery ALSO
+  // fails (a different username, or the password was retyped differently
+  // on this attempt), the player gets the same real, actionable "incorrect"
+  // answer the Log In tab already shows - never the raw "not_ghost" code -
+  // and the form is left genuinely resubmittable (QF-07's lock and authBusy
+  // both release), not wedged.
+  it("surfaces a real credential answer, not the raw not_ghost code, when create-account's login-recovery also fails", async () => {
+    const identityClient = {
+      playAsGuest: vi.fn(async () => ({
+        accountId: "acc-guest-4",
+        displayName: "vijay",
+        token: "jwt-guest-4",
+        status: "ghost" as const,
+      })),
+      secureGuest: vi.fn(async () => {
+        throw new ApiRequestError("not_ghost", "not_ghost", 409);
+      }),
+      login: vi.fn(async () => {
+        throw new ApiRequestError("invalid_credentials", "invalid_credentials", 401);
+      }),
+    };
+    const user = userEvent.setup();
+    render(
+      <App
+        apiOrigin={apiOrigin}
+        fetchImpl={createFetchMock()}
+        storage={memoryStorage()}
+        identityClient={identityClient}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(screen.getByRole("button", { name: /^create account$/i }));
+    await user.type(screen.getByLabelText(/vgames username/i), "vijay");
+    await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
+    await user.type(screen.getByLabelText(/confirm password/i), "secret-pass");
+    const form = screen.getByLabelText(/vgames username/i).closest("form") as HTMLFormElement;
+    fireEvent.submit(form);
+
+    expect(
+      await screen.findByText("That VGames username or password is incorrect."),
+    ).toBeVisible();
+    expect(screen.queryByText("not_ghost")).toBeNull();
+    // The button-never-wedges rule (QF-07's lock is synchronous, released in
+    // `finally`): a failed recovery leaves the form genuinely resubmittable,
+    // not stuck disabled.
+    expect(createAccountSubmitButton()).toBeEnabled();
+  });
+
   it("keeps a successful login in memory when browser storage rejects the write", async () => {
     const repository: VGamesIdentityRepository = {
       clearSession: vi.fn(),

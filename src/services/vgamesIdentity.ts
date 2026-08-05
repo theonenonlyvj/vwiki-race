@@ -90,12 +90,48 @@ export function isIdentityConnectivityFailure(caught: unknown): boolean {
   return code !== null && CONNECTIVITY_FAILURE_CODES.has(code);
 }
 
+// P0 fix (2026-08-05, live report "Rob couldn't create an account"): `quick()`
+// (server/vgamesIdentityClient.ts, backing playAsGuest) hardcodes its
+// returned session's `status` to "ghost" regardless of the account's REAL
+// state - confirmed live against prod: replaying `/api/v2/identity/guest`
+// for a deviceCredential that already secured an account still answers
+// `status: "ghost"`. That's the only bootstrap step createVGamesAccount
+// (App.tsx) has to decide whether it's safe to call secureGuest - so a
+// retry after secureGuest's own single, non-retryable attempt (LR-2
+// non-goal) times out with the mutation ALREADY having landed server-side
+// walks straight back into calling secureGuest a second time on an
+// already-claimed account. viota's `/auth/set-credentials` correctly
+// rejects that with `not_ghost` (confirmed live: repeating a successful
+// secure call with the identical token/username/password answers
+// `{"error":{"code":"not_ghost","message":"not_ghost"}}`, not a repeat
+// success) - but with no case for it below, that raw code used to reach the
+// player VERBATIM as the literal string "not_ghost", a dead end with no
+// actionable next step (retrying the identical form forever reproduces it).
+export function isAccountAlreadySecuredFailure(caught: unknown): boolean {
+  const code = caught !== null && typeof caught === "object" && "code" in caught &&
+      typeof caught.code === "string"
+    ? caught.code
+    : null;
+  return code === "not_ghost";
+}
+
 export const IDENTITY_CONNECTIVITY_FAILURE_MESSAGE =
   "VGames identity is having a moment — try once more.";
+
+export const ACCOUNT_ALREADY_SECURED_MESSAGE =
+  "This device already has a VGames account. Log in instead.";
 
 export function vgamesIdentityErrorMessage(caught: unknown, fallback: string): string {
   if (isIdentityConnectivityFailure(caught)) {
     return IDENTITY_CONNECTIVITY_FAILURE_MESSAGE;
+  }
+  // Defense in depth: createVGamesAccount (App.tsx) already intercepts this
+  // failure and attempts a login-recovery before ever surfacing an error -
+  // see isAccountAlreadySecuredFailure's own doc comment. This case only
+  // fires if that recovery is bypassed or itself fails for a non-credential
+  // reason, so "not_ghost" is never shown to a player verbatim.
+  if (isAccountAlreadySecuredFailure(caught)) {
+    return ACCOUNT_ALREADY_SECURED_MESSAGE;
   }
 
   const code = caught !== null && typeof caught === "object" && "code" in caught &&
