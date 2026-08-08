@@ -42,6 +42,8 @@ const excludedStartTitles = new Set<string>(
 );
 
 const attempts = Number(process.argv[2] ?? 5);
+const dailyDate = process.argv[3] ?? "2026-08-06";
+const flavor = (process.argv[4] ?? "weird") as "recognizable" | "weird" | "hard";
 const seen = new Set<string>();
 const results: unknown[] = [];
 
@@ -58,8 +60,8 @@ const run = async () => {
     });
     try {
       const c = await evaluator.findCandidate({
-        dailyDate: "2026-08-06",
-        flavor: "weird",
+        dailyDate,
+        flavor,
         excludedTargetTitles,
         excludedStartTitles,
         computeReferencePath: true,
