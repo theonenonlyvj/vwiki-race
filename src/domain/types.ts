@@ -288,8 +288,12 @@ export interface AccountStats {
     averageClicks: number;
     averageElapsedMs: number;
   };
-  topStarts: CountStat[];
-  topTargets: CountStat[];
+  /**
+   * Most-visited pages (profile "You" tab, single top-10 list - replaces
+   * the former topStarts/topTargets/mostVisited three-list layout):
+   * server-computed from ungated `owner_runs` (starts + destinations,
+   * alias-resolved), see d1TrackingRepository.ts's `getAccountStats`.
+   */
   mostVisited: CountStat[];
   /**
    * Increment 4 (UX redesign spec §Data requirements - "Streaks"): count of

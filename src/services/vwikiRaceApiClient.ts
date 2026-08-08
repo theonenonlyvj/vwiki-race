@@ -1148,9 +1148,8 @@ function isAccountStats(value: unknown): value is AccountStats {
     (totals.bestElapsedMs === null || hasNumber(totals, "bestElapsedMs")) &&
     hasNumber(totals, "averageClicks") &&
     hasNumber(totals, "averageElapsedMs") &&
-    [value.topStarts, value.topTargets, value.mostVisited].every((rows) =>
-      Array.isArray(rows) && rows.every((row) => isRecord(row) && hasString(row, "title") && hasNumber(row, "count")),
-    ) &&
+    Array.isArray(value.mostVisited) &&
+    value.mostVisited.every((row) => isRecord(row) && hasString(row, "title") && hasNumber(row, "count")) &&
     hasNumber(value, "dailyStreak") &&
     isAccountTrend30(value.trend30);
 }

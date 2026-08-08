@@ -1,6 +1,6 @@
 import StagedLoadingNotice from "../components/StagedLoadingNotice";
 import { formatElapsed } from "../race/shared";
-import type { AccountStats } from "../domain/types";
+import type { AccountStats, CountStat } from "../domain/types";
 import type { VGamesIdentitySession } from "../services/vgamesIdentity";
 
 /** RC-06 ("one honest loading/error system", Judge A amendment 3 / Judge B
@@ -338,28 +338,21 @@ function StatsPanel({
           <dd>{totals ? totals.totalClicks : NO_DATA_YET}</dd>
         </div>
       </dl>
-      <StatsList
-        title="Top starts"
-        items={stats?.topStarts.map((item) => item.title) ?? []}
-      />
-      <StatsList
-        title="Top targets"
-        items={stats?.topTargets.map((item) => item.title) ?? []}
-      />
-      <StatsList title="Visited pages" items={stats?.mostVisited.map((item) => item.title) ?? []} />
+      <StatsList title="Most visited pages" items={stats?.mostVisited ?? []} />
     </section>
   );
 }
 
-function StatsList({ title, items }: { title: string; items: string[] }) {
+function StatsList({ title, items }: { title: string; items: CountStat[] }) {
   return (
     <section>
       <h3>{title}</h3>
       {items.length ? (
         <ol className="compact-list">
-          {items.slice(0, 5).map((item) => (
-            <li key={item}>
-              <span>{item}</span>
+          {items.slice(0, 10).map((item) => (
+            <li key={item.title}>
+              <span>{item.title}</span>
+              <span className="muted">×{item.count}</span>
             </li>
           ))}
         </ol>

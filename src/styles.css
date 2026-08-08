@@ -3199,8 +3199,16 @@ h1 {
 .compact-list li {
   border-bottom: 1px solid rgba(130, 246, 239, 0.1);
   color: var(--text);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   overflow-wrap: anywhere;
   padding-bottom: 6px;
+}
+
+.compact-list li .muted {
+  flex-shrink: 0;
 }
 
 .empty-state {

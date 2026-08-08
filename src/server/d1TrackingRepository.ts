@@ -3441,20 +3441,14 @@ export function createD1TrackingRepository(options: {
         const { results } = await db.prepare(`${ownerCte} ${sql}`).bind(...receipt.bindings).all<CountRow>();
         return results.map((row) => ({ title: row.title, count: Number(row.count) }));
       };
-      const [topStarts, topTargets, mostVisited] = await Promise.all([
-        countRows(`SELECT start_title title, count(*) count FROM owner_runs
-                   GROUP BY start_title ORDER BY count DESC, title ASC LIMIT 5`),
-        countRows(`SELECT target_title title, count(*) count FROM owner_runs
-                   GROUP BY target_title ORDER BY count DESC, title ASC LIMIT 5`),
-        countRows(`, visits AS (
+      const mostVisited = await countRows(`, visits AS (
                      SELECT start_title title FROM owner_runs
                      UNION ALL
                      SELECT p.destination_title title
                      FROM run_path_steps p JOIN owner_runs r ON r.id = p.run_id
                    )
                    SELECT title, count(*) count FROM visits
-                   GROUP BY title ORDER BY count DESC, title ASC LIMIT 5`),
-      ]);
+                   GROUP BY title ORDER BY count DESC, title ASC LIMIT 10`);
       // Increment 4: streak + 30-day trend, both alias-resolved against the
       // same canonical `account.accountId` the rest of this method already
       // resolved to. `trend30` reuses `listDailyTrends` wholesale (rather
@@ -3504,8 +3498,6 @@ export function createD1TrackingRepository(options: {
           averageClicks: Number(totals?.average_clicks ?? 0),
           averageElapsedMs: Number(totals?.average_elapsed_ms ?? 0),
         },
-        topStarts,
-        topTargets,
         mostVisited,
         dailyStreak,
         trend30,

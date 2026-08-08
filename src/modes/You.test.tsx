@@ -24,8 +24,6 @@ const zeroStats: AccountStats = {
     averageClicks: 0,
     averageElapsedMs: 0,
   },
-  topStarts: [],
-  topTargets: [],
   mostVisited: [],
   dailyStreak: 0,
   trend30: { ranked: false, avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, guard: 3 },
@@ -178,5 +176,59 @@ describe("You: RC-06 (one honest loading/error system) - three visually distinct
     expect(statsPanel).toHaveClass("surface-entrance");
     expect(document.querySelectorAll(".surface-entrance")).toHaveLength(1);
     expect(document.querySelector(".you-empty-state")).toBeNull();
+  });
+});
+
+describe("You: single 'Most visited pages' list (drops Top starts/Top targets)", () => {
+  it("renders one 'Most visited pages' list with per-title counts, up to 10 rows, no Top starts/Top targets sections", () => {
+    const stats: AccountStats = {
+      ...zeroStats,
+      mostVisited: [
+        { title: "Cat", count: 12 },
+        { title: "Dog", count: 9 },
+        { title: "Bird", count: 8 },
+        { title: "Fish", count: 7 },
+        { title: "Ant", count: 6 },
+        { title: "Bee", count: 5 },
+        { title: "Owl", count: 4 },
+        { title: "Fox", count: 3 },
+        { title: "Bat", count: 2 },
+        { title: "Elk", count: 1 },
+      ],
+    };
+    renderYou({ stats, statsStatus: "ready" });
+
+    expect(screen.getByText("Most visited pages")).toBeVisible();
+    expect(screen.queryByText("Top starts")).toBeNull();
+    expect(screen.queryByText("Top targets")).toBeNull();
+    expect(screen.queryByText("Visited pages")).toBeNull();
+
+    expect(screen.getByText("Cat")).toBeVisible();
+    expect(screen.getByText("×12")).toBeVisible();
+    expect(screen.getByText("Elk")).toBeVisible();
+    expect(screen.getByText("×1")).toBeVisible();
+
+    const list = screen.getByText("Most visited pages").closest("section")!.querySelector("ol")!;
+    expect(list.querySelectorAll("li")).toHaveLength(10);
+  });
+
+  it("caps the list at 10 even when the server sends more rows", () => {
+    const stats: AccountStats = {
+      ...zeroStats,
+      mostVisited: Array.from({ length: 12 }, (_, i) => ({ title: `Page ${i}`, count: 12 - i })),
+    };
+    renderYou({ stats, statsStatus: "ready" });
+
+    const list = screen.getByText("Most visited pages").closest("section")!.querySelector("ol")!;
+    expect(list.querySelectorAll("li")).toHaveLength(10);
+    expect(screen.queryByText("Page 10")).toBeNull();
+    expect(screen.queryByText("Page 11")).toBeNull();
+  });
+
+  it("shows 'No data yet.' when mostVisited is empty", () => {
+    renderYou({ stats: zeroStats, statsStatus: "ready" });
+
+    const section = screen.getByText("Most visited pages").closest("section")!;
+    expect(section).toHaveTextContent("No data yet.");
   });
 });

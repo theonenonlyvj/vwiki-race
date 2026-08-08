@@ -20,8 +20,6 @@ function stats(attempts: number, dailyStreak: number): AccountStats {
       averageClicks: 0,
       averageElapsedMs: 0,
     },
-    topStarts: [],
-    topTargets: [],
     mostVisited: [],
     dailyStreak,
     trend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, ranked: false, guard: 10 },

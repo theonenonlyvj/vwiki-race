@@ -3716,8 +3716,6 @@ describe("Task 4 D1 projections", () => {
         averageClicks: 0,
         averageElapsedMs: 0,
       },
-      topStarts: [],
-      topTargets: [],
       mostVisited: [],
       dailyStreak: 0,
       // Owner ruling, 2026-07-25 ("metric-independent ranking changes"):
@@ -3773,8 +3771,6 @@ describe("Task 4 D1 projections", () => {
         averageClicks: 2.5,
         averageElapsedMs: 4200,
       },
-      topStarts: [{ title: "Moon", count: 3 }],
-      topTargets: [{ title: "Gravity", count: 3 }],
       mostVisited: [
         { title: "Moon", count: 3 },
         { title: "Gravity", count: 1 },
@@ -3824,6 +3820,56 @@ describe("Task 4 D1 projections", () => {
     const stats = await repository.getAccountStats(account);
 
     expect(stats.totals).toMatchObject({ attempts: 1, completed: 0, abandoned: 1 });
+  });
+
+  it("caps mostVisited at 10 rows (bumped from 5) when more than 10 distinct titles were visited", async () => {
+    // 11 distinct start titles, one run each - "Page 00" gets a second run
+    // so it out-ranks the rest on count, and "Page 10" (the 11th, lowest
+    // count, last alphabetically) is the one that must be dropped by the
+    // LIMIT 10 cutoff.
+    const titles = Array.from({ length: 11 }, (_, i) => `Page ${String(i).padStart(2, "0")}`);
+    for (const [index, title] of titles.entries()) {
+      await env.VWIKI_RACE_DB.prepare(
+        `INSERT INTO runs
+           (id, challenge_id, account_id, canonical_account_id, status, started_at,
+            completed_at, elapsed_ms, wall_elapsed_ms, click_count, start_title,
+            target_title, final_title, start_page_id, target_page_id, last_page_id,
+            last_title, expires_at, ranked_eligible, protocol_version, created_at,
+            updated_at)
+         VALUES (?, 'challenge-0001', ?, ?, 'completed',
+                 '2026-07-14T01:00:00.000Z', '2026-07-14T01:00:04.200Z', 4200, 4200, 1, ?,
+                 'Gravity', 'Gravity', ?, 38579, 38579, 'Gravity',
+                 '2026-07-15T01:00:00.000Z', 1, 2,
+                 '2026-07-14T01:00:00.000Z', '2026-07-14T01:00:04.200Z')`,
+      ).bind(
+        `mostvisited-cap-${index}`,
+        account.accountId,
+        account.accountId,
+        title,
+        90000 + index,
+      ).run();
+    }
+    // A second run against "Page 00" so it's the unambiguous top count.
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO runs
+         (id, challenge_id, account_id, canonical_account_id, status, started_at,
+          completed_at, elapsed_ms, wall_elapsed_ms, click_count, start_title,
+          target_title, final_title, start_page_id, target_page_id, last_page_id,
+          last_title, expires_at, ranked_eligible, protocol_version, created_at,
+          updated_at)
+       VALUES ('mostvisited-cap-repeat', 'challenge-0001', ?, ?, 'completed',
+               '2026-07-14T01:00:00.000Z', '2026-07-14T01:00:04.200Z', 4200, 4200, 1, 'Page 00',
+               'Gravity', 'Gravity', 90099, 38579, 38579, 'Gravity',
+               '2026-07-15T01:00:00.000Z', 1, 2,
+               '2026-07-14T01:00:00.000Z', '2026-07-14T01:00:04.200Z')`,
+    ).bind(account.accountId, account.accountId).run();
+
+    const { repository } = fixture();
+    const stats = await repository.getAccountStats(account);
+
+    expect(stats.mostVisited).toHaveLength(10);
+    expect(stats.mostVisited[0]).toEqual({ title: "Page 00", count: 2 });
+    expect(stats.mostVisited.map((row) => row.title)).not.toContain("Page 10");
   });
 });
 

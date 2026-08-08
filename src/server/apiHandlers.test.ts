@@ -2269,7 +2269,7 @@ function fakeWorkerTracking(): WorkerTracking {
       recordClickV2: vi.fn(async () => ({ transition: { runId: "run-1", clickCount: 1, runStatus: "active" } })),
       abandonRunV2: vi.fn(async () => ({ runId: "run-1", runStatus: "abandoned" })),
       findActiveRun: vi.fn(async () => null),
-      getAccountStats: vi.fn(async () => ({ totals: {}, topStarts: [], topTargets: [], mostVisited: [] })),
+      getAccountStats: vi.fn(async () => ({ totals: {}, mostVisited: [] })),
       getPublicRunPath: vi.fn(async () => []),
       findChallengeCreationReplay: vi.fn(async () => null),
     },

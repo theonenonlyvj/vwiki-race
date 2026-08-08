@@ -12,8 +12,10 @@ import type { VGamesIdentitySession } from "../services/vgamesIdentity";
  * destructive-path guard (§2.2/§2.3): while stats are unresolved we cannot
  * prove the ghost is stakes-free, so the guard fires anyway.
  *
- * Note (judge amendment, 2026-07-20): `topStarts`/`topTargets`/`mostVisited`
- * are populated from ungated `owner_runs` server-side (no
+ * Note (judge amendment, 2026-07-20): `mostVisited` (formerly also
+ * `topStarts`/`topTargets`, dropped when the profile page collapsed to one
+ * "Most visited pages" list) is populated from ungated `owner_runs`
+ * server-side (no
  * MIN_COUNTED_DNF_CLICKS filter - d1TrackingRepository.ts ~2965-2977), so a
  * ghost can carry real-looking browse history even when `attempts === 0`.
  * That's consistent with the existing FB-7 ruling that a sub-threshold run
