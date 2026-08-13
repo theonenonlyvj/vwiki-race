@@ -187,6 +187,13 @@ export default function ChallengeDetail({
   // peeked", matching the server's own extended disclosure guard
   // (`viewerFinishedOrPeekedChallengeExistsSql`) - a peeked account earns
   // the same "View path"/"View graph" access a finisher gets.
+  // Pre-finish spoiler mask (owner ask, extends invariant 5): the name stays
+  // `pathsUnlocked` (unchanged definition), but it now ALSO gates every
+  // row's time·clicks column (both the main Leaderboard panel via
+  // `LeaderboardList` and "Your history" below), not just "View
+  // path"/"View graph" - "before I finish the race, I shouldn't be able to
+  // see how long or # clicks on the leaderboard, just rankings and
+  // usernames."
   const pathsUnlocked = yourRows.some((row) => row.status === "completed") || peeked;
   // DT-1 (owner-proxy ruling, "anything else" (b)): a lone completed
   // attempt that's ALSO this account's placement on the main board above is
@@ -316,7 +323,9 @@ export default function ChallengeDetail({
           status={boardStatus}
         />
         {!pathsUnlocked ? (
-          <p className="muted board-footnote">Paths hidden until you&apos;ve played.</p>
+          <p className="muted board-footnote">
+            Times, clicks, and paths hidden until you&apos;ve played (or given up).
+          </p>
         ) : null}
       </section>
 
@@ -350,7 +359,16 @@ export default function ChallengeDetail({
                     {row.status === "abandoned" ? "DNF" : `#${row.rank}`}
                   </span>
                   <span className="leaderboard-player">
-                    <span>{formatTimeAndClicks(row.elapsedMs, row.clickCount)}</span>
+                    {/* Pre-finish spoiler mask (owner ask): the SAME
+                        `pathsUnlocked` gate below that controls "View path"
+                        - a DNF-only history's own time/clicks stay hidden
+                        alongside it until you've finished (or given up on)
+                        this challenge. */}
+                    <span>
+                      {pathsUnlocked
+                        ? formatTimeAndClicks(row.elapsedMs, row.clickCount)
+                        : <span className="muted">—</span>}
+                    </span>
                     {row.protocolVersion === 1 ? (
                       // PKG-03: a tap-to-reveal explanation (mobile has no
                       // hover) replaces the old hover-only `title` attribute -

@@ -584,6 +584,59 @@ describe("Boards: FB-4 path comparison (council 2026-07-19, owner decision 10)",
     expect(screen.queryByText(/view path/i)).toBeNull();
   });
 
+  /**
+   * Pre-finish spoiler mask (owner ask, 2026-08-13): "before I finish the
+   * race, just like I can't view the graph, I shouldn't be able to see how
+   * long or # clicks on the leaderboard - just rankings and usernames."
+   * Extends the SAME `pathsUnlocked` gate FB-4 already established for path
+   * disclosure to the time/clicks column, on both placement and DNF rows.
+   */
+  it("masks time/clicks on every placement AND DNF row until the viewer has finished this board's challenge - rank/name still show", async () => {
+    const apiClient = mockApiClient({
+      getChallengeBoard: vi.fn(async () => ({
+        ...boardWithRunIds,
+        placements: boardWithRunIds.placements.filter((row) => row.accountId !== "acc-1"),
+      })),
+    });
+    renderBoards({
+      apiClient,
+      identityAccountId: "acc-1",
+      heroSelection: { challenge: yesterdaysDaily, kind: "yesterday-daily" },
+    });
+
+    await screen.findByText("Ari");
+    expect(screen.getByText("Sam")).toBeVisible();
+    expect(screen.getByText(/times, clicks, and paths hidden until you've played/i)).toBeVisible();
+
+    // Ari's completed row: rank/name visible, time/clicks masked.
+    expect(screen.queryByText("0:25 · 4 clk")).toBeNull();
+    const ariRow = screen.getByText("Ari").closest("li")!;
+    expect(within(ariRow).getByText("—")).toHaveClass("muted");
+
+    // Sam's DNF row: rank/name visible, time/clicks masked (distinct from
+    // the DNF row's own pre-existing rank-dnf dash).
+    expect(screen.queryByText("0:05 · 1 clk")).toBeNull();
+    const samRow = screen.getByText("Sam").closest("li")!;
+    const samDashes = within(samRow).getAllByText("—");
+    expect(samDashes).toHaveLength(2);
+    expect(samDashes.some((el) => el.className === "muted")).toBe(true);
+  });
+
+  it("shows time/clicks on every row (placement and DNF) once the viewer has finished this board's challenge", async () => {
+    const apiClient = mockApiClient({
+      getChallengeBoard: vi.fn(async () => boardWithRunIds),
+    });
+    renderBoards({
+      apiClient,
+      identityAccountId: "acc-1",
+      heroSelection: { challenge: yesterdaysDaily, kind: "yesterday-daily" },
+    });
+
+    expect(await screen.findByText("0:20 · 3 clk")).toBeVisible();
+    expect(screen.getByText("0:25 · 4 clk")).toBeVisible();
+    expect(screen.getByText("0:05 · 1 clk")).toBeVisible();
+  });
+
   it("discloses any placement's winning path (not just your own), and never a DNF row's, once you've finished this board's challenge", async () => {
     const apiClient = mockApiClient({
       getChallengeBoard: vi.fn(async () => boardWithRunIds),

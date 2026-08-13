@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import LeaderboardList from "./LeaderboardList";
 import type { ChallengeBoardDnfRow, ChallengeBoardPlacement } from "../domain/types";
@@ -107,5 +107,81 @@ describe("LeaderboardList: RC-06 tri-state", () => {
       />,
     );
     expect(screen.queryByRole("region", { name: "DNF" })).toBeNull();
+  });
+});
+
+/**
+ * Pre-finish spoiler mask (owner ask, 2026-08-13): "before I finish the
+ * race, just like I can't view the graph, I shouldn't be able to see how
+ * long or # clicks on the leaderboard - just rankings and usernames."
+ * Extends the SAME `pathsUnlocked` gate that already controls "View path"
+ * disclosure to the time/clicks column, on both placement and DNF rows.
+ */
+describe("LeaderboardList: pre-finish spoiler mask (time/clicks)", () => {
+  function dnf(overrides: Partial<ChallengeBoardDnfRow> = {}): ChallengeBoardDnfRow {
+    return {
+      accountId: "acc-2",
+      displayName: "Ari",
+      elapsedMs: 8_000,
+      clickCount: 2,
+      ...overrides,
+    };
+  }
+
+  it("locked (pathsUnlocked=false): shows rank + name only - no time/clicks - for both a placement and a DNF row", () => {
+    render(
+      <LeaderboardList
+        dnfs={[dnf()]}
+        identityAccountId={null}
+        onDisclosePath={vi.fn()}
+        pathsUnlocked={false}
+        placements={[placement()]}
+        runPaths={{}}
+      />,
+    );
+
+    expect(screen.getByText("FranTheGreat")).toBeVisible();
+    expect(screen.getByText("Ari")).toBeVisible();
+    expect(screen.queryByText("0:42 · 6 clk")).toBeNull();
+    expect(screen.queryByText("0:08 · 2 clk")).toBeNull();
+
+    // Both rows carry a masked placeholder in the time column - distinct
+    // from the DNF row's own `.rank-dnf` dash.
+    const placementRow = screen.getByText("FranTheGreat").closest("li")!;
+    expect(within(placementRow).getByText("—")).toHaveClass("muted");
+    const dnfRow = screen.getByText("Ari").closest("li")!;
+    const dnfDashes = within(dnfRow).getAllByText("—");
+    expect(dnfDashes).toHaveLength(2);
+    expect(dnfDashes.some((el) => el.className === "muted")).toBe(true);
+  });
+
+  it("locked: never renders 'View path', even for a placement row carrying a runId", () => {
+    render(
+      <LeaderboardList
+        dnfs={[]}
+        identityAccountId={null}
+        onDisclosePath={vi.fn()}
+        pathsUnlocked={false}
+        placements={[placement({ runId: "run-1" })]}
+        runPaths={{}}
+      />,
+    );
+    expect(screen.queryByText(/view path/i)).toBeNull();
+  });
+
+  it("unlocked (pathsUnlocked=true): shows time/clicks for both a placement and a DNF row", () => {
+    render(
+      <LeaderboardList
+        dnfs={[dnf()]}
+        identityAccountId={null}
+        onDisclosePath={vi.fn()}
+        pathsUnlocked
+        placements={[placement()]}
+        runPaths={{}}
+      />,
+    );
+
+    expect(screen.getByText("0:42 · 6 clk")).toBeVisible();
+    expect(screen.getByText("0:08 · 2 clk")).toBeVisible();
   });
 });

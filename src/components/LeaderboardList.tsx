@@ -96,7 +96,17 @@ export default function LeaderboardList({
                     {row.displayName ?? "Unknown"}
                     {isYou ? <span className="muted"> (you)</span> : null}
                   </span>
-                  <span>{formatTimeAndClicks(row.elapsedMs, row.clickCount)}</span>
+                  {/* Pre-finish spoiler mask (owner ask): "before I finish
+                      the race... I shouldn't be able to see how long or #
+                      clicks on the leaderboard - just rankings and
+                      usernames" - the SAME `pathsUnlocked` gate already
+                      controlling "View path" just below, extended to this
+                      column. */}
+                  <span>
+                    {pathsUnlocked
+                      ? formatTimeAndClicks(row.elapsedMs, row.clickCount)
+                      : <span className="muted">—</span>}
+                  </span>
                   {pathsUnlocked && row.runId ? (
                     <details
                       className="path-disclosure"
@@ -144,7 +154,14 @@ export default function LeaderboardList({
                     {row.displayName ?? "Unknown"}
                     {isYou ? <span className="muted"> (you)</span> : null}
                   </span>
-                  <span>{formatTimeAndClicks(row.elapsedMs, row.clickCount)}</span>
+                  {/* Pre-finish spoiler mask (owner ask): same gate as the
+                      placements column above - a DNF row's time/clicks are
+                      no less of a spoiler. */}
+                  <span>
+                    {pathsUnlocked
+                      ? formatTimeAndClicks(row.elapsedMs, row.clickCount)
+                      : <span className="muted">—</span>}
+                  </span>
                 </li>
               );
             })}

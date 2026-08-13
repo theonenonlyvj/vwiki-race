@@ -3829,6 +3829,59 @@ h1 {
   .auth-mode-switch {
     grid-template-columns: 1fr;
   }
+
+  /* Owner ask (phone leaderboard readability): "on phone you can't see
+     usernames and formatting is clunky" on the 7d/30d/lifetime boards. Root
+     cause - `.trend-row-toggle`'s base 3-column grid (`2.4em minmax(0,1fr)
+     auto`) gives the score column (`trendBeatRateText · avg time · clicks
+     ▲` - long and incompressible) whatever width it needs, so the name
+     track (`minmax(0,1fr)`) is squeezed to whatever's left, collapsing
+     usernames on a narrow phone. Below this same phone breakpoint the
+     `.board-segment-control` snap/fade above already targets, restack each
+     ranked row to two lines instead: line 1 keeps rank+name at full width
+     (ellipsis now only a last resort - see `.trend-row-name`'s own base
+     rule - since it no longer has to share the row with the score text);
+     line 2 is the score string alone, spanning the full row (`grid-column:
+     1 / -1`) and indented past the rank gutter to match
+     `.board-trend-drilldown`'s own `padding-left: 2.4em` convention just
+     above it. Desktop (`@media (min-width: 880px)` below) is untouched -
+     this only overrides the mobile-default grid. `min-height: 44px` (base
+     rule) is preserved as a FLOOR, not a fixed height, so the now-taller
+     two-line button only grows past it. */
+  .trend-row-toggle {
+    grid-template-columns: 2.4em minmax(0, 1fr);
+    row-gap: 2px;
+  }
+
+  .trend-row-score {
+    grid-column: 1 / -1;
+    padding-left: 2.4em;
+    /* Muted/smaller second line, same intent as `.board-trend-drilldown`'s
+       own 0.8rem - a de-emphasized detail line under the name, not a
+       co-equal column. `font-variant-numeric: tabular-nums` (base rule)
+       still applies here unchanged. */
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  /* The unranked "Not yet ranked" runway and the Lifetime-only roster share
+     `.trend-row-toggle`'s exact collapse problem: their own base rule
+     (`minmax(0,1fr) auto`) gives the count/progress text (also long -
+     "Finish N more races to rank", "9 races · 7 finishes · 2 wins") whatever
+     width it needs, squeezing the name. Same two-line restack, minus the
+     rank gutter these rows never had in the first place (no indent to
+     match). */
+  .board-snippet.board-trend-unranked li,
+  .board-snippet.board-roster li {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 2px;
+  }
+
+  .board-snippet.board-trend-unranked li > span:last-child,
+  .board-snippet.board-roster li > span:last-child {
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
 }
 
 @media (max-width: 350px) {

@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import Home from "./Home";
@@ -251,5 +251,83 @@ describe("Home: RC-05 part B - heroBoard tri-state skeleton-hold (unblocked by R
 
     expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
     expect(screen.queryByText(/checking your status/i)).toBeNull();
+  });
+});
+
+/**
+ * Pre-finish spoiler mask (owner ask, 2026-08-13): "before I finish the
+ * race, just like I can't view the graph, I shouldn't be able to see how
+ * long or # clicks on the leaderboard - just rankings and usernames." The
+ * pre-play "Yesterday's results" card shows OTHER players' results before
+ * the viewer has necessarily played yesterday's still-open daily - it must
+ * mirror the exact same "has the viewer placed on THIS board" signal
+ * (`yesterdayPathsUnlocked`) already computed for that card's own graph
+ * button.
+ */
+describe("Home: pre-finish spoiler mask on 'Yesterday's results' (owner ask, 2026-08-13)", () => {
+  it("locked: the viewer has no placement on yesterday's board - shows names, masks time/clicks", async () => {
+    const apiClient = mockApiClient({
+      getChallengeBoard: vi.fn(async (challengeId: string) => {
+        if (challengeId === yesterdaysDaily.id) {
+          return {
+            challengeId,
+            placements: [
+              { accountId: "acc-other", displayName: "Ari", placement: 1, elapsedMs: 20_000, clickCount: 3 },
+            ],
+            dnfs: [],
+          };
+        }
+        return { challengeId, placements: [], dnfs: [] };
+      }),
+    });
+    renderHome({ apiClient, identityAccountId: "acc-1" });
+
+    expect(await screen.findByText("Ari")).toBeVisible();
+    expect(screen.queryByText("0:20 · 3 clk")).toBeNull();
+    const ariRow = screen.getByText("Ari").closest("li")!;
+    expect(within(ariRow).getByText("—")).toHaveClass("muted");
+  });
+
+  it("unlocked: the viewer already has a placement on yesterday's board - shows time/clicks normally", async () => {
+    const apiClient = mockApiClient({
+      getChallengeBoard: vi.fn(async (challengeId: string) => {
+        if (challengeId === yesterdaysDaily.id) {
+          return {
+            challengeId,
+            placements: [
+              { accountId: "acc-1", displayName: "Vijay", placement: 1, elapsedMs: 20_000, clickCount: 3 },
+              { accountId: "acc-other", displayName: "Ari", placement: 2, elapsedMs: 25_000, clickCount: 4 },
+            ],
+            dnfs: [],
+          };
+        }
+        return { challengeId, placements: [], dnfs: [] };
+      }),
+    });
+    renderHome({ apiClient, identityAccountId: "acc-1" });
+
+    expect(await screen.findByText("0:20 · 3 clk")).toBeVisible();
+    expect(screen.getByText("0:25 · 4 clk")).toBeVisible();
+  });
+
+  it("anonymous viewer (no identityAccountId): always locked - never has a placement to unlock with", async () => {
+    const apiClient = mockApiClient({
+      getChallengeBoard: vi.fn(async (challengeId: string) => {
+        if (challengeId === yesterdaysDaily.id) {
+          return {
+            challengeId,
+            placements: [
+              { accountId: "acc-other", displayName: "Ari", placement: 1, elapsedMs: 20_000, clickCount: 3 },
+            ],
+            dnfs: [],
+          };
+        }
+        return { challengeId, placements: [], dnfs: [] };
+      }),
+    });
+    renderHome({ apiClient, identityAccountId: null });
+
+    expect(await screen.findByText("Ari")).toBeVisible();
+    expect(screen.queryByText("0:20 · 3 clk")).toBeNull();
   });
 });

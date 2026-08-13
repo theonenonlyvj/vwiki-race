@@ -8432,13 +8432,23 @@ describe("Boards v1: Today/Yesterday daily views (Increment 3)", () => {
     const board = screen.getByRole("region", { name: "Stats" });
     const dnfSection = await within(board).findByRole("region", { name: "DNF" });
     expect(within(dnfSection).getByText("Vijay")).toBeVisible();
-    expect(within(dnfSection).getByText("0:08 · 2 clk")).toBeVisible();
     expect(within(dnfSection).getByText(/\(you\)/i)).toBeVisible();
     // FB-4 / invariant 5: a DNF alone never counts as "played" - the viewer
     // (Vijay) only has a DNF row here, no completed placement, so Boards'
     // path disclosure (added this package - see the FB-4 test below) stays
     // hidden the same as it always has for a never-played challenge.
     expect(within(board).queryByText(/view path/i)).toBeNull();
+    // Pre-finish spoiler mask (owner ask): the same "haven't played this
+    // board's challenge" gate above now also hides time/clicks, not just
+    // paths - Vijay's own DNF time (0:08 · 2 clk) stays masked until they've
+    // finished (or given up). The DNF row now carries two em dashes - the
+    // pre-existing DNF rank glyph (`.rank-dnf`) and the new masked-time
+    // placeholder (`.muted`, distinct from the rank one).
+    expect(within(dnfSection).queryByText("0:08 · 2 clk")).toBeNull();
+    const vijayRow = within(dnfSection).getByText("Vijay").closest("li")!;
+    const dashes = within(vijayRow).getAllByText("—");
+    expect(dashes).toHaveLength(2);
+    expect(dashes.some((el) => el.className === "muted")).toBe(true);
   });
 
   it("FB-4: once the viewer has finished today's daily, Boards discloses ANY placement's winning path (not just your own)", async () => {

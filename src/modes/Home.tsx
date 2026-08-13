@@ -473,6 +473,13 @@ export default function Home({
           status={yesterdayBoardStatus}
           title="Yesterday's results"
           rows={yesterdayBoard ? boardSnippetRowsFromBoard(yesterdayBoard, identityAccountId) : []}
+          // Pre-finish spoiler mask (owner ask): this card can render BEFORE
+          // the viewer has played yesterday's still-open daily (the
+          // pre-drop `yesterdayIsHero` case - see this file's own doc
+          // comment) - reuses the exact same "has the viewer placed on THIS
+          // board" signal already computed for the graph button just below,
+          // rather than a second derivation that could drift from it.
+          unlocked={yesterdayPathsUnlocked}
         >
           <button
             className="link-button"

@@ -539,6 +539,11 @@ export default function Boards({
   // FB-4 (invariant 5): "played" means finished THIS board's challenge -
   // same completed-placement-row test `showRaceCta` above already uses, so
   // the two can't independently drift on what counts as "played".
+  // Pre-finish spoiler mask (owner ask, extends FB-4): the name stays
+  // `pathsUnlocked` (unchanged definition/precedent), but it now ALSO gates
+  // every placement/DNF row's time·clicks column below, not just "View
+  // path" - "before I finish the race, I shouldn't be able to see how long
+  // or # clicks on the leaderboard, just rankings and usernames."
   const pathsUnlocked = Boolean(ownPlacement);
   // PKG-01: pre-drop, Today's badge mirrors Home's exact "Yesterday's
   // daily · <flavor>" prefix (never a bare flavor pill that reads as if
@@ -856,7 +861,17 @@ export default function Boards({
                         {row.displayName ?? "Unknown"}
                         {isYou ? <span className="muted"> (you)</span> : null}
                       </span>
-                      <span>{formatTimeAndClicks(row.elapsedMs, row.clickCount)}</span>
+                      {/* Pre-finish spoiler mask (owner ask): "before I
+                          finish the race... I shouldn't be able to see how
+                          long or # clicks on the leaderboard - just
+                          rankings and usernames" - the SAME `pathsUnlocked`
+                          gate that already covers the "View path"
+                          disclosure just below, extended to this column. */}
+                      <span>
+                        {pathsUnlocked
+                          ? formatTimeAndClicks(row.elapsedMs, row.clickCount)
+                          : <span className="muted">—</span>}
+                      </span>
                       {/* FB-4: same disclosure affordance as Challenge
                           Detail's LeaderboardList - a compact "View path"
                           link on the row (DT-1: renamed from "View winning
@@ -920,7 +935,14 @@ export default function Boards({
                         {row.displayName ?? "Unknown"}
                         {isYou ? <span className="muted"> (you)</span> : null}
                       </span>
-                      <span>{formatTimeAndClicks(row.elapsedMs, row.clickCount)}</span>
+                      {/* Pre-finish spoiler mask (owner ask): same gate as
+                          the placements column above - a DNF row's
+                          time/clicks are no less of a spoiler. */}
+                      <span>
+                        {pathsUnlocked
+                          ? formatTimeAndClicks(row.elapsedMs, row.clickCount)
+                          : <span className="muted">—</span>}
+                      </span>
                     </li>
                   );
                 })}
@@ -929,7 +951,9 @@ export default function Boards({
           ) : null}
 
           {!pathsUnlocked ? (
-            <p className="muted board-footnote">Paths hidden until you&apos;ve played.</p>
+            <p className="muted board-footnote">
+              Times, clicks, and paths hidden until you&apos;ve played.
+            </p>
           ) : (
             <ChallengePathGraphButton
               apiClient={apiClient}

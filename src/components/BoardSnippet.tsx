@@ -20,7 +20,22 @@ const WINDOW_OPTIONS = { topCount: 2, radius: 2, showAllAt: 7 } as const;
  *  just brought into the DOM (freshly MOUNTED, never rows that were already
  *  visible), so the plain top-N/window rows keep rendering with zero
  *  entrance treatment, exactly as before this feature. */
-function BoardSnippetRowItem({ row, revealed }: { row: BoardSnippetRow; revealed: boolean }) {
+function BoardSnippetRowItem({
+  row,
+  revealed,
+  unlocked,
+}: {
+  row: BoardSnippetRow;
+  revealed: boolean;
+  // Pre-finish spoiler mask (owner ask): "before I finish the race, I
+  // shouldn't be able to see how long or # clicks on the leaderboard - just
+  // rankings and usernames" - the same invariant-5 `pathsUnlocked` gate
+  // Boards/ChallengeDetail already apply to path disclosure, extended here to
+  // the time/clicks column. `true` by default so RaceResults' and the
+  // finished-state "Today's board" caller (both already past the gate by
+  // construction - see BoardSnippet's own doc comment) stay unaffected.
+  unlocked: boolean;
+}) {
   return (
     <li
       className={[row.isYou ? "is-you" : null, revealed ? "surface-entrance" : null]
@@ -39,7 +54,9 @@ function BoardSnippetRowItem({ row, revealed }: { row: BoardSnippetRow; revealed
         {row.displayName}
         {row.isYou ? <span className="muted"> (you)</span> : null}
       </span>
-      <span>{formatTimeAndClicks(row.elapsedMs, row.clickCount)}</span>
+      <span>
+        {unlocked ? formatTimeAndClicks(row.elapsedMs, row.clickCount) : <span className="muted">—</span>}
+      </span>
     </li>
   );
 }
@@ -69,6 +86,7 @@ export default function BoardSnippet({
   maxRows = 3,
   onRetry,
   status = "ready",
+  unlocked = true,
 }: {
   title: string;
   rows: BoardSnippetRow[];
@@ -93,6 +111,14 @@ export default function BoardSnippet({
   // Only ever consulted from the "error"/"loading" branches below.
   onRetry?: () => void;
   status?: "loading" | "error" | "ready";
+  // Pre-finish spoiler mask (owner ask, extends invariant 5's existing
+  // `pathsUnlocked` gate to time/clicks - see `BoardSnippetRowItem`'s own doc
+  // comment): defaults to `true` so every pre-existing caller (RaceResults,
+  // Home's finished-state "Today's board" card - both only ever render once
+  // the viewer's own run already qualifies) is unaffected. Home's pre-play
+  // "Yesterday's results" card is the one caller that passes `false` for a
+  // viewer who hasn't finished THAT board's challenge yet.
+  unlocked?: boolean;
 }) {
   // BD-1: this hook MUST live above every early return below, not inside a
   // delegate child component gated on `status`/`rows.length` - a prior
@@ -197,7 +223,7 @@ export default function BoardSnippet({
         {segments.map((segment, segmentIndex) => {
           if (segment.type === "rows") {
             return segment.rows.map((row) => (
-              <BoardSnippetRowItem key={row.key} revealed={false} row={row} />
+              <BoardSnippetRowItem key={row.key} revealed={false} row={row} unlocked={unlocked} />
             ));
           }
           // `segment.type === "gap"` from here down.
@@ -220,7 +246,7 @@ export default function BoardSnippet({
             );
           }
           return segment.rows.map((row) => (
-            <BoardSnippetRowItem key={row.key} revealed row={row} />
+            <BoardSnippetRowItem key={row.key} revealed row={row} unlocked={unlocked} />
           ));
         })}
       </ol>

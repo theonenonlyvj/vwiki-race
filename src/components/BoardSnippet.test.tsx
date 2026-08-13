@@ -274,6 +274,58 @@ describe("BoardSnippet: emptyStateNotice (zero-finisher escape hatch)", () => {
   });
 });
 
+/**
+ * Pre-finish spoiler mask (owner ask, 2026-08-13): "before I finish the
+ * race, just like I can't view the graph, I shouldn't be able to see how
+ * long or # clicks on the leaderboard - just rankings and usernames."
+ * `unlocked` defaults to `true` (every pre-existing caller - RaceResults,
+ * Home's finished-state "Today's board" card - keeps rendering unchanged);
+ * Home's pre-play "Yesterday's results" card is the one caller passing
+ * `false` for a viewer who hasn't finished that board's challenge yet.
+ */
+describe("BoardSnippet: pre-finish spoiler mask (unlocked)", () => {
+  it("defaults unlocked to true - a pre-existing caller that never passes it renders time/clicks unchanged", () => {
+    render(<BoardSnippet title="Today's board" rows={[row()]} />);
+    expect(screen.getByText("0:42 · 6 clk")).toBeVisible();
+  });
+
+  it("unlocked=false: shows rank + name only - no time/clicks - for every row", () => {
+    render(
+      <BoardSnippet
+        title="Yesterday's results"
+        rows={[row(), row({ key: "row-2", rankLabel: "DNF", rank: null, displayName: "Loser" })]}
+        unlocked={false}
+      />,
+    );
+
+    expect(screen.getByText("FranTheGreat")).toBeVisible();
+    expect(screen.getByText("Loser")).toBeVisible();
+    expect(screen.queryByText("0:42 · 6 clk")).toBeNull();
+
+    const placementRow = screen.getByText("FranTheGreat").closest("li")!;
+    expect(within(placementRow).getByText("—")).toHaveClass("muted");
+    // The DNF row's own rank glyph reads "DNF" (a literal word, not a
+    // dash - see `BoardSnippetRowItem`), so its masked time column is the
+    // row's only em dash.
+    const dnfRow = screen.getByText("Loser").closest("li")!;
+    expect(within(dnfRow).getByText("—")).toHaveClass("muted");
+  });
+
+  it("unlocked=true (explicit): shows time/clicks normally", () => {
+    render(<BoardSnippet title="Today's board" rows={[row()]} unlocked />);
+    expect(screen.getByText("0:42 · 6 clk")).toBeVisible();
+  });
+
+  it("the masked placeholder never applies to the isYou highlight/'(you)' suffix - only the time column", () => {
+    render(
+      <BoardSnippet title="Yesterday's results" rows={[row({ isYou: true })]} unlocked={false} />,
+    );
+    const yourRow = screen.getByText("FranTheGreat").closest("li")!;
+    expect(yourRow).toHaveClass("is-you");
+    expect(within(yourRow).getByText("(you)")).toBeVisible();
+  });
+});
+
 describe("BoardSnippet: RC-06 (one honest loading/error system) - status tri-state", () => {
   it("defaults status to 'ready' - a pre-existing caller (e.g. Results) that never passes it is unaffected", () => {
     render(<BoardSnippet title="Today's board" rows={rankedRows(2, null)} />);

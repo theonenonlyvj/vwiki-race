@@ -194,6 +194,65 @@ describe("ChallengeDetail: RC-06 (one honest loading/error system)", () => {
   });
 });
 
+function leaderboardRow(overrides: Partial<RankedLeaderboardRow> = {}): RankedLeaderboardRow {
+  return {
+    rank: 1,
+    runId: "run-1",
+    challengeId: challenge.id,
+    accountId: "acc-1",
+    displayName: "Vijay",
+    status: "completed",
+    isRepeatRun: false,
+    startedAt: "2026-07-14T01:00:00.000Z",
+    elapsedMs: 42_000,
+    clickCount: 6,
+    completedAt: "2026-07-14T01:00:42.000Z",
+    protocolVersion: 2,
+    ...overrides,
+  };
+}
+
+/**
+ * Pre-finish spoiler mask (owner ask, 2026-08-13): "before I finish the
+ * race, just like I can't view the graph, I shouldn't be able to see how
+ * long or # clicks on the leaderboard - just rankings and usernames."
+ * Extends the SAME `pathsUnlocked` gate (invariant 5) that already controls
+ * "View path"/"View graph" to the time/clicks column - both the main
+ * Leaderboard panel (via `LeaderboardList`, covered directly in its own
+ * test file) and "Your history" below, which this file owns directly.
+ */
+describe("ChallengeDetail: pre-finish spoiler mask (time/clicks)", () => {
+  it("locked (no completed row, not peeked): 'Your history' shows rank only - no time/clicks - for a DNF-only account", async () => {
+    renderDetail({
+      identityAccountId: "acc-1",
+      leaderboard: [
+        leaderboardRow({ runId: "run-1", status: "abandoned", elapsedMs: 8_000, clickCount: 2 }),
+      ],
+    });
+
+    expect(await screen.findByText("DNF")).toBeVisible();
+    expect(screen.queryByText("0:08 · 2 clk")).toBeNull();
+    const historyPanel = screen.getByRole("region", { name: "Your history" });
+    expect(within(historyPanel).getByText("—")).toHaveClass("muted");
+    expect(screen.getByText(/times, clicks, and paths hidden until you've played \(or given up\)/i))
+      .toBeVisible();
+  });
+
+  it("unlocked (a completed row exists): 'Your history' shows time/clicks normally", async () => {
+    renderDetail({
+      identityAccountId: "acc-1",
+      leaderboard: [
+        leaderboardRow({ runId: "run-1", status: "completed", elapsedMs: 42_000, clickCount: 6 }),
+        leaderboardRow({ runId: "run-2", status: "abandoned", elapsedMs: 8_000, clickCount: 2 }),
+      ],
+    });
+
+    expect(await screen.findByText("0:42 · 6 clk")).toBeVisible();
+    expect(screen.getByText("0:08 · 2 clk")).toBeVisible();
+    expect(screen.queryByText(/hidden until you've played/i)).toBeNull();
+  });
+});
+
 describe("\"I gave up\" affordance + solution view (owner spec, 2026-08-02)", () => {
   it("renders nothing when signed out - the affordance requires a real identity", () => {
     renderDetail({ identityToken: null, identityAccountId: null });
