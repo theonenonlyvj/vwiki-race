@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 /**
  * Owner ask (phone leaderboard readability, 2026-08-13): "on phone you
  * can't see usernames and formatting is clunky" on the 7d/30d/lifetime
- * boards - `.trend-row-toggle`'s mobile-default grid (`2.4em minmax(0,1fr)
+ * boards - `.trend-row-toggle`'s mobile-default grid (`1.9em minmax(0,1fr)
  * auto`) gives the long, incompressible score column whatever width it
  * needs, collapsing the name track. jsdom can't evaluate real `@media`
  * layout (see styles.dialogFamily.test.ts's own doc comment on why this is
@@ -55,19 +55,29 @@ describe("Boards trend rows: phone restack (styles.css)", () => {
   const phoneBlock = mediaBlockBody("(max-width: 640px)");
   const desktopBlock = mediaBlockBody("(min-width: 880px)");
 
-  it("restacks .trend-row-toggle to a 2-column (rank/name) grid inside the phone breakpoint", () => {
+  /**
+   * The 2026-08-15 per-window redesign changed WHICH part drops to the
+   * second line, but not the bug being guarded: something on this row is
+   * long and incompressible, and if it shares line 1 with the name then
+   * the name track (`minmax(0,1fr)`) collapses and usernames disappear on
+   * a phone. It used to be the whole score column; it is now just the
+   * muted detail, because the ranked-on figure is short ("64", "86%") and
+   * burying it on line 2 hid the one number the board sorts by.
+   */
+  it("keeps rank, name and the ranked-on figure on line 1 inside the phone breakpoint", () => {
     const rules = rulesIn(phoneBlock, ".trend-row-toggle");
     expect(rules.length).toBeGreaterThan(0);
-    expect(rules.some((rule) => /grid-template-columns:\s*2\.4em minmax\(0,\s*1fr\)\s*;/.test(rule.body)))
+    expect(rules.some((rule) => /grid-template-columns:\s*1\.9em minmax\(0,\s*1fr\)\s*max-content/.test(rule.body)))
       .toBe(true);
+    const score = rulesIn(phoneBlock, ".trend-row-score");
+    expect(score.some((rule) => /grid-row:\s*1/.test(rule.body))).toBe(true);
   });
 
-  it("makes .trend-row-score span the full row and indents it to match .board-trend-drilldown's 2.4em convention", () => {
-    const rules = rulesIn(phoneBlock, ".trend-row-score");
+  it("drops the long detail - not the figure - to its own second line", () => {
+    const rules = rulesIn(phoneBlock, ".trend-detail");
     expect(rules.length).toBeGreaterThan(0);
-    const rule = rules[0]!;
-    expect(rule.body).toMatch(/grid-column:\s*1\s*\/\s*-1/);
-    expect(rule.body).toMatch(/padding-left:\s*2\.4em/);
+    expect(rules.some((rule) => /grid-row:\s*2/.test(rule.body))).toBe(true);
+    expect(rules.some((rule) => /grid-column:\s*2\s*\/\s*-1/.test(rule.body))).toBe(true);
   });
 
   it("restacks the unranked and roster rows to a single column too, sharing the same collapse fix", () => {
@@ -84,6 +94,7 @@ describe("Boards trend rows: phone restack (styles.css)", () => {
     for (const className of [
       ".trend-row-toggle",
       ".trend-row-score",
+      ".trend-detail",
       ".board-snippet.board-trend-unranked li",
       ".board-snippet.board-roster li",
     ]) {
@@ -99,7 +110,11 @@ describe("Boards trend rows: phone restack (styles.css)", () => {
     expect(desktopRules.length).toBeGreaterThan(0);
     // The pre-existing desktop rule packs rank/name/score adjacent
     // (max-content columns), not the phone restack's 2-column grid.
-    expect(desktopRules.some((rule) => /grid-template-columns:\s*2\.4em minmax\(0,\s*max-content\)\s*max-content/.test(rule.body)))
+    // Four tracks now (rank / name / detail / figure), and crucially the
+    // NAME takes the free space rather than `max-content` - a rendered
+    // check showed content-hugging rows leaving the ranked-on figures in a
+    // ragged column down the middle of the panel with nothing to scan.
+    expect(desktopRules.some((rule) => /grid-template-columns:\s*1\.9em minmax\(0,\s*1fr\)\s*max-content max-content/.test(rule.body)))
       .toBe(true);
   });
 });

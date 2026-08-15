@@ -114,20 +114,85 @@ export function beatRateForPlacement(placement: number, fieldSize: number): numb
 }
 
 /**
- * Once an account has at least this many graded races in a window, its
- * single worst one is dropped before averaging (ranking council spec:
- * "exactly-4-graded triggers drop-worst"). Below this count, every graded
- * race counts toward the mean.
+ * How many racers this account finished ahead of in one race - the same
+ * comparison `beatRateForPlacement` expresses as a share, kept as a raw
+ * count. A solo finish beats nobody (0). Used by the 30-day board, where
+ * the count is both more concrete than a share ("you beat 64 racers this
+ * month", not "16.3 points") and self-weighting: a well-attended day is
+ * worth more than a two-hander, which is correct for a board about turning
+ * up.
  */
-export const BEAT_RATE_DROP_WORST_THRESHOLD = 4;
+export function racersBeatenForPlacement(placement: number, fieldSize: number): number {
+  return Math.max(0, fieldSize - placement);
+}
+
+/**
+ * The three windows answer three different questions (owner framing,
+ * 2026-08-15: "lifetime is asking who's GOAT, 30 days: who's showing up,
+ * 7: who's hot?"), so each ranks by a different aggregation of the SAME
+ * per-race primitive rather than all three running one metric - which is
+ * what made them near-redundant before.
+ */
+export type TrendWindowMetric = "hot" | "showing-up" | "goat";
+
+export function trendMetricForWindow(windowDays: 7 | 30 | null): TrendWindowMetric {
+  if (windowDays === 7) return "hot";
+  if (windowDays === 30) return "showing-up";
+  return "goat";
+}
+
+/**
+ * Races needed to appear on each board. Deliberately per-metric rather than
+ * one shared floor, because each metric earns its own:
+ *  - `hot` - a RATE is meaningless from one race, so a couple are needed.
+ *  - `showing-up` - none. The metric IS participation; one race is simply a
+ *    small count that sorts itself to the bottom. A board about turning up
+ *    that hides people who turned up would be self-defeating.
+ *  - `goat` - a career rate needs a body of work, the same way every
+ *    sporting GOAT list carries a minimum-appearances rule. Sized against
+ *    production (2026-08-15): a floor of 5 leaves 10 of 27 lifetime players
+ *    ranked - enough to be a board, tight enough to mean something - where
+ *    a floor of 10 would leave 5. Flat, not scaled to catalogue size: the
+ *    owner already ruled against reality-scaled guards on 2026-07-25.
+ */
+export function trendFloorForMetric(metric: TrendWindowMetric): number {
+  if (metric === "showing-up") return 0;
+  if (metric === "goat") return GOAT_INCLUSION_FLOOR;
+  return DAILY_TREND_INCLUSION_FLOOR;
+}
+
+export const GOAT_INCLUSION_FLOOR = 5;
+
+/**
+ * Lifetime shrinkage strength, in races. A career rate is scored as though
+ * it began with this many average (0.5) races already on the record, so a
+ * short record is pulled toward the middle and a long one is barely moved:
+ * 5 races at 85% reads 62%, while 33 races at 54% reads 53%. Without it a
+ * single lucky race shows as 100% and outranks a 33-race body of work -
+ * measured on production before this was added.
+ *
+ * Note the floor above and this constant do DIFFERENT jobs and neither
+ * replaces the other: the floor decides who is eligible at all, shrinkage
+ * decides how much to believe the eligible. Shrinkage alone left one-race
+ * accounts in the lifetime top ten.
+ */
+export const GOAT_PRIOR_RACES = 10;
+
+/** The population mean of a share-of-field-beaten is exactly 0.5 by
+ * construction - it is zero-sum across a field - so that is the honest
+ * prior to regress a short record toward. Verified against production:
+ * the race-weighted mean came out at 0.500. */
+const BEAT_RATE_PRIOR = 0.5;
 
 export interface BeatRateAggregate {
-  /** Mean of the counted (post-drop, if applicable) graded beats, 0-1. */
+  /** Mean share of field beaten across every graded race, 0-1. */
   beatRate: number;
-  /** Total graded races in-window, BEFORE any drop - what the row displays. */
+  /** Graded races in-window - what the row displays. */
   gradedCount: number;
-  /** Whether the single worst graded race was excluded from the mean. */
-  worstDropped: boolean;
+  /** Total racers finished ahead of, summed across the window. */
+  racersBeaten: number;
+  /** The window's ranking key - see `scoreForMetric`. */
+  score: number;
 }
 
 /**
@@ -147,26 +212,53 @@ export interface BeatRateAggregate {
  * one instance - which one is arbitrary and doesn't change the resulting
  * mean, since they're equal values.
  */
-export function aggregateBeatRate(beats: number[]): BeatRateAggregate | null {
+export function aggregateBeatRate(
+  beats: number[],
+  racersBeatenPerRace: number[],
+  metric: TrendWindowMetric,
+): BeatRateAggregate | null {
   if (beats.length === 0) return null;
   const gradedCount = beats.length;
-  let counted = beats;
-  let worstDropped = false;
-  if (gradedCount >= BEAT_RATE_DROP_WORST_THRESHOLD) {
-    const worstIndex = beats.reduce(
-      (worst, value, index) => (value < beats[worst] ? index : worst),
-      0,
-    );
-    counted = beats.slice(0, worstIndex).concat(beats.slice(worstIndex + 1));
-    worstDropped = true;
-  }
-  const sum = counted.reduce((total, value) => total + value, 0);
+  const sum = beats.reduce((total, value) => total + value, 0);
   // Rounded to 4 decimal places (hundredths of a percentage point) - plenty
   // of precision for the client's whole-percentage display
   // (`Math.round(beatRate * 100)`) while keeping the wire payload free of
   // long floating-point tails like 0.6666666666666666.
-  const beatRate = Math.round((sum / counted.length) * 10000) / 10000;
-  return { beatRate, gradedCount, worstDropped };
+  const beatRate = Math.round((sum / gradedCount) * 10000) / 10000;
+  const racersBeaten = racersBeatenPerRace.reduce((total, value) => total + value, 0);
+  return { beatRate, gradedCount, racersBeaten, score: scoreForMetric(metric, beatRate, gradedCount, racersBeaten) };
+}
+
+/**
+ * The window's ranking key. One primitive, three readings:
+ *  - `hot` (7d) - the plain mean. A short window is exactly where a hot
+ *    streak lives, so small samples are the POINT, not noise to correct.
+ *  - `showing-up` (30d) - total racers beaten. You cannot accumulate
+ *    without turning up, and it still rewards doing well when you do.
+ *  - `goat` (lifetime) - the mean regressed toward 0.5 by
+ *    `GOAT_PRIOR_RACES`, so a career rate has to be earned over volume.
+ *
+ * There is deliberately NO drop-worst anywhere (removed 2026-08-15). It was
+ * measured against production as regressive - worth ~7 points to a 4-race
+ * player and 1.8 to a 30-race one, since dropping 1 of 4 forgives 25% of a
+ * record and 1 of 30 forgives 3% - while changing only 4 of 16 board
+ * positions, every one of them by a single place. It also contradicted the
+ * 30-day metric outright: deleting a race you turned up for, on the board
+ * whose whole premise is turning up.
+ */
+export function scoreForMetric(
+  metric: TrendWindowMetric,
+  beatRate: number,
+  gradedCount: number,
+  racersBeaten: number,
+): number {
+  if (metric === "showing-up") return racersBeaten;
+  if (metric === "goat") {
+    const shrunk = (gradedCount * beatRate + GOAT_PRIOR_RACES * BEAT_RATE_PRIOR)
+      / (gradedCount + GOAT_PRIOR_RACES);
+    return Math.round(shrunk * 10000) / 10000;
+  }
+  return beatRate;
 }
 
 /**

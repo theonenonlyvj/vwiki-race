@@ -428,11 +428,19 @@ export interface AccountStats {
  * domain/dailyTrends.ts), averaged across the account's GRADED completions
  * in the window (a solo, field-of-one completion still counts toward
  * `playedCount`/the inclusion floor, but isn't graded - see
- * `aggregateBeatRate`). `gradedCount` is the graded-race count BEFORE any
- * drop; once it reaches `BEAT_RATE_DROP_WORST_THRESHOLD` (4), the single
- * worst graded race is excluded from the `beatRate` mean and `worstDropped`
- * is `true` - recomputed fresh per window (stateless), so a dropped worst
- * race never "resurrects" as the window shifts. An account needs >= 1 graded
+ * `aggregateBeatRate`).
+ *
+ * Per-window metrics (owner framing, 2026-08-15: "lifetime is asking who's
+ * GOAT, 30 days: who's showing up, 7: who's hot?"). All three windows used
+ * to run the SAME metric, which made them near-redundant; each now ranks by
+ * a different aggregation of the same per-race primitive, carried on the
+ * wire as `score` (see `scoreForMetric`): 7d the plain mean, 30d
+ * `racersBeaten`, lifetime the mean regressed toward 0.5 by
+ * `GOAT_PRIOR_RACES`. Drop-worst was REMOVED in the same pass - measured
+ * against production as regressive (~7 points to a 4-race account, 1.8 to a
+ * 30-race one) while moving only 4 of 16 positions, each by one place.
+ *
+ * An account needs >= 1 graded
  * race to rank at all, even once it clears the inclusion floor on
  * completions alone (an all-solo account stays unranked - see
  * `trendUnrankedProgressCopy`). `avgPlacement` stays on the wire for one
@@ -451,7 +459,19 @@ export interface DailyTrendRankedEntry {
   avgPlacement: number;
   beatRate: number;
   gradedCount: number;
-  worstDropped: boolean;
+  /**
+   * Total racers this account finished ahead of in the window - the 30-day
+   * board's ranking key, and the number it displays ("beat 64 racers").
+   */
+  racersBeaten: number;
+  /**
+   * The window's ranking key, already computed server-side per
+   * `scoreForMetric`. The client must NOT re-derive an ordering from
+   * `beatRate`: the three windows rank by three different aggregations, so
+   * sorting on the displayed rate would silently mis-order 30d and
+   * lifetime.
+   */
+  score: number;
   playedCount: number;
   avgElapsedMs: number;
   avgClicks: number;

@@ -852,7 +852,13 @@ function isDailyTrendRankedEntry(value: unknown): value is BoardsTrendsResponse[
     // rank" ruling - see `aggregateBeatRate`, domain/dailyTrends.ts).
     hasNumber(value, "beatRate") &&
     hasNumber(value, "gradedCount") &&
-    typeof value.worstDropped === "boolean" &&
+    // Per-window metrics (2026-08-15): `score` is the window's ranking key,
+    // computed server-side. Required, because the client must never
+    // re-derive an ordering from `beatRate` - 30d ranks on `racersBeaten`
+    // and lifetime on a shrunk mean, so sorting by the displayed rate would
+    // silently mis-order two of the three boards.
+    hasNumber(value, "racersBeaten") &&
+    hasNumber(value, "score") &&
     hasNumber(value, "playedCount") &&
     // Owner ruling, 2026-07-25 ("metric-independent ranking changes"): the
     // info columns alongside the placement - this account's own average

@@ -1383,7 +1383,11 @@ h1 {
 .trend-row-toggle {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: 2.4em minmax(0, 1fr) auto;
+  /* Rank track tightened 2.4em -> 1.9em: the rank lost its trailing "."
+     in the 2026-08-15 redesign and is right-aligned now, so the wider
+     track was pure dead gutter in front of every name. */
+  grid-template-columns: 1.9em minmax(0, 1fr) auto;
+  position: relative;
   gap: 8px;
   align-items: baseline;
   width: 100%;
@@ -1394,7 +1398,7 @@ h1 {
      baseline as before); `min-height` is the floor for the rare case the
      padded content is still short of it. */
   min-height: 44px;
-  padding: 10px 0;
+  padding: 6px 0 9px;
   background: transparent;
   border: none;
   color: inherit;
@@ -1431,6 +1435,65 @@ h1 {
    width as rows re-render. */
 .trend-row-score {
   font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.trend-headline {
+  color: var(--text);
+  font-size: 1.02rem;
+  /* FB-8/NV-1: a stat's numeric value, same 600 ceiling as You's groups. */
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.trend-unit {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+
+.trend-detail {
+  color: var(--muted);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+/* The ranking bar, proportional to the leader - the same encoding You's
+   page lists use, so the two screens read as one system. A 3px baseline
+   rule rather than a filled row: at row height a tint reads as a table
+   highlight competing with the names, which is the exact mistake the
+   profile list made and had corrected on a rendered check the same day.
+   z-index 0 keeps it behind the row's static children; a negative index
+   would drop it behind the panel and vanish. */
+.trend-row-toggle::before {
+  content: "";
+  position: absolute;
+  inset: auto auto 0 0;
+  z-index: 0;
+  height: 3px;
+  width: var(--fill, 0%);
+  border-radius: 0 2px 2px 0;
+  background: rgba(24, 227, 207, 0.32);
+  pointer-events: none;
+}
+
+.trend-row-toggle > * {
+  position: relative;
+  z-index: 1;
+}
+
+.trend-row-toggle .rank {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The leader's own bar is the 100% reference, so give the top row a little
+   more presence than "same colour, full width" would. */
+.board-snippet ol li:first-child .trend-row-toggle::before {
+  background: rgba(24, 227, 207, 0.5);
 }
 
 /* PKG-10 follow-on: this is the ranked `<li>`'s second child once expanded
@@ -1446,7 +1509,7 @@ h1 {
   grid-column: 1 / -1;
   gap: 4px;
   margin: 8px 0 0;
-  padding-left: 2.4em;
+  padding-left: 1.9em;
   font-size: 0.8rem;
 }
 
@@ -2479,6 +2542,13 @@ h1 {
 .board-snippet ol {
   display: grid;
   gap: 6px;
+}
+
+/* A little more air than the placement lists get: each ranking bar sits at
+   its row's baseline, so too tight a gap leaves it equidistant between its
+   own row and the next one's name and its ownership reads ambiguous. */
+.board-trend-list {
+  gap: 12px;
 }
 
 /* DT-1 (owner feedback, "ROWS AS A REAL GRID"): a 4th fixed track added for
@@ -4115,19 +4185,43 @@ h1 {
      rule) is preserved as a FLOOR, not a fixed height, so the now-taller
      two-line button only grows past it. */
   .trend-row-toggle {
-    grid-template-columns: 2.4em minmax(0, 1fr);
+    grid-template-columns: 1.9em minmax(0, 1fr) max-content;
     row-gap: 2px;
   }
 
+  /* Phone: rank + name + the ranked-on figure stay on line 1; only the
+     muted detail drops beneath, indented past the rank gutter. Placed
+     explicitly rather than by source order - the detail sits before the
+     score in the DOM (so a screen reader hears the context first), and
+     auto-placement alone pushed the ranked-on figure down to a third
+     line, burying the one number the board sorts by. */
+  .trend-row-toggle .rank {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .trend-row-name {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
   .trend-row-score {
-    grid-column: 1 / -1;
-    padding-left: 2.4em;
-    /* Muted/smaller second line, same intent as `.board-trend-drilldown`'s
-       own 0.8rem - a de-emphasized detail line under the name, not a
-       co-equal column. `font-variant-numeric: tabular-nums` (base rule)
-       still applies here unchanged. */
-    color: var(--muted);
-    font-size: 0.78rem;
+    grid-row: 1;
+    grid-column: 3;
+  }
+
+  .trend-detail {
+    grid-row: 2;
+    grid-column: 2 / -1;
+  }
+
+  /* The DETAIL is what drops to a second muted line on a phone now - the
+     score itself stays a first-line column (see the placement rules just
+     above). This rule used to do that job for the whole score column,
+     back when the row was one long sentence. */
+  .trend-detail {
+    padding-left: 0;
+    font-size: 0.76rem;
   }
 
   /* The unranked "Not yet ranked" runway and the Lifetime-only roster share
@@ -4231,15 +4325,31 @@ h1 {
      same row - so "View path" rendered squeezed into a track barely wider
      than the rank glyph and wrapped mid-word. */
   .boards-mode .board-snippet li {
-    grid-template-columns: 2.4em minmax(0, max-content) max-content auto;
+    grid-template-columns: 1.9em minmax(0, max-content) max-content auto;
     justify-content: start;
     column-gap: 16px;
   }
 
+  /* The trend rows deliberately do NOT follow `.board-snippet li`'s
+     content-hugging pack above. A rendered check (2026-08-15) showed why:
+     with `max-content` on the name track every row ends at its own width,
+     so the ranked-on figures form a ragged edge down the middle of the
+     panel and there is nothing to scan. The name track takes the free
+     space instead, which parks the figures on one right-hand edge and
+     lets the ranking bar run the full row. */
   .trend-row-toggle {
-    grid-template-columns: 2.4em minmax(0, max-content) max-content;
-    justify-content: start;
+    grid-template-columns: 1.9em minmax(0, 1fr) max-content max-content;
     column-gap: 16px;
+  }
+
+  /* ...and the row's own `li` has to stop hugging its content, or the
+     toggle above can never be wider than the tracks its parent allows.
+     `.boards-mode .board-snippet li`'s content-pack is right for the
+     Today/Yesterday placement rows and wrong for a ranked trend list, so
+     the trend list opts out rather than that rule changing for everyone. */
+  .board-trend-list > li {
+    display: block;
+    width: 100%;
   }
 
   .board-snippet.board-trend-unranked li,

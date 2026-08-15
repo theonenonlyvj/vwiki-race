@@ -8675,7 +8675,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
           window: "7",
           guard: 3,
           ranked: [
-            { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.75, gradedCount: 3, worstDropped: false, playedCount: 3, avgElapsedMs: 277_000, avgClicks: 9.3 },
+            { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.75, gradedCount: 3, racersBeaten: 4, score: 0.75, playedCount: 3, avgElapsedMs: 277_000, avgClicks: 9.3 },
           ],
           unranked: [
             { accountId: "acc-2", displayName: "Ari", playedCount: 1, gradedCount: 0 },
@@ -8690,11 +8690,18 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     const board = screen.getByRole("region", { name: "Stats" });
     await user.click(within(board).getByRole("tab", { name: "7d" }));
 
-    expect(await within(board).findByText(/rolling 7 days · ranked by the share of racers you.ve finished ahead of/i)).toBeVisible();
+    expect(await within(board).findByText(/who.s hot — the share of racers you finished ahead of/i)).toBeVisible();
     expect(within(board).getByText(/finish 3 races to rank/i)).toBeVisible();
-    expect(within(board).getByText("1.")).toBeVisible();
+    // Rank lost its trailing "." in the 2026-08-15 redesign (right-aligned
+    // in its own gutter, so the period was noise).
+    expect(within(board).getByText("1")).toBeVisible();
     expect(within(board).getByText(/vijay/i)).toBeVisible();
-    expect(within(board).getByText(/beat 75% of racers · 3 races \(3 graded\) · 4:37 · 9\.3 clk/)).toBeVisible();
+    // The hot board leads with the bare percentage - the subheader already
+    // says it is the share of racers beaten, and repeating that on every
+    // row was noise. The detail line carries the context.
+    expect(within(board).getByRole("button", { name: /vijay/i })).toHaveTextContent(
+      /3 races · 4:37 · 9\.3 clk75%/,
+    );
     expect(within(board).getByText(/\(you\)/i)).toBeVisible();
 
     const unrankedSection = within(board).getByRole("region", { name: "Not yet ranked" });
@@ -8720,9 +8727,14 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     const board = screen.getByRole("region", { name: "Stats" });
     await user.click(within(board).getByRole("tab", { name: "30d" }));
 
-    expect(await within(board).findByText(/rolling 30 days · ranked by the share of racers you.ve finished ahead of/i)).toBeVisible();
-    expect(within(board).getByText(/finish 10 races to rank/i)).toBeVisible();
-    expect(within(board).getByText(/finish 6 more races to rank/i)).toBeVisible();
+    expect(await within(board).findByText(/who.s showing up — every racer you finished ahead of/i)).toBeVisible();
+    // The 30d board has NO floor - the metric IS participation, so a race
+    // quota would be a number it doesn't enforce. The guard copy is
+    // deliberately absent here, and an unranked account is told the one
+    // thing actually still missing: a head-to-head result.
+    expect(within(board).queryByText(/finish 10 races to rank/i)).toBeNull();
+    expect(within(board).queryByText(/finish 6 more races to rank/i)).toBeNull();
+    expect(within(board).getByText(/race someone head-to-head to rank/i)).toBeVisible();
   });
 
   it("expands the viewer's own ranked row into their last 3 dailies as placement/DNF + time·clicks (invariant 1)", async () => {
@@ -8735,7 +8747,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
         "7": {
           window: "7",
           guard: 3,
-          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 1, gradedCount: 3, worstDropped: false, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1 }],
+          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 1, gradedCount: 3, racersBeaten: 6, score: 1.0, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1 }],
           unranked: [],
         },
       },
@@ -8759,7 +8771,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     await user.click(await screen.findByRole("button", { name: "Stats" }));
     const board = screen.getByRole("region", { name: "Stats" });
     await user.click(within(board).getByRole("tab", { name: "7d" }));
-    await user.click(await within(board).findByRole("button", { name: /vijay.*beat 100% of racers/i }));
+    await user.click(await within(board).findByRole("button", { name: /vijay.*100%/i }));
 
     expect(await within(board).findByText("2026-07-18")).toBeVisible();
     expect(within(board).getByText(/#1 · 0:05 · 2 clk/)).toBeVisible();
@@ -8777,11 +8789,11 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
           guard: 3,
           ranked: [
             // Lower avgPlacement than prevAvgPlacement -> improved -> ▲.
-            { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.8, gradedCount: 3, worstDropped: false, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1, prevAvgPlacement: 2.1 },
+            { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.8, gradedCount: 3, racersBeaten: 5, score: 0.8, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1, prevAvgPlacement: 2.1 },
             // Higher avgPlacement than prevAvgPlacement -> declined -> ▼.
-            { accountId: "acc-2", displayName: "Ari", avgPlacement: 3.0, beatRate: 0.4, gradedCount: 4, worstDropped: true, playedCount: 4, avgElapsedMs: 6_000, avgClicks: 2, prevAvgPlacement: 1.5 },
+            { accountId: "acc-2", displayName: "Ari", avgPlacement: 3.0, beatRate: 0.4, gradedCount: 4, racersBeaten: 3, score: 0.4, playedCount: 4, avgElapsedMs: 6_000, avgClicks: 2, prevAvgPlacement: 1.5 },
             // No previous window standing at all -> –.
-            { accountId: "acc-3", displayName: "Sam", avgPlacement: 2.0, beatRate: 0.6, gradedCount: 3, worstDropped: false, playedCount: 3, avgElapsedMs: 7_000, avgClicks: 3, prevAvgPlacement: null },
+            { accountId: "acc-3", displayName: "Sam", avgPlacement: 2.0, beatRate: 0.6, gradedCount: 3, racersBeaten: 4, score: 0.6, playedCount: 3, avgElapsedMs: 7_000, avgClicks: 3, prevAvgPlacement: null },
           ],
           unranked: [],
         },
@@ -8797,7 +8809,10 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     await within(board).findByText(/vijay/i);
     expect(within(board).getByLabelText(/improved vs\. previous window/i)).toHaveTextContent("▲");
     expect(within(board).getByLabelText(/declined vs\. previous window/i)).toHaveTextContent("▼");
-    expect(within(board).getByLabelText(/no previous window to compare/i)).toHaveTextContent("–");
+    // "No previous window to compare" renders NO arrow now: a rendered
+    // check had that dash printing after all 27 rows, where it read as a
+    // stray hyphen inside the figure rather than as information.
+    expect(within(board).queryByLabelText(/no previous window to compare/i)).toBeNull();
   });
 
   it("renders every trend copy off the server-echoed guard, never a client re-derivation (F5)", async () => {
@@ -8832,7 +8847,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
         "7": {
           window: "7",
           guard: 3,
-          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.75, gradedCount: 3, worstDropped: false, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1 }],
+          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.75, gradedCount: 3, racersBeaten: 4, score: 0.75, playedCount: 3, avgElapsedMs: 5_667, avgClicks: 1 }],
           unranked: [],
         },
       },
@@ -8865,7 +8880,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
         lifetime: {
           window: "lifetime",
           guard: 2,
-          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.75, gradedCount: 4, worstDropped: false, playedCount: 4, avgElapsedMs: 5_667, avgClicks: 1 }],
+          ranked: [{ accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.75, gradedCount: 4, racersBeaten: 6, score: 0.75, playedCount: 4, avgElapsedMs: 5_667, avgClicks: 1 }],
           unranked: [],
           roster: [
             { accountId: "acc-1", displayName: "Vijay", racesStarted: 4, finishes: 4, wins: 3 },
@@ -8887,7 +8902,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     const board = screen.getByRole("region", { name: "Stats" });
 
     await user.click(within(board).getByRole("tab", { name: "7d" }));
-    await within(board).findByText(/rolling 7 days/i);
+    await within(board).findByText(/who.s hot/i);
     expect(within(board).queryByText(/everyone who.s played/i)).toBeNull();
 
     await user.click(within(board).getByRole("tab", { name: "Lifetime" }));
@@ -9018,7 +9033,8 @@ function createFetchMock(options?: {
       avgPlacement: number;
       beatRate: number;
       gradedCount: number;
-      worstDropped: boolean;
+      racersBeaten: number;
+      score: number;
       playedCount: number;
       avgElapsedMs: number;
       avgClicks: number;

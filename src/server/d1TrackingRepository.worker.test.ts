@@ -5666,7 +5666,7 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     expect(ranked).toEqual([
       {
         accountId: accountA, displayName: null, avgPlacement: 1.3,
-        beatRate: 0.5, gradedCount: 2, worstDropped: false,
+        beatRate: 0.5, gradedCount: 2, racersBeaten: 1, score: 0.5,
         playedCount: 3, avgElapsedMs: 5667, avgClicks: 1,
       },
     ]);
@@ -5716,7 +5716,7 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     expect(ranked).toEqual([
       {
         accountId, displayName: null, avgPlacement: 1,
-        beatRate: 1, gradedCount: 1, worstDropped: false,
+        beatRate: 1, gradedCount: 1, racersBeaten: 1, score: 1,
         playedCount: 2, avgElapsedMs: 6000, avgClicks: 7,
       },
     ]);
@@ -5761,7 +5761,7 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     expect(ranked).toEqual([
       {
         accountId, displayName: null, avgPlacement: 1,
-        beatRate: 1, gradedCount: 1, worstDropped: false,
+        beatRate: 1, gradedCount: 1, racersBeaten: 1, score: 1,
         playedCount: 3, avgElapsedMs: 1667, avgClicks: 1.7,
       },
     ]);
@@ -5796,10 +5796,15 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     // clears the floor, so it's ranked instead (owner ruling, 2026-07-25:
     // was also `unranked` before the guard became completions-only-and-flat,
     // since the pre-ruling reality-scaled lifetime guard was 3 here).
+    // This test's subject is the WINDOW BOUNDARY, and `playedCount` still
+    // shows it cleanly: the week sees 1 completion, lifetime sees both.
+    // Neither ranks now - the week is below the hot floor of 2, and
+    // lifetime below `GOAT_INCLUSION_FLOOR` (a career rate needs a body of
+    // work; 1 graded race is not one).
     expect(week.unranked.find((entry) => entry.accountId === accountId)?.playedCount).toBe(1);
     expect(week.ranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
-    expect(lifetime.ranked.find((entry) => entry.accountId === accountId)).toMatchObject({ playedCount: 2 });
-    expect(lifetime.unranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
+    expect(lifetime.unranked.find((entry) => entry.accountId === accountId)?.playedCount).toBe(2);
+    expect(lifetime.ranked.find((entry) => entry.accountId === accountId)).toBeUndefined();
   });
 
   it("ranks exactly at the flat inclusion floor (2 counted completions) and leaves one fewer completion unranked", async () => {
@@ -5831,11 +5836,22 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
     }
 
     const { repository } = fixture();
-    const { ranked, unranked } = await repository.listDailyTrends(30, "2026-07-18");
+    // 7d, not 30d: per-window metrics (2026-08-15) took the floor OFF the
+    // 30-day board - see the companion test below - so the inclusion floor
+    // this test exists for now lives on the hot window.
+    const { ranked, unranked } = await repository.listDailyTrends(7, "2026-07-18");
 
     expect(ranked.find((entry) => entry.accountId === rankedAccount)).toMatchObject({ playedCount: 2 });
     expect(unranked.find((entry) => entry.accountId === unrankedAccount)).toMatchObject({ playedCount: 1 });
     expect(ranked.find((entry) => entry.accountId === unrankedAccount)).toBeUndefined();
+
+    // The 30-day showing-up board ranks BOTH: its metric is participation,
+    // so a board that hid someone who turned up would defeat itself. The
+    // one-race account simply sorts to the bottom on a smaller count.
+    const thirtyDay = await repository.listDailyTrends(30, "2026-07-18");
+    expect(thirtyDay.ranked.find((entry) => entry.accountId === unrankedAccount))
+      .toMatchObject({ playedCount: 1 });
+    expect(thirtyDay.unranked.find((entry) => entry.accountId === unrankedAccount)).toBeUndefined();
   });
 
   it("does not truncate a single challenge's finishers at 100 (no LIMIT, unlike listChallengePlacements)", async () => {
@@ -6267,7 +6283,7 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
       const { ranked } = await repository.listDailyTrends(7, "2026-07-18");
 
       expect(ranked.find((entry) => entry.accountId === accountId)).toMatchObject({
-        beatRate: 1, gradedCount: 4, worstDropped: true, playedCount: 4,
+        beatRate: 0.75, gradedCount: 4, playedCount: 4,
       });
     });
 
@@ -6300,7 +6316,7 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
 
       // Mean of all 3: (1 + 1 + 0) / 3 = 0.6666... -> rounds to 0.6667.
       expect(ranked.find((entry) => entry.accountId === accountId)).toMatchObject({
-        beatRate: 0.6667, gradedCount: 3, worstDropped: false, playedCount: 3,
+        beatRate: 0.6667, gradedCount: 3, playedCount: 3,
       });
     });
 
@@ -6338,7 +6354,7 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
       // three wins is 1.0.
       const thirtyDay = await repository.listDailyTrends(30, "2026-07-18");
       expect(thirtyDay.ranked.find((entry) => entry.accountId === accountId)).toMatchObject({
-        beatRate: 1, gradedCount: 4, worstDropped: true, playedCount: 4,
+        beatRate: 0.75, gradedCount: 4, playedCount: 4,
       });
       // 7d window: the 2026-06-25 loss falls OUT of scope entirely (not
       // "restored" from a drop - it was never counted here at all) - only 3
@@ -6348,7 +6364,7 @@ describe("listDailyTrends (Increment 4; generalized to ALL challenges by FB-10, 
       // is no persisted "already dropped" state carried between calls.
       const week = await repository.listDailyTrends(7, "2026-07-18");
       expect(week.ranked.find((entry) => entry.accountId === accountId)).toMatchObject({
-        beatRate: 1, gradedCount: 3, worstDropped: false, playedCount: 3,
+        beatRate: 1, gradedCount: 3, playedCount: 3,
       });
     });
   });

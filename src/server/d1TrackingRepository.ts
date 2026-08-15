@@ -15,6 +15,9 @@ import {
 import {
   aggregateBeatRate,
   beatRateForPlacement,
+  racersBeatenForPlacement,
+  trendFloorForMetric,
+  trendMetricForWindow,
   DAILY_TREND_INCLUSION_FLOOR,
   dailyTrendWindowCreatedAtBounds,
   partitionChallengesByTrendWindow,
@@ -2750,6 +2753,14 @@ export function createD1TrackingRepository(options: {
         windowedIds = partition.ids;
       }
 
+      // Per-window metrics (owner framing, 2026-08-15). `guard` stays the
+      // number the CLIENT renders as runway copy ("Finish 2 races to rank")
+      // and Home's chip reads - it is the 7d/hot floor, unchanged. `floor`
+      // is what this window actually gates on, which differs: the 30-day
+      // showing-up board has no floor at all (the metric IS participation),
+      // and lifetime demands a body of work.
+      const metric = trendMetricForWindow(windowDays);
+      const floor = trendFloorForMetric(metric);
       const guard = DAILY_TREND_INCLUSION_FLOOR;
 
       // No challenge at all exists in this window (young catalog, or a
@@ -2852,6 +2863,9 @@ export function createD1TrackingRepository(options: {
         elapsedMsList: number[];
         clickCountList: number[];
         beats: number[];
+        /** Parallel to `beats` - the same comparison as a headcount rather
+         * than a share, for the 30-day showing-up metric. */
+        racersBeaten: number[];
       }
       const byAccount = new Map<string, AccountAccumulator>();
       for (const row of results) {
@@ -2863,6 +2877,7 @@ export function createD1TrackingRepository(options: {
             elapsedMsList: [],
             clickCountList: [],
             beats: [],
+            racersBeaten: [],
           };
           byAccount.set(row.account_id, accumulator);
         }
@@ -2872,7 +2887,10 @@ export function createD1TrackingRepository(options: {
         accumulator.elapsedMsList.push(Number(row.elapsed_ms));
         accumulator.clickCountList.push(Number(row.click_count));
         const beat = beatRateForPlacement(placement, fieldSize);
-        if (beat !== null) accumulator.beats.push(beat);
+        if (beat !== null) {
+          accumulator.beats.push(beat);
+          accumulator.racersBeaten.push(racersBeatenForPlacement(placement, fieldSize));
+        }
       }
 
       const mean = (values: number[]) => values.reduce((total, value) => total + value, 0) / values.length;
@@ -2885,15 +2903,16 @@ export function createD1TrackingRepository(options: {
         // there is no zero-completion entry to handle.
         const completedCount = accumulator.placements.length;
         const displayName = accumulator.displayName;
-        const beatAggregate = aggregateBeatRate(accumulator.beats);
-        if (completedCount >= guard && beatAggregate !== null) {
+        const beatAggregate = aggregateBeatRate(accumulator.beats, accumulator.racersBeaten, metric);
+        if (completedCount >= floor && beatAggregate !== null) {
           ranked.push({
             accountId,
             displayName,
             avgPlacement: Math.round(mean(accumulator.placements) * 10) / 10,
             beatRate: beatAggregate.beatRate,
             gradedCount: beatAggregate.gradedCount,
-            worstDropped: beatAggregate.worstDropped,
+            racersBeaten: beatAggregate.racersBeaten,
+            score: beatAggregate.score,
             playedCount: completedCount,
             avgElapsedMs: Math.round(mean(accumulator.elapsedMsList)),
             avgClicks: Math.round(mean(accumulator.clickCountList) * 10) / 10,
@@ -2911,8 +2930,11 @@ export function createD1TrackingRepository(options: {
           });
         }
       }
+      // Sorted by the WINDOW'S metric, never by the displayed rate - see
+      // `scoreForMetric`. Ties fall through to volume then name, so an
+      // ordering is always total and stable across reloads.
       ranked.sort((left, right) =>
-        right.beatRate - left.beatRate ||
+        right.score - left.score ||
         right.gradedCount - left.gradedCount ||
         right.playedCount - left.playedCount ||
         (left.displayName ?? "").localeCompare(right.displayName ?? ""));

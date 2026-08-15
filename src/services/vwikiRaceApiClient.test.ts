@@ -974,7 +974,7 @@ describe("VWiki Race API client", () => {
       window: "7" as const,
       guard: 2,
       ranked: [
-        { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.75, gradedCount: 3, worstDropped: false, playedCount: 3, avgElapsedMs: 5667, avgClicks: 4.3 },
+        { accountId: "acc-1", displayName: "Vijay", avgPlacement: 1.3, beatRate: 0.75, gradedCount: 3, racersBeaten: 5, score: 0.75, playedCount: 3, avgElapsedMs: 5667, avgClicks: 4.3 },
       ],
       unranked: [
         { accountId: "acc-2", displayName: "Casey", playedCount: 1, gradedCount: 0 },

@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import ChallengePathGraphButton from "../components/ChallengePathGraphButton";
@@ -16,7 +17,11 @@ import {
   type HomeHeroSelection,
 } from "../domain/challengeSelection";
 import { dailyFlavorBadgeText } from "../domain/dailyEditorial";
-import { trendGuardProgressCopy, trendUnrankedProgressCopy } from "../domain/dailyTrends";
+import {
+  GOAT_INCLUSION_FLOOR,
+  trendGuardProgressCopy,
+  trendUnrankedProgressCopy,
+} from "../domain/dailyTrends";
 import { formatTimeAndClicks } from "../domain/formatting";
 import type { PlayAnotherSuggestionState } from "../domain/playAnother";
 import { pathStepsToChain } from "../domain/winningPath";
@@ -647,16 +652,18 @@ export default function Boards({
         ) : (
           <>
             <p className="board-trend-subheader muted">
-              Rolling {TREND_PROSE_LABEL[segment]} · Ranked by the share of racers you&apos;ve
-              finished ahead of — your worst race doesn&apos;t count against you.{" "}
-              {trendGuardProgressCopy(0, guard)}
+              {TREND_SUBHEADER[segment]}{" "}
+              {segment === "30d"
+                ? null
+                : trendGuardProgressCopy(0, trendFloorForSegment(segment, guard))}
             </p>
 
             <section className="board-snippet" aria-label={`${SEGMENT_LABEL[segment]} rolling trend`}>
               {rankedRows.length ? (
-                <ol>
+                <ol className="board-trend-list">
                   {rankedRows.map((row, index) => {
                     const isYou = row.accountId === identityAccountId;
+                    const figures = trendRowFigures(row, segment);
                     return (
                       <li className={isYou ? "is-you" : undefined} key={row.accountId}>
                         <button
@@ -664,17 +671,30 @@ export default function Boards({
                           className="trend-row-toggle"
                           disabled={!isYou}
                           onClick={isYou ? () => setOwnRowExpanded((value) => !value) : undefined}
+                          style={{ "--fill": trendBarWidth(row, rankedRows[0]) } as CSSProperties}
                           type="button"
                         >
-                          <span className="rank">{index + 1}.</span>
+                          <span className="rank">{index + 1}</span>
                           <span className="trend-row-name">
                             {row.displayName ?? "Unknown"}
                             {isYou ? <span className="muted"> (you)</span> : null}
                           </span>
+                          <span className="trend-detail">{figures.detail}</span>
                           <span className="trend-row-score">
-                            {trendBeatRateText(row)} · {formatTimeAndClicks(row.avgElapsedMs, row.avgClicks)}{" "}
-                            <span aria-label={trendArrowLabel(row)} className="trend-arrow muted">
-                              {trendArrowGlyph(row)}
+                            <span className="trend-headline">
+                              {figures.headline}
+                              {figures.unit ? <span className="trend-unit"> {figures.unit}</span> : null}
+                              {/* Only when there is a direction to report.
+                                  A rendered check (2026-08-15) had the
+                                  "no previous window" dash printing after
+                                  all 27 rows, where it read as a stray
+                                  hyphen in the figure rather than as
+                                  information. */}
+                              {trendArrowGlyph(row) === "–" ? null : (
+                                <span aria-label={trendArrowLabel(row)} className="trend-arrow">
+                                  {trendArrowGlyph(row)}
+                                </span>
+                              )}
                             </span>
                           </span>
                         </button>
@@ -735,7 +755,7 @@ export default function Boards({
                           {row.displayName ?? "Unknown"}
                           {isYou ? <span className="muted"> (you)</span> : null}
                         </span>
-                        <span>{trendUnrankedProgressCopy(row, guard)}</span>
+                        <span>{trendUnrankedProgressCopy(row, trendFloorForSegment(segment, guard))}</span>
                       </li>
                     );
                   })}
@@ -1026,12 +1046,93 @@ function recentDailyDetailText(detail: RecentDailyDetail): string {
  * is how many of those were graded (non-solo); `worstDropped` only ever
  * shows once `gradedCount` has cleared `BEAT_RATE_DROP_WORST_THRESHOLD` (4).
  */
-function trendBeatRateText(row: BoardsTrendRankedEntry): string {
+/**
+ * The three windows answer three different questions (owner framing,
+ * 2026-08-15: "lifetime is asking who's GOAT, 30 days: who's showing up,
+ * 7: who's hot?"), so each row leads with the number that window actually
+ * ranks on, and everything else steps back into the muted line. Before
+ * this, all three rendered one undifferentiated sentence with the ranking
+ * number buried mid-string:
+ *   "beat 93% of racers · 5 races (5 graded, worst dropped) · 1:06 · 5 clk"
+ */
+export function trendRowFigures(
+  row: BoardsTrendRankedEntry,
+  segment: TrendSegment,
+): { headline: string; unit: string; detail: string } {
   const percent = Math.round(row.beatRate * 100);
   const races = `${row.playedCount} ${row.playedCount === 1 ? "race" : "races"}`;
-  const graded = `${row.gradedCount} graded${row.worstDropped ? ", worst dropped" : ""}`;
-  return `beat ${percent}% of racers · ${races} (${graded})`;
+  const pace = formatTimeAndClicks(row.avgElapsedMs, row.avgClicks);
+  if (segment === "30d") {
+    return {
+      headline: String(row.racersBeaten),
+      // Just "beaten", not "racers beaten": the subheader already says what
+      // the number counts, and the long form repeated down 27 rows was pure
+      // noise on a rendered check.
+      unit: "beaten",
+      detail: `${races} · beat ${percent}% · ${pace}`,
+    };
+  }
+  if (segment === "lifetime") {
+    // The career score, not the raw rate: lifetime ranks on a rate
+    // regressed toward average by race count, so showing the raw number
+    // here would let the list appear mis-sorted whenever a longer record
+    // outranks a shorter, better-looking one.
+    return {
+      headline: `${Math.round(row.score * 100)}%`,
+      unit: "career",
+      detail: `${races} · beat ${percent}% · ${pace}`,
+    };
+  }
+  // No unit on the hot board: the subheader already says the percentage is
+  // the share of racers beaten, and repeating it down every row was noise
+  // on a rendered check.
+  return { headline: `${percent}%`, unit: "", detail: `${races} · ${pace}` };
 }
+
+/**
+ * The floor THIS board actually gates on, which is not always the `guard`
+ * on the wire. `guard` stays the 7d/hot floor everywhere (Home's chip and
+ * You's trend both read it, and neither should shift because a Boards
+ * segment changed) - but the 30-day showing-up board has no floor at all,
+ * so an account unranked there is unranked for the one remaining reason:
+ * no head-to-head result yet. Passing 0 makes
+ * `trendUnrankedProgressCopy` say that instead of inventing a race quota
+ * the board does not enforce.
+ */
+function trendFloorForSegment(segment: TrendSegment, guard: number): number {
+  if (segment === "30d") return 0;
+  // Lifetime gates on its own, higher floor - a career rate needs a body of
+  // work. Read from the domain constant rather than the wire, because
+  // `guard` deliberately stays the 7d/hot floor for Home and You. A
+  // rendered check (2026-08-15) caught the alternative: passing `guard` here
+  // told five lifetime-unranked accounts to "Finish 0 more races to rank".
+  if (segment === "lifetime") return GOAT_INCLUSION_FLOOR;
+  return guard;
+}
+
+/**
+ * Row bar length, as a share of the leader's score - the same encoding
+ * You's page lists use, so the two screens read as one system. Scored
+ * against the top row rather than an absolute maximum, because the three
+ * metrics have three different natural ranges (a rate is 0-1, a headcount
+ * is unbounded); relative-to-leader is the only shape that works for all
+ * three. A leader at zero (nobody has beaten anybody yet) yields no bars
+ * rather than a divide-by-zero.
+ */
+function trendBarWidth(row: BoardsTrendRankedEntry, leader: BoardsTrendRankedEntry | undefined): string {
+  const top = leader?.score ?? 0;
+  return top > 0 ? `${Math.round((row.score / top) * 100)}%` : "0%";
+}
+
+/** What each board is FOR, in the player's words. Replaces the single
+ * "ranked by the share of racers you've finished ahead of — your worst race
+ * doesn't count against you" line, whose second clause stopped being true
+ * when drop-worst was removed. */
+const TREND_SUBHEADER: Record<TrendSegment, string> = {
+  "7d": "Who's hot — the share of racers you finished ahead of, last 7 days.",
+  "30d": "Who's showing up — every racer you finished ahead of in 30 days, added up. Race more, climb higher.",
+  lifetime: "Who's the GOAT — your career share of racers beaten, weighted by how much you've raced.",
+};
 
 /**
  * F3: lower `avgPlacement` is better, so a current average lower than
