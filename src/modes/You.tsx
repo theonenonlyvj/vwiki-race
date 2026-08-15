@@ -319,10 +319,9 @@ function StatsPanel({
             server-side, and this repo's convention is to never fabricate a
             number the server hasn't actually computed. */}
         <StatGroup title="Turning up">
-          <StatRow
-            value={stats ? stats.dailyStreak : null}
-            label={stats?.dailyStreak === 1 ? "day streak" : "day streak"}
-          />
+          {/* "1 day streak" and "32 day streak" both read correctly, so the
+              label needs no plural branch. */}
+          <StatRow value={stats ? stats.dailyStreak : null} label="day streak" />
           {/* Three old tiles (Attempts / Completed / DNFs) restated one
               fact. "37 of 44 finished" says it once, and leaves DNFs to
               carry only what it alone knows. */}

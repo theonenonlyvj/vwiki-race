@@ -3139,7 +3139,7 @@ describe("VWiki Race app", () => {
 
     await user.click(await screen.findByRole("button", { name: /^you$/i }));
 
-    expect(await screen.findByText("7")).toBeVisible();
+    expect(await screen.findByText("of 7 finished")).toBeVisible();
     expect(accountStatsCalls(fetchImpl)).toBe(1);
   });
 
@@ -3175,20 +3175,20 @@ describe("VWiki Race app", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: /^you$/i }));
-    expect(await screen.findByText("7")).toBeVisible();
+    expect(await screen.findByText("of 7 finished")).toBeVisible();
     view.rerender(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} identityRepository={repositoryB} />);
     // "Honest You": State C's chip is a static status readout labeled
     // "{name}, logged in" - all three `identity()` fixtures here are
     // claimed sessions.
     await waitFor(() => expect(screen.getByRole("status", { name: /friend b, logged in/i })).toHaveTextContent("Friend B"));
-    expect(screen.queryByText("7")).toBeNull();
+    expect(screen.queryByText("of 7 finished")).toBeNull();
 
     view.rerender(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} identityRepository={repositoryC} />);
-    expect(await screen.findByText("2")).toBeVisible();
+    expect(await screen.findByText("of 2 finished")).toBeVisible();
     friendBStats.resolve(jsonResponse({ stats: accountStatsFixture(9) }));
     await act(async () => { await friendBStats.promise; });
-    await waitFor(() => expect(screen.queryByText("9")).toBeNull());
-    expect(screen.getByText("2")).toBeVisible();
+    await waitFor(() => expect(screen.queryByText("of 9 finished")).toBeNull());
+    expect(screen.getByText("of 2 finished")).toBeVisible();
   });
 
   it("clears stale identity and prior stats when the stats projection returns 401", async () => {
@@ -3198,7 +3198,7 @@ describe("VWiki Race app", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
 
     await user.click(await screen.findByRole("button", { name: /^you$/i }));
-    expect(await screen.findByText("7")).toBeVisible();
+    expect(await screen.findByText("of 7 finished")).toBeVisible();
     await user.click(screen.getByRole("button", { name: /^home$/i }));
     await user.click(screen.getByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
@@ -4615,7 +4615,7 @@ describe("VWiki Race app", () => {
       await user.click(await screen.findByRole("button", { name: "You" }));
 
       expect(screen.getByRole("heading", { name: "Your stats" })).toBeVisible();
-      expect(await screen.findByText("9")).toBeVisible();
+      expect(await screen.findByText("of 9 finished")).toBeVisible();
     });
 
     it("gives an unclaimed guest a persistent claim CTA in You", async () => {
@@ -4715,7 +4715,7 @@ describe("VWiki Race app", () => {
       expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
     });
 
-    it("QF-09: a played account's You tab shows Avg speed/Avg clicks tiles alongside the existing grid", async () => {
+    it("QF-09 (layout B): a played account's You tab features Average speed/Average clicks", async () => {
       const fetchImpl = createFetchMock({
         accountAttempts: 9,
         accountAverages: { averageClicks: 4.5, averageElapsedMs: 12300 },
@@ -4724,15 +4724,20 @@ describe("VWiki Race app", () => {
       render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
       await user.click(await screen.findByRole("button", { name: "You" }));
-      await screen.findByText("Attempts");
+      await screen.findByText("of 9 finished");
 
-      const grid = document.querySelector(".stat-grid") as HTMLElement;
-      const valueFor = (label: string) =>
-        within(grid).getByText(label).nextElementSibling?.textContent;
+      const panel = document.querySelector(".stats-panel") as HTMLElement;
+      // Layout B: a FEATURED stat is <dt>label</dt><dd>value</dd>; a GROUPED
+      // one is <dd>value</dd><dt>label</dt> - value first, so the eye lands
+      // on the number and the label qualifies it.
+      const featured = (label: string) =>
+        within(panel).getByText(label).nextElementSibling?.textContent;
+      const grouped = (label: string) =>
+        within(panel).getByText(label).previousElementSibling?.textContent;
 
-      await waitFor(() => expect(valueFor("Attempts")).toBe("9"));
-      expect(valueFor("Avg speed")).toBe("12.3s");
-      expect(valueFor("Avg clicks")).toBe("4.5");
+      await waitFor(() => expect(grouped("of 9 finished")).toBe("0"));
+      expect(featured("Average speed")).toBe("12.3s");
+      expect(featured("Average clicks")).toBe("4.5");
     });
   });
 });
@@ -4886,7 +4891,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock({ accountAttempts: 5 })} storage={storage} />);
 
       await user.click(await screen.findByRole("button", { name: "You" }));
-      await screen.findByText("5");
+      await screen.findByText("of 5 finished");
       await user.click(screen.getByRole("button", { name: /^log out$/i }));
 
       // No confirm dialog - 2026-07-20 judge amendment cut it (reversible,
@@ -4915,7 +4920,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       // (§3) may already have landed on this button by the time stats
       // resolve.
       await user.click(await screen.findByRole("button", { name: /^you\b/i }));
-      await screen.findByText("3");
+      await screen.findByText("of 3 finished");
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^log in$/i }));
       const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
@@ -4938,7 +4943,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={ghostStorage("Nimbus")} />);
 
       await user.click(await screen.findByRole("button", { name: /^you\b/i }));
-      await screen.findByText("3");
+      await screen.findByText("of 3 finished");
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^log in$/i }));
       let sheet = await screen.findByRole("dialog", { name: /save your stats/i });
@@ -4965,7 +4970,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={ghostStorage("Nimbus")} />);
 
       await user.click(await screen.findByRole("button", { name: /^you\b/i }));
-      await screen.findByText("3");
+      await screen.findByText("of 3 finished");
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^log in$/i }));
       let sheet = await screen.findByRole("dialog", { name: /save your stats/i });
@@ -5026,7 +5031,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={ghostStorage("Nimbus")} />);
 
       await user.click(await screen.findByRole("button", { name: /^you\b/i }));
-      await screen.findByText("3");
+      await screen.findByText("of 3 finished");
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^log in$/i }));
       const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
@@ -5047,9 +5052,10 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={ghostStorage("Nimbus")} />);
 
       await user.click(await screen.findByRole("button", { name: "You" }));
-      const statGrid = document.querySelector(".stat-grid") as HTMLElement;
+      const panel = document.querySelector(".stats-panel") as HTMLElement;
       await waitFor(() => {
-        expect(within(statGrid).getByText("Attempts").nextElementSibling?.textContent).toBe("0");
+        // Layout B: value first, label second.
+        expect(within(panel).getByText("of 0 finished").previousElementSibling?.textContent).toBe("0");
       });
 
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
@@ -5143,7 +5149,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
 
       await user.click(await screen.findByRole("button", { name: /^you\b/i }));
-      await screen.findByText("3");
+      await screen.findByText("of 3 finished");
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^play as someone else$/i }));
 
@@ -5198,7 +5204,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
 
       await user.click(await screen.findByRole("button", { name: /^you\b/i }));
-      await screen.findByText("3");
+      await screen.findByText("of 3 finished");
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^play as someone else$/i }));
 
@@ -5282,7 +5288,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={ghostStorage("Nimbus")} />);
 
       await user.click(await screen.findByRole("button", { name: /^you\b/i }));
-      await screen.findByText("3");
+      await screen.findByText("of 3 finished");
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^play as someone else$/i }));
 
@@ -5366,9 +5372,10 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
         />,
       );
       await user.click(await screen.findByRole("button", { name: "You" }));
-      const statGrid = document.querySelector(".stat-grid") as HTMLElement;
+      const panel = document.querySelector(".stats-panel") as HTMLElement;
       await waitFor(() => {
-        expect(within(statGrid).getByText("Attempts").nextElementSibling?.textContent).toBe("0");
+        // Layout B: value first, label second.
+        expect(within(panel).getByText("of 0 finished").previousElementSibling?.textContent).toBe("0");
       });
       expect(screen.getByRole("button", { name: "You" })).toBeVisible();
     });
@@ -7425,8 +7432,11 @@ describe("PKG-07 (council 2026-07-19, owner-proxy ruling): daily ritual identity
     await user.click(await screen.findByRole("button", { name: "You" }));
 
     expect(screen.getByRole("heading", { name: "Your stats" })).toBeVisible();
-    expect(await screen.findByText("Streak")).toBeVisible();
-    expect(screen.getByText("9 days")).toBeVisible();
+    // Layout B: the streak leads the "Turning up" group as a bare number
+    // with its unit in the label, rather than a "9 days" tile value.
+    const streakLabel = await screen.findByText("day streak");
+    expect(streakLabel).toBeVisible();
+    expect(streakLabel.previousElementSibling).toHaveTextContent("9");
   });
 
   it("You's stat tiles show real zeros for confirmed-zero totals and 'No data yet.' (never a bare '-') for a never-completed account (PKG-11)", async () => {
@@ -7435,25 +7445,28 @@ describe("PKG-07 (council 2026-07-19, owner-proxy ruling): daily ritual identity
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
     await user.click(await screen.findByRole("button", { name: "You" }));
-    await screen.findByText("Streak");
+    await screen.findByText("day streak");
 
-    const grid = document.querySelector(".stat-grid") as HTMLElement;
+    const panel = document.querySelector(".stats-panel") as HTMLElement;
+    // Layout B: grouped stats are <dd>value</dd><dt>label</dt>, value first.
     const valueFor = (label: string) =>
-      within(grid).getByText(label).nextElementSibling?.textContent;
+      within(panel).getByText(label).previousElementSibling?.textContent;
 
     // Confirmed zeros (the fixture's default: an identified account that has
-    // never played) render as real numbers, not a placeholder.
-    await waitFor(() => expect(valueFor("Attempts")).toBe("0"));
-    expect(valueFor("Streak")).toBe("0 days");
-    expect(valueFor("Completed")).toBe("0");
+    // never played) render as real numbers, not a placeholder. "Attempts"
+    // and "Completed" are no longer separate rows - one "of N finished"
+    // line carries both, which is the whole point of the regroup.
+    await waitFor(() => expect(valueFor("of 0 finished")).toBe("0"));
+    expect(valueFor("day streak")).toBe("0");
     expect(valueFor("DNFs")).toBe("0");
-    expect(valueFor("Completed clicks")).toBe("0");
+    expect(valueFor("clicks")).toBe("0");
+    expect(valueFor("racing")).toBe("0.0s");
     // `bestElapsedMs`/`bestClicks` are legitimately `null` (no completion to
-    // measure yet, not a missing-data bug) - "No data yet." matches
-    // StatsList's own established convention rather than a bare "-".
-    expect(valueFor("Best speed")).toBe("No data yet.");
-    expect(valueFor("Best clicks")).toBe("No data yet.");
-    expect(within(grid).queryByText("-")).toBeNull();
+    // measure yet, not a missing-data bug) - "No data yet." matches the
+    // page lists' own established convention rather than a bare "-".
+    expect(valueFor("fastest race")).toBe("No data yet.");
+    expect(valueFor("fewest clicks")).toBe("No data yet.");
+    expect(within(panel).queryByText("-")).toBeNull();
   });
 
   it("How-to-play establishes the daily cadence, not just the rules (acceptance criterion 3)", async () => {

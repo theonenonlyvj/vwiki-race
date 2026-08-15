@@ -141,7 +141,18 @@ const TARGET_COLOR = "#ff765f";
 
 const LABEL_ROW_OFFSETS = [0, 18, -18, 36, -36, 54, -54, 72, -72, 90, -90];
 const LABEL_GAP_PX = 8;
-const CHAR_WIDTH_PX = 6.6; // rough Fredoka-500-at-12px advance width
+/**
+ * Feeds `estimateLabelWidth`, which drives label collision spacing in the
+ * SVG - so an UNDER-estimate overlaps labels, while an over-estimate merely
+ * leaves them roomier. Deliberately left at Fredoka's 6.6 through the
+ * 2026-08-15 Merriweather swap: Merriweather-500 measures 5.95px per
+ * character at 12px over a sample of real page titles (fontTools, weighted
+ * by the actual glyph advances), so 6.6 is now a ~11% safety margin rather
+ * than a fit. Keep any future value at or ABOVE the measured advance of the
+ * body face; tightening it to the exact figure trades invisible slack for a
+ * visible overlap bug the first time a title runs wide.
+ */
+const CHAR_WIDTH_PX = 6.6;
 
 const MOBILE_BREAKPOINT = 480;
 const SCROLL_HINT_KEY = "cpg-scroll-hint-seen";
@@ -805,7 +816,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
     <div className="cpg-root">
       <style>{`
         .cpg-root {
-          font-family: var(--viota-ui-font, "Fredoka", sans-serif);
+          font-family: var(--viota-ui-font, "Merriweather", ui-serif, Georgia, serif);
           color: var(--text, #eef7f8);
           background: var(--ink, #061014);
           border: 1px solid var(--line, #295159);
@@ -1259,7 +1270,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                         // (--viota-ui-font), not the display font.
                         fontWeight={600}
                         fill="var(--ink, #061014)"
-                        fontFamily="var(--viota-ui-font, Fredoka, sans-serif)"
+                        fontFamily="var(--viota-ui-font, Merriweather, ui-serif, Georgia, serif)"
                         pointerEvents="none"
                       >
                         {node.visitorCount}
@@ -1273,7 +1284,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                         textAnchor="middle"
                         fontSize={12}
                         fill="var(--ink, #061014)"
-                        fontFamily="var(--viota-ui-font, Fredoka, sans-serif)"
+                        fontFamily="var(--viota-ui-font, Merriweather, ui-serif, Georgia, serif)"
                         // NV-1: capped at 600 (was 700).
                         fontWeight={600}
                         pointerEvents="none"
@@ -1314,7 +1325,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                       textAnchor="middle"
                       fontSize={node.fontSize}
                       fontWeight={node.isStart || isTarget ? 600 : 500}
-                      fontFamily="var(--viota-ui-font, Fredoka, sans-serif)"
+                      fontFamily="var(--viota-ui-font, Merriweather, ui-serif, Georgia, serif)"
                       fill={labelColor}
                       paintOrder="stroke"
                       stroke="var(--ink, #061014)"
@@ -1367,7 +1378,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                         textAnchor="middle"
                         fontSize={13}
                         fill="var(--text-bright, #dffbfb)"
-                        fontFamily="var(--viota-ui-font, Fredoka, sans-serif)"
+                        fontFamily="var(--viota-ui-font, Merriweather, ui-serif, Georgia, serif)"
                       >
                         {callout.title}
                       </text>
@@ -1384,7 +1395,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
               fontSize={11}
               fill="var(--muted, #9fb8bd)"
               opacity={0.8}
-              fontFamily="var(--viota-ui-font, Fredoka, sans-serif)"
+              fontFamily="var(--viota-ui-font, Merriweather, ui-serif, Georgia, serif)"
             >
               position = % through each player&apos;s own path — not click count
             </text>
