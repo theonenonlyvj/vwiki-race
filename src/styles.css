@@ -3243,6 +3243,11 @@ h1 {
   line-height: 1.05;
   color: var(--cyan);
   font-variant-numeric: tabular-nums;
+  /* Luckiest Guy's colon is two heavy squares that fuse with the digits
+     beside them at this size - "4:40" read closer to "440" in a rendered
+     check. Tracking separates them enough to read as a time without
+     abandoning the display face the owner asked for on these two stats. */
+  letter-spacing: .06em;
 }
 
 .you-featured .you-featured-sub {
@@ -3381,15 +3386,22 @@ h1 {
 /* The bar. Anchored to the row's left edge, rounded only on the data end,
    and explicitly z-index 0: a positioned pseudo-element would otherwise
    paint OVER its static siblings, and a negative z-index would drop it
-   behind the panel's own background and vanish. */
+   behind the panel's own background and vanish.
+   A rendered check (2026-08-15) replaced the original full-height 10%
+   tint: at row height it read as a table-row highlight - ten stacked
+   slabs competing with the titles - rather than as a chart mark. A 3px
+   rule at the baseline carries exactly the same length encoding at a
+   fraction of the visual weight, and the ranking's staircase becomes the
+   thing you see first. Brighter alpha because a thin mark needs it. */
 .you-pages-list li::before {
   content: "";
   position: absolute;
-  inset: 0 auto 0 0;
+  inset: auto auto 0 0;
   z-index: 0;
+  height: 3px;
   width: var(--fill, 0%);
-  border-radius: 0 3px 3px 0;
-  background: rgba(13, 235, 215, 0.1);
+  border-radius: 0 2px 2px 0;
+  background: rgba(24, 227, 207, 0.45);
   pointer-events: none;
 }
 
