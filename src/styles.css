@@ -1557,6 +1557,13 @@ h1 {
    red/green"), never a semantic color. */
 .trend-arrow {
   margin-left: 2px;
+  /* A fixed slot, occupied or not, so the figure column stays on one edge
+     whether or not a row has a direction to report. */
+  display: inline-block;
+  min-width: 0.85em;
+  text-align: right;
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 /* F6: a failed trends fetch - reuses `.error-banner` rather than the

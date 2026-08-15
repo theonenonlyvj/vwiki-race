@@ -690,7 +690,16 @@ export default function Boards({
                                   all 27 rows, where it read as a stray
                                   hyphen in the figure rather than as
                                   information. */}
-                              {trendArrowGlyph(row) === "–" ? null : (
+                              {/* Always rendered so the figure column can't
+                                  jitter between rows that have a direction
+                                  and rows that don't - but EMPTY when there
+                                  is nothing to report. A rendered check had
+                                  the "no previous window" dash printing
+                                  after every row, where it read as a stray
+                                  hyphen inside the number. */}
+                              {trendArrowGlyph(row) === "–" ? (
+                                <span aria-hidden="true" className="trend-arrow" />
+                              ) : (
                                 <span aria-label={trendArrowLabel(row)} className="trend-arrow">
                                   {trendArrowGlyph(row)}
                                 </span>
