@@ -3768,7 +3768,10 @@ describe("Task 4 D1 projections", () => {
         completed: 2,
         abandoned: 1,
         timedCompleted: 1,
-        totalClicks: 5,
+        // 2 + 3 from the two completions PLUS 9 from the counted 9-click
+        // DNF: `total_clicks` is FB-7-gated as of 2026-08-15, same as
+        // attempts/abandoned/totalDwellMs (was completed-only at 5).
+        totalClicks: 14,
         bestClicks: 2,
         bestElapsedMs: 4200,
         averageClicks: 2.5,
@@ -3816,6 +3819,40 @@ describe("Task 4 D1 projections", () => {
     const stats = await repository.getAccountStats(account);
 
     expect(stats.totals).toMatchObject({ attempts: 0, completed: 0, abandoned: 0 });
+  });
+
+  /**
+   * `total_clicks` was the last "how much have you played" number in this
+   * file still counting completed runs ONLY, which was defensible while its
+   * label read "Completed clicks". Layout B (2026-08-15) puts it under a
+   * "Totals" heading beside `totalDwellMs`, which is FB-7-gated - two
+   * adjacent totals counting different populations is the quiet kind of
+   * wrong this profile has already been bitten by, so it now uses the same
+   * gate as `attempts`/`abandoned`/`totalDwellMs`. A sub-threshold DNF
+   * still contributes nothing.
+   */
+  it("counts clicks from counted DNFs, not just completions (FB-7 gate, matching totalDwellMs)", async () => {
+    await insertCompletedV2({
+      id: "clicks-completed", accountId: account.accountId, elapsedMs: 4_200,
+      completedAt: "2026-07-14T01:00:04.200Z",
+    });
+    await env.VWIKI_RACE_DB.prepare(
+      "UPDATE runs SET click_count = 5 WHERE id = 'clicks-completed'",
+    ).run();
+    await insertAbandonedV2({
+      id: "clicks-counted-dnf", accountId: account.accountId, clickCount: 4,
+      elapsedMs: 9_000, abandonedAt: "2026-07-14T01:00:09.000Z",
+    });
+    await insertAbandonedV2({
+      id: "clicks-ghost-dnf", accountId: account.accountId, clickCount: 1,
+      elapsedMs: 9_000, abandonedAt: "2026-07-14T01:00:09.000Z",
+    });
+
+    const { repository } = fixture();
+    const stats = await repository.getAccountStats(account);
+
+    // 5 completed + 4 from the counted DNF; the 1-click ghost contributes 0.
+    expect(stats.totals.totalClicks).toBe(9);
   });
 
   it("counts a 2-click DNF in attempts/abandoned (exactly at the FB-7 threshold)", async () => {

@@ -3,10 +3,10 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
 } from "react";
 import StagedLoadingNotice from "../components/StagedLoadingNotice";
-import { formatMinutesSeconds } from "../domain/formatting";
-import { formatElapsed } from "../race/shared";
+import { formatMinutesSeconds, formatStatDuration } from "../domain/formatting";
 import type { AccountStats, PageStat } from "../domain/types";
 import type { VGamesIdentitySession } from "../services/vgamesIdentity";
 
@@ -289,64 +289,94 @@ function StatsPanel({
           "Your stats" disambiguates without touching Boards' own
           ratified "Stats" rename. */}
       <h2>Your stats</h2>
-      <dl className="stat-grid">
+      {/* The two numbers that describe how you TYPICALLY race, in the
+          display face (owner pick, 2026-08-15). Averages rather than bests
+          deliberately: a personal best is a story about one lucky race, an
+          average is a story about you. Everything else steps down to the
+          groups below, which is the hierarchy the old nine-equal-tiles grid
+          never had. */}
+      <dl className="you-featured">
+        <div>
+          <dt>Average speed</dt>
+          <dd>{totals ? formatStatDuration(totals.averageElapsedMs) : NO_DATA_YET}</dd>
+          <dd className="you-featured-sub">per finished race</dd>
+        </div>
+        <div>
+          <dt>Average clicks</dt>
+          {/* One decimal, the precision every other avgClicks field in this
+              app uses (e.g. listDailyTrends' ranked rows). */}
+          <dd>{totals ? totals.averageClicks.toFixed(1) : NO_DATA_YET}</dd>
+          <dd className="you-featured-sub">per finished race</dd>
+        </div>
+      </dl>
+      <div className="you-groups">
         {/* PKG-07 (council 2026-07-19, owner-proxy ruling (a)): the ritual-
             identity streak, reusing `accountStats.dailyStreak` - Home
             already fetches this same field for its own streak/trend chip
-            (StreakTrendRow in Home.tsx), so You never has to introduce a
-            second source of truth for it. No "best streak" tile alongside
-            it - `AccountStats` doesn't track a lifetime-best streak
-            anywhere server-side, and this repo's data-fidelity convention
-            is to never fabricate a number the server hasn't actually
-            computed. */}
-        <div>
-          <dt>Streak</dt>
-          <dd>
-            {stats ? `${stats.dailyStreak} ${stats.dailyStreak === 1 ? "day" : "days"}` : NO_DATA_YET}
-          </dd>
-        </div>
-        <div>
-          <dt>Attempts</dt>
-          <dd>{totals ? totals.attempts : NO_DATA_YET}</dd>
-        </div>
-        <div>
-          <dt>Completed</dt>
-          <dd>{totals ? totals.completed : NO_DATA_YET}</dd>
-        </div>
-        <div>
-          <dt>DNFs</dt>
-          <dd>{totals ? totals.abandoned : NO_DATA_YET}</dd>
-        </div>
-        <div>
-          <dt>Best speed</dt>
-          <dd>{totals?.bestElapsedMs === null || totals?.bestElapsedMs === undefined ? NO_DATA_YET : formatElapsed(totals.bestElapsedMs)}</dd>
-        </div>
-        {/* QF-09: averageElapsedMs/averageClicks are already server-computed,
-            typed, and delivered on every AccountStats response - they were
-            just never rendered. Same formatters as their "Best" siblings:
-            formatElapsed for the ms field, and toFixed(1) for the
-            fractional-clicks field, one decimal place - same precision
-            server-side avgClicks fields use throughout this app (e.g.
-            listDailyTrends' ranked rows). */}
-        <div>
-          <dt>Avg speed</dt>
-          <dd>{totals ? formatElapsed(totals.averageElapsedMs) : NO_DATA_YET}</dd>
-        </div>
-        <div>
-          <dt>Best clicks</dt>
-          <dd>{totals?.bestClicks === null || totals?.bestClicks === undefined ? NO_DATA_YET : totals.bestClicks}</dd>
-        </div>
-        <div>
-          <dt>Avg clicks</dt>
-          <dd>{totals ? totals.averageClicks.toFixed(1) : NO_DATA_YET}</dd>
-        </div>
-        <div>
-          <dt>Completed clicks</dt>
-          <dd>{totals ? totals.totalClicks : NO_DATA_YET}</dd>
-        </div>
-      </dl>
+            (StreakTrendRow in Home.tsx), so You never introduces a second
+            source of truth for it. Still no "best streak" beside it:
+            `AccountStats` doesn't track a lifetime-best anywhere
+            server-side, and this repo's convention is to never fabricate a
+            number the server hasn't actually computed. */}
+        <StatGroup title="Turning up">
+          <StatRow
+            value={stats ? stats.dailyStreak : null}
+            label={stats?.dailyStreak === 1 ? "day streak" : "day streak"}
+          />
+          {/* Three old tiles (Attempts / Completed / DNFs) restated one
+              fact. "37 of 44 finished" says it once, and leaves DNFs to
+              carry only what it alone knows. */}
+          <StatRow
+            value={totals ? totals.completed : null}
+            label={totals ? `of ${totals.attempts} finished` : "finished"}
+          />
+          <StatRow value={totals ? totals.abandoned : null} label="DNFs" />
+        </StatGroup>
+        <StatGroup title="Personal bests">
+          <StatRow
+            value={totals?.bestElapsedMs == null ? null : formatStatDuration(totals.bestElapsedMs)}
+            label="fastest race"
+          />
+          <StatRow
+            value={totals?.bestClicks == null ? null : totals.bestClicks}
+            label="fewest clicks"
+          />
+        </StatGroup>
+        <StatGroup title="Totals">
+          {/* `totalDwellMs` is time actually spent ON pages, summed - not
+              `sum(elapsed_ms)`, which for a DNF is wall clock and would
+              silently count a tab left open. See its doc comment in
+              domain/types.ts. */}
+          <StatRow
+            value={totals ? formatStatDuration(totals.totalDwellMs) : null}
+            label="racing"
+          />
+          <StatRow value={totals ? totals.totalClicks : null} label="clicks" />
+        </StatGroup>
+      </div>
       <PageLists stats={stats} />
     </section>
+  );
+}
+
+function StatGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="you-group">
+      <h3>{title}</h3>
+      <dl>{children}</dl>
+    </section>
+  );
+}
+
+/** Value first, label second - the eye lands on the number, and the label
+ * qualifies it. A null value is genuinely unknown (no completed race yet),
+ * never a zero. */
+function StatRow({ value, label }: { value: string | number | null; label: string }) {
+  return (
+    <div>
+      <dd>{value === null ? NO_DATA_YET : value}</dd>
+      <dt>{label}</dt>
+    </div>
   );
 }
 

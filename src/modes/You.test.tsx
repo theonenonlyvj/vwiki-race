@@ -5,6 +5,8 @@ import You from "./You";
 import type { AccountStats, PageStat } from "../domain/types";
 import type { VGamesIdentitySession } from "../services/vgamesIdentity";
 
+const NO_DATA = "No data yet.";
+
 const claimedSession: VGamesIdentitySession = {
   accountId: "acc-1",
   displayName: "Vijay",
@@ -90,12 +92,12 @@ describe("You: RC-06 (one honest loading/error system) - three visually distinct
     expect(screen.queryByText(/loading your stats/i)).toBeNull();
     expect(screen.queryByText(/couldn.t load your stats/i)).toBeNull();
     // Confirmed-zero totals render as "0", not a placeholder.
-    const attemptsRow = screen.getByText("Attempts").closest("div")!;
-    expect(attemptsRow).toHaveTextContent("0");
+    const finished = screen.getByText("of 0 finished").closest("div")!;
+    expect(finished).toHaveTextContent("0");
     // bestElapsedMs/bestClicks are legitimately null before a first
     // completion - "No data yet." is correct there even in the ready state.
-    const bestSpeedRow = screen.getByText("Best speed").closest("div")!;
-    expect(bestSpeedRow).toHaveTextContent("No data yet.");
+    const bestSpeedRow = screen.getByText("fastest race").closest("div")!;
+    expect(bestSpeedRow).toHaveTextContent(NO_DATA);
   });
 
   it("the three states are mutually exclusive and distinct on the same identity", () => {
@@ -178,6 +180,82 @@ describe("You: RC-06 (one honest loading/error system) - three visually distinct
     expect(statsPanel).toHaveClass("surface-entrance");
     expect(document.querySelectorAll(".surface-entrance")).toHaveLength(1);
     expect(document.querySelector(".you-empty-state")).toBeNull();
+  });
+});
+
+/**
+ * Layout B (owner pick, 2026-08-15). The nine equal bordered tiles are
+ * replaced by two FEATURED averages in the display face plus three groups
+ * that mean something — how often you turn up, your personal bests, your
+ * lifetime totals. The old grid had no hierarchy and spent three tiles
+ * (Attempts / Completed / DNFs) restating one fact; "37 of 44" says it
+ * once.
+ */
+describe("You: layout B — featured averages plus meaningful groups", () => {
+  const playedStats: AccountStats = {
+    ...zeroStats,
+    totals: {
+      attempts: 44,
+      completed: 37,
+      abandoned: 7,
+      timedCompleted: 37,
+      totalClicks: 464,
+      bestClicks: 1,
+      bestElapsedMs: 8_100,
+      averageClicks: 9.6,
+      averageElapsedMs: 281_000,
+      totalDwellMs: 17_400_000,
+    },
+    dailyStreak: 32,
+  };
+
+  it("features exactly the two averages, in the display face", () => {
+    renderYou({ stats: playedStats, statsStatus: "ready" });
+    const featured = document.querySelector(".you-featured")!;
+
+    expect(featured.querySelectorAll("div")).toHaveLength(2);
+    expect(featured).toHaveTextContent("Average speed");
+    expect(featured).toHaveTextContent("4:41");
+    expect(featured).toHaveTextContent("Average clicks");
+    expect(featured).toHaveTextContent("9.6");
+  });
+
+  it("renders an average speed over a minute as m:ss, never as raw seconds", () => {
+    renderYou({ stats: playedStats, statsStatus: "ready" });
+
+    // The bug this replaces: the same value shipped as "280.7s".
+    expect(screen.getByText("4:41")).toBeVisible();
+    expect(screen.queryByText(/^\d{3,}\.\d+s$/)).toBeNull();
+  });
+
+  it("folds attempts, completed and DNFs into one honest 'of N finished' line", () => {
+    renderYou({ stats: playedStats, statsStatus: "ready" });
+
+    expect(screen.getByText("of 44 finished")).toBeVisible();
+    expect(screen.getByText("37")).toBeVisible();
+    // The three separate tiles are gone.
+    expect(screen.queryByText("Attempts")).toBeNull();
+    expect(screen.queryByText("Completed")).toBeNull();
+  });
+
+  it("renders total racing time in hours, where m:ss would read as 290:00", () => {
+    renderYou({ stats: playedStats, statsStatus: "ready" });
+
+    expect(screen.getByText("4h 50m")).toBeVisible();
+    expect(screen.getByText("racing")).toBeVisible();
+  });
+
+  it("groups the remaining stats under three headings that mean something", () => {
+    renderYou({ stats: playedStats, statsStatus: "ready" });
+    const heads = [...document.querySelectorAll(".you-group h3")].map((h) => h.textContent);
+
+    expect(heads).toEqual(["Turning up", "Personal bests", "Totals"]);
+  });
+
+  it("keeps a best speed under a minute at tenth-of-a-second precision", () => {
+    renderYou({ stats: playedStats, statsStatus: "ready" });
+
+    expect(screen.getByText("8.1s")).toBeVisible();
   });
 });
 

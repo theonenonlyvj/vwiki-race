@@ -3432,13 +3432,20 @@ export function createD1TrackingRepository(options: {
                 sum(status = 'completed') completed,
                 sum(status = 'abandoned' AND click_count >= ?) abandoned,
                 sum(status = 'completed' AND protocol_version = 2 AND elapsed_ms IS NOT NULL) timed_completed,
-                coalesce(sum(CASE WHEN status = 'completed' THEN click_count ELSE 0 END), 0) total_clicks,
+                coalesce(sum(CASE WHEN status = 'completed'
+                                       OR (status = 'abandoned' AND click_count >= ?)
+                                  THEN click_count ELSE 0 END), 0) total_clicks,
                 min(CASE WHEN status = 'completed' THEN click_count END) best_clicks,
                 min(CASE WHEN status = 'completed' AND protocol_version = 2 THEN elapsed_ms END) best_elapsed_ms,
                 coalesce(avg(CASE WHEN status = 'completed' THEN click_count END), 0) average_clicks,
                 coalesce(avg(CASE WHEN status = 'completed' AND protocol_version = 2 THEN elapsed_ms END), 0) average_elapsed_ms
          FROM owner_runs`,
-      ).bind(...receipt.bindings, MIN_COUNTED_DNF_CLICKS, MIN_COUNTED_DNF_CLICKS).first<AccountStatsTotalsRow>();
+      ).bind(
+        ...receipt.bindings,
+        MIN_COUNTED_DNF_CLICKS, // attempts
+        MIN_COUNTED_DNF_CLICKS, // abandoned
+        MIN_COUNTED_DNF_CLICKS, // total_clicks - gated 2026-08-15, see below
+      ).first<AccountStatsTotalsRow>();
       // You's two page lists (owner request, 2026-08-15: "toggle with total
       // time spent, but have both"). `visits` is unchanged from the
       // single-list version - starts + destinations, ungated (see
