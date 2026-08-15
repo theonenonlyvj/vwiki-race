@@ -3716,6 +3716,7 @@ describe("Task 4 D1 projections", () => {
         bestElapsedMs: null,
         averageClicks: 0,
         averageElapsedMs: 0,
+        totalDwellMs: 0,
       },
       mostVisited: [],
       mostTimeSpent: [],
@@ -3772,6 +3773,9 @@ describe("Task 4 D1 projections", () => {
         bestElapsedMs: 4200,
         averageClicks: 2.5,
         averageElapsedMs: 4200,
+        // Only the protocol-2 completed run carries a timed step (4200ms on
+        // "Moon"); the two legacy runs are excluded from dwell entirely.
+        totalDwellMs: 4200,
       },
       // "Moon" starts all three runs (3 visits) but only the protocol-2 one
       // has a timed step, so its 4200ms total averages over that ONE dwell
@@ -4033,6 +4037,89 @@ describe("getAccountStats per-page dwell (You's \"Most time spent\")", () => {
     const stats = await repository.getAccountStats(account);
 
     expect(stats.mostTimeSpent.map((row) => row.title)).toEqual(["Apple", "Zebra"]);
+  });
+
+  /**
+   * `totals.totalDwellMs` - You's "time racing" figure (owner request,
+   * 2026-08-15). Deliberately the SUM OF MEASURED PAGE DWELLS, not
+   * `sum(elapsed_ms)`, and that distinction is the whole point of the
+   * field: `abandonRunV2` overwrites a DNF's `elapsed_ms` with WALL CLOCK
+   * (`julianday(abandoned_at) - julianday(started_at)`), so a DNF's
+   * elapsed_ms measures "start until the player got round to clearing the
+   * run" - a different clock from a completed run's decision time, and one
+   * that silently absorbs however long a tab sat open. Summing the two
+   * together is the same class of bug the `protocol_version = 2` guard
+   * already exists to prevent. Production evidence (2026-08-15): the
+   * owner's 7 counted DNFs held 3h30m of elapsed_ms, of which 81 minutes
+   * sat in ONE run's trailing wall-clock gap; summing measured dwells
+   * instead drops that by construction rather than by special case.
+   */
+  it("totals.totalDwellMs sums measured page dwell across counted runs", async () => {
+    await insertRunWithPath({
+      id: "dwell-total-completed",
+      steps: [
+        { source: "Moon", destination: "Gravity", cumulativeMs: 5_000 },
+        { source: "Gravity", destination: "Physics", cumulativeMs: 12_000 },
+      ],
+    });
+    await insertRunWithPath({
+      id: "dwell-total-dnf",
+      status: "abandoned",
+      steps: [
+        { source: "Sun", destination: "Star", cumulativeMs: 1_000 },
+        { source: "Star", destination: "Fusion", cumulativeMs: 3_000 },
+      ],
+    });
+
+    const { repository } = fixture();
+    const stats = await repository.getAccountStats(account);
+
+    // 12_000 clicked through on the completed run + 3_000 on the DNF.
+    expect(stats.totals.totalDwellMs).toBe(15_000);
+  });
+
+  it("excludes a sub-threshold DNF from totalDwellMs, same FB-7 gate as attempts", async () => {
+    await insertRunWithPath({
+      id: "dwell-total-real",
+      steps: [
+        { source: "Moon", destination: "Gravity", cumulativeMs: 5_000 },
+        { source: "Gravity", destination: "Physics", cumulativeMs: 12_000 },
+      ],
+    });
+    // One click only: an accidental open, not an attempt - and 9 minutes of
+    // it, which is exactly the kind of row that would inflate the headline.
+    await insertRunWithPath({
+      id: "dwell-total-ghost",
+      status: "abandoned",
+      steps: [{ source: "Sun", destination: "Star", cumulativeMs: 540_000 }],
+    });
+
+    const { repository } = fixture();
+    const stats = await repository.getAccountStats(account);
+
+    expect(stats.totals.totalDwellMs).toBe(12_000);
+  });
+
+  it("clamps each page's contribution to totalDwellMs, not just the list", async () => {
+    await insertRunWithPath({
+      id: "dwell-total-afk",
+      steps: [
+        { source: "Moon", destination: "Gravity", cumulativeMs: MAX_COUNTED_DWELL_MS + 3_600_000 },
+        { source: "Gravity", destination: "Physics", cumulativeMs: MAX_COUNTED_DWELL_MS + 3_602_000 },
+      ],
+    });
+
+    const { repository } = fixture();
+    const stats = await repository.getAccountStats(account);
+
+    expect(stats.totals.totalDwellMs).toBe(MAX_COUNTED_DWELL_MS + 2_000);
+  });
+
+  it("reports zero rather than null when an account has no timed steps", async () => {
+    const { repository } = fixture();
+    await expect(repository.getAccountStats(account)).resolves.toMatchObject({
+      totals: { totalDwellMs: 0 },
+    });
   });
 
   it("caps mostTimeSpent at 10 rows, dropping the smallest total", async () => {
@@ -7562,32 +7649,37 @@ async function insertRunWithPath(input: {
   steps: Array<{ source: string; destination: string; cumulativeMs: number }>;
   accountId?: string;
   protocolVersion?: 1 | 2;
+  status?: "completed" | "abandoned";
 }) {
   const accountId = input.accountId ?? account.accountId;
   const first = input.steps[0];
   const last = input.steps[input.steps.length - 1];
+  const status = input.status ?? "completed";
   await env.VWIKI_RACE_DB.prepare(
     `INSERT INTO runs
        (id, challenge_id, account_id, canonical_account_id, status, started_at,
-        completed_at, elapsed_ms, wall_elapsed_ms, click_count, start_title,
-        target_title, final_title, start_page_id, target_page_id, last_page_id,
-        last_title, expires_at, ranked_eligible, protocol_version, created_at,
-        updated_at)
-     VALUES (?, 'challenge-0001', ?, ?, 'completed',
-             '2026-07-14T01:00:00.000Z', '2026-07-14T01:30:00.000Z', ?, ?, ?, ?,
-             ?, ?, 19331, 38579, 38579, ?,
+        completed_at, abandoned_at, elapsed_ms, wall_elapsed_ms, click_count,
+        start_title, target_title, final_title, start_page_id, target_page_id,
+        last_page_id, last_title, expires_at, ranked_eligible, protocol_version,
+        created_at, updated_at)
+     VALUES (?, 'challenge-0001', ?, ?, ?,
+             '2026-07-14T01:00:00.000Z', ?, ?, ?, ?, ?,
+             ?, ?, ?, 19331, 38579, 38579, ?,
              '2026-07-15T01:00:00.000Z', 1, ?,
              '2026-07-14T01:00:00.000Z', '2026-07-14T01:30:00.000Z')`,
   ).bind(
     input.id,
     accountId,
     accountId,
+    status,
+    status === "completed" ? "2026-07-14T01:30:00.000Z" : null,
+    status === "abandoned" ? "2026-07-14T01:30:00.000Z" : null,
     last.cumulativeMs,
     last.cumulativeMs,
     input.steps.length,
     first.source,
     last.destination,
-    last.destination,
+    status === "completed" ? last.destination : null,
     last.destination,
     input.protocolVersion ?? 2,
   ).run();

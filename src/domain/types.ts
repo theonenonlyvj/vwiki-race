@@ -309,6 +309,29 @@ export interface AccountStats {
     bestElapsedMs: number | null;
     averageClicks: number;
     averageElapsedMs: number;
+    /**
+     * Total time actually spent ON pages across counted runs (owner
+     * request, 2026-08-15: "Totals should have total time across all races
+     * too"), FB-7-gated exactly like `attempts`.
+     *
+     * This is the SUM OF MEASURED PAGE DWELLS, never `sum(elapsed_ms)`, and
+     * that difference is why the field exists server-side instead of being
+     * derived from average × count. `abandonRunV2` overwrites a DNF's
+     * `elapsed_ms` with WALL CLOCK, so a DNF's elapsed_ms answers "how long
+     * from start until the player got round to clearing the run" - a
+     * different clock from a completed run's decision time, and one that
+     * absorbs however long a tab sat open. Summing the two together is the
+     * same class of bug the `protocol_version = 2` guard already prevents
+     * inside the dwell CTE. Production evidence (2026-08-15): the owner's 7
+     * counted DNFs held 3h30m of elapsed_ms, 81 minutes of it inside ONE
+     * run's trailing wall-clock gap; summing measured dwells drops that by
+     * construction rather than by special case.
+     *
+     * Each page's contribution is clamped by `MAX_COUNTED_DWELL_MS`, the
+     * same ceiling the two lists use - a total that quietly disagreed with
+     * the list beside it would be worse than either number alone.
+     */
+    totalDwellMs: number;
   };
   /**
    * Most-visited pages (profile "You" tab, single top-10 list - replaces

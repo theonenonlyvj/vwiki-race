@@ -1148,6 +1148,10 @@ function isAccountStats(value: unknown): value is AccountStats {
     (totals.bestElapsedMs === null || hasNumber(totals, "bestElapsedMs")) &&
     hasNumber(totals, "averageClicks") &&
     hasNumber(totals, "averageElapsedMs") &&
+    // Required, not optional: the documented `ship it` order deploys the
+    // Worker before Pages, so a client new enough to read this never meets
+    // a server too old to send it.
+    hasNumber(totals, "totalDwellMs") &&
     isPageStatList(value.mostVisited) &&
     isPageStatList(value.mostTimeSpent) &&
     hasNumber(value, "dailyStreak") &&

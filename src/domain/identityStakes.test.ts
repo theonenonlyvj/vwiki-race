@@ -19,6 +19,7 @@ function stats(attempts: number, dailyStreak: number): AccountStats {
       bestElapsedMs: null,
       averageClicks: 0,
       averageElapsedMs: 0,
+      totalDwellMs: 0,
     },
     mostVisited: [],
     mostTimeSpent: [],

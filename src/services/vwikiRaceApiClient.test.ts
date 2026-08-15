@@ -809,6 +809,7 @@ describe("VWiki Race API client", () => {
         bestElapsedMs: 1500,
         averageClicks: 2,
         averageElapsedMs: 1500,
+        totalDwellMs: 0,
       },
       mostVisited: [],
       mostTimeSpent: [],
@@ -899,6 +900,7 @@ describe("VWiki Race API client", () => {
             ...accountStats(0).totals,
             averageClicks: null,
             averageElapsedMs: null,
+            totalDwellMs: 0,
           },
         },
       })),
@@ -930,6 +932,19 @@ describe("VWiki Race API client", () => {
     const { mostTimeSpent: _mostTimeSpent, ...withoutTimeSpent } = accountStats(0);
     const client = createVWikiRaceApiClient(
       vi.fn(async () => Response.json({ stats: withoutTimeSpent })),
+      { apiOrigin },
+    );
+    await expect(client.getAccountStats("jwt")).rejects.toMatchObject({
+      code: "invalid_response",
+      status: 502,
+    });
+  });
+
+  it("rejects account stats missing totals.totalDwellMs", async () => {
+    const base = accountStats(0);
+    const { totalDwellMs: _drop, ...totalsWithout } = base.totals;
+    const client = createVWikiRaceApiClient(
+      vi.fn(async () => Response.json({ stats: { ...base, totals: totalsWithout } })),
       { apiOrigin },
     );
     await expect(client.getAccountStats("jwt")).rejects.toMatchObject({
@@ -1779,6 +1794,7 @@ function accountStats(attempts: number) {
       bestElapsedMs: null,
       averageClicks: 0,
       averageElapsedMs: 0,
+      totalDwellMs: 0,
     },
     mostVisited: [],
     mostTimeSpent: [],

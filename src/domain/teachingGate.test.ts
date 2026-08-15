@@ -14,6 +14,7 @@ function stats(completed: number): AccountStats {
       bestElapsedMs: 1_500,
       averageClicks: 2,
       averageElapsedMs: 1_500,
+      totalDwellMs: 0,
     },
     mostVisited: [],
     mostTimeSpent: [],
