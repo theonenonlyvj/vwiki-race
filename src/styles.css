@@ -3159,7 +3159,17 @@ h1 {
   padding: 10px;
 }
 
-.stat-grid div:last-child {
+/* Owner feedback, 2026-08-15 ("this layout is ugly"): this span used to be
+   unconditional. PKG-09 wrote it when You rendered SEVEN tiles - 7 into 3
+   columns leaves the last one alone, and stretching it read as a
+   deliberate wide summary. You renders NINE now (QF-09's Avg speed among
+   them), and 9 into 3 columns fill exactly - so the unconditional rule
+   punched a hole in the last row and stretched a tile with two perfectly
+   good neighbours. Gating on `:nth-child(3n + 1)` means the tile is
+   stretched only when it genuinely IS the orphan, which keeps the rule
+   correct through the next tile-count change instead of needing another
+   hand-edit. */
+.stat-grid div:last-child:nth-child(3n + 1) {
   grid-column: 1 / -1;
 }
 
@@ -3190,6 +3200,122 @@ h1 {
      an uppercase kicker subheading (not a "title"), so it follows the
      meta/label bucket - 400. */
   font-weight: 400;
+}
+
+/* ---- You's page lists (owner feedback, 2026-08-15) ----------------------
+   The list is a ranked horizontal bar chart, not a table: ONE measure,
+   so bar LENGTH carries magnitude and the colour stays constant (a hue
+   ramp here would encode rank twice and say nothing new). Every row is
+   directly labelled, so the bar is decoration over data that already
+   reads without it - which is also why it sits at a low enough alpha to
+   leave the row text's contrast untouched. */
+
+.you-pages-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  /* Phones: the switch drops under the kicker instead of crushing it. */
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.you-pages-head h3 {
+  margin: 0;
+}
+
+/* NOT `.board-segment-control`: that control's `grid-auto-flow: column`
+   auto tracks absorb free space, which reads as a control at Boards' five
+   segments (~20% each) and as two slabs at You's two (~50% each). Sized to
+   content here, so two segments look like a switch. Boards keeps its own
+   rule untouched - it is correct at its own segment count. */
+.you-pages-switch {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.you-pages-switch button {
+  /* The app-wide base button height (38px), not the 44px segment-control
+     height - this is a compact in-panel sort switch, not a nav tabbar. */
+  min-height: 38px;
+  padding: 7px 12px;
+  background: var(--ink-soft);
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* PKG-04: coral stays reserved for Start/End Run - the active segment is
+   the same teal tint/outline the Boards control and auth tabs already
+   use. */
+.you-pages-switch button.active {
+  background: rgba(13, 235, 215, 0.12);
+  border-color: var(--cyan);
+  color: var(--cyan);
+  font-weight: 600;
+}
+
+.you-pages-list {
+  display: grid;
+  /* 2px of surface between bars, rather than rules between rows - the gap
+     is what separates adjacent marks in a bar chart. */
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.you-pages-list li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.5em minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 8px;
+  overflow-wrap: anywhere;
+}
+
+/* The bar. Anchored to the row's left edge, rounded only on the data end,
+   and explicitly z-index 0: a positioned pseudo-element would otherwise
+   paint OVER its static siblings, and a negative z-index would drop it
+   behind the panel's own background and vanish. */
+.you-pages-list li::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 0;
+  width: var(--fill, 0%);
+  border-radius: 0 3px 3px 0;
+  background: rgba(13, 235, 215, 0.1);
+  pointer-events: none;
+}
+
+.you-pages-list li > * {
+  position: relative;
+  z-index: 1;
+}
+
+.you-pages-rank {
+  color: var(--muted);
+  font-size: 0.78rem;
+  /* Right-aligned so 1-9 and 10 share one edge instead of stepping. */
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.you-pages-title {
+  color: var(--text);
+}
+
+.you-pages-figure {
+  color: var(--muted);
+  flex-shrink: 0;
+  font-size: 0.86rem;
+  /* Fixed-width digits so the times form a clean column down the list
+     instead of jittering row to row. */
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .compact-list {
@@ -3513,6 +3639,13 @@ h1 {
 
   .stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Same orphan gate as the desktop rule above, re-stated for this grid's
+     own column count: 9 tiles into 2 columns DOES leave a lone last tile,
+     so here the span is what closes the row. */
+  .stat-grid div:last-child:nth-child(2n + 1) {
+    grid-column: 1 / -1;
   }
 
   .create-challenge-form {

@@ -329,6 +329,52 @@ describe("You: Most visited / Most time spent toggle", () => {
     expect(visitedTab).toHaveAttribute("aria-selected", "true");
   });
 
+  /**
+   * The list is a ranked horizontal bar chart, not a table: each row's bar
+   * length encodes the metric the list is CURRENTLY sorted by, so bars
+   * never increase as you read down. One measure, one hue - length carries
+   * magnitude, colour is constant.
+   */
+  it("scales each row's bar against the top row of the active ranking", () => {
+    renderYou({ stats: togglingStats, statsStatus: "ready" });
+    const rows = [...document.querySelectorAll<HTMLLIElement>(".you-pages-list li")];
+
+    // Visits view: bars encode count (7, 4, 3), peak 7.
+    expect(rows.map((row) => row.style.getPropertyValue("--fill"))).toEqual([
+      "100%",
+      "57%",
+      "43%",
+    ]);
+  });
+
+  it("re-scales the bars against the time metric after toggling", async () => {
+    const user = userEvent.setup();
+    renderYou({ stats: togglingStats, statsStatus: "ready" });
+
+    await user.click(screen.getByRole("tab", { name: "Most time" }));
+    const rows = [...document.querySelectorAll<HTMLLIElement>(".you-pages-list li")];
+
+    // Time view: bars encode totalMs (791_000, 106_000), peak 791_000.
+    expect(rows.map((row) => row.style.getPropertyValue("--fill"))).toEqual(["100%", "13%"]);
+  });
+
+  it("never gives a visited page a zero-length bar just because it has no time", () => {
+    // "Gravity" has null time but 3 real visits - in the VISITS ranking the
+    // bar encodes count, so a missing dwell sample must not flatten it.
+    renderYou({ stats: togglingStats, statsStatus: "ready" });
+    const gravityRow = screen.getByText("Gravity").closest("li")!;
+
+    expect(gravityRow.style.getPropertyValue("--fill")).toBe("43%");
+  });
+
+  it("numbers the rows and spells the figures out for hover/screen readers", () => {
+    renderYou({ stats: togglingStats, statsStatus: "ready" });
+    const rows = [...document.querySelectorAll<HTMLLIElement>(".you-pages-list li")];
+
+    expect([...rows[0].querySelectorAll("span")].map((s) => s.textContent)).toContain("1");
+    expect(rows[0].title).toBe("Earth — 7 visits, 1:46 total");
+  });
+
   it("shows 'No data yet.' on the time side even when visits exist", async () => {
     const user = userEvent.setup();
     renderYou({

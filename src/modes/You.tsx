@@ -1,4 +1,9 @@
-import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import StagedLoadingNotice from "../components/StagedLoadingNotice";
 import { formatMinutesSeconds } from "../domain/formatting";
 import { formatElapsed } from "../race/shared";
@@ -396,40 +401,56 @@ function PageLists({ stats }: { stats: AccountStats | null }) {
     tabRefs.current[next]?.focus();
   }
 
+  const rows = items.slice(0, 10);
+  // Bars encode the metric the list is CURRENTLY sorted by, so they always
+  // decrease down the list - the shape reads as the ranking itself rather
+  // than as a second, competing signal. No minimum-width floor: the
+  // smallest real value in either ranking is still a visible fraction of
+  // its peak, and padding it out would overstate it.
+  const peak = rows.reduce((most, row) => Math.max(most, pageMetric(row, view)), 0);
+
   return (
     <section className="you-pages">
-      <div
-        aria-label="Page ranking"
-        className="board-segment-control"
-        onKeyDown={handleTabKeyDown}
-        role="tablist"
-      >
-        {PAGE_VIEWS.map((key) => (
-          <button
-            aria-controls={YOU_PAGES_PANEL_ID}
-            aria-selected={view === key}
-            className={view === key ? "active" : undefined}
-            id={pageTabId(key)}
-            key={key}
-            onClick={() => setView(key)}
-            ref={(el) => {
-              tabRefs.current[key] = el;
-            }}
-            role="tab"
-            tabIndex={view === key ? 0 : -1}
-            type="button"
-          >
-            {PAGE_VIEW_LABEL[key]}
-          </button>
-        ))}
+      <div className="you-pages-head">
+        <h3>Pages</h3>
+        <div
+          aria-label="Page ranking"
+          className="you-pages-switch"
+          onKeyDown={handleTabKeyDown}
+          role="tablist"
+        >
+          {PAGE_VIEWS.map((key) => (
+            <button
+              aria-controls={YOU_PAGES_PANEL_ID}
+              aria-selected={view === key}
+              className={view === key ? "active" : undefined}
+              id={pageTabId(key)}
+              key={key}
+              onClick={() => setView(key)}
+              ref={(el) => {
+                tabRefs.current[key] = el;
+              }}
+              role="tab"
+              tabIndex={view === key ? 0 : -1}
+              type="button"
+            >
+              {PAGE_VIEW_LABEL[key]}
+            </button>
+          ))}
+        </div>
       </div>
       <div aria-labelledby={pageTabId(view)} id={YOU_PAGES_PANEL_ID} role="tabpanel">
-        {items.length ? (
-          <ol className="compact-list">
-            {items.slice(0, 10).map((item) => (
-              <li key={item.title}>
-                <span>{item.title}</span>
-                <span className="muted">{pageFigures(item, view)}</span>
+        {rows.length ? (
+          <ol className="you-pages-list">
+            {rows.map((item, index) => (
+              <li
+                key={item.title}
+                style={{ "--fill": barWidth(item, view, peak) } as CSSProperties}
+                title={pageTooltip(item)}
+              >
+                <span className="you-pages-rank">{index + 1}</span>
+                <span className="you-pages-title">{item.title}</span>
+                <span className="you-pages-figure">{pageFigures(item, view)}</span>
               </li>
             ))}
           </ol>
@@ -439,6 +460,26 @@ function PageLists({ stats }: { stats: AccountStats | null }) {
       </div>
     </section>
   );
+}
+
+/** Whichever number the active ranking is sorted by - the one the bar
+ * length has to encode for the list to read as its own ordering. */
+function pageMetric(stat: PageStat, view: PageView): number {
+  return view === "time" ? stat.totalMs ?? 0 : stat.count;
+}
+
+function barWidth(stat: PageStat, view: PageView, peak: number): string {
+  return peak > 0 ? `${Math.round((pageMetric(stat, view) / peak) * 100)}%` : "0%";
+}
+
+/** Says out loud what the terse `10:00 · ×5` row figure means. Carries
+ * BOTH numbers regardless of the active view, so hovering never requires
+ * toggling to see the other one. */
+function pageTooltip(stat: PageStat): string {
+  const visits = `${stat.count} ${stat.count === 1 ? "visit" : "visits"}`;
+  return stat.totalMs === null
+    ? `${stat.title} — ${visits}, no timed visit`
+    : `${stat.title} — ${visits}, ${formatMinutesSeconds(stat.totalMs)} total`;
 }
 
 /** Reuses `formatMinutesSeconds` - the app's one duration format (Global

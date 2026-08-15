@@ -50,15 +50,28 @@ export const MIN_GIVE_UP_WALL_MS = 180_000;
 // only by `RUN_EXPIRY_MS` (24h): uncapped, one lunch break plants a
 // multi-hour page at #1 on that player's list permanently.
 //
-// The value came from the 2026-08-13 production snapshot (2255 accepted
-// steps): p50 14s, p90 80s, p99 4.5m, max 25.7m. A 5-minute clamp would
-// have clipped 17 steps (0.75%) and visibly reordered the top - i.e. it
-// censors real struggle on genuinely link-poor pages. 10 minutes clips 2
-// steps (0.09%) and leaves the ranking intact, so it costs today's data
-// nothing while still closing the idle-tab hole. Deliberately its own
-// constant rather than a reuse of any give-up/DNF threshold above: those
-// gate "did this count as an attempt," this only shapes a stats list.
-export const MAX_COUNTED_DWELL_MS = 600_000;
+// Raised 10min -> 20min by owner decision, 2026-08-15, when the shipped
+// 10-minute value was caught understating a real row: the owner's own
+// "Supreme Court of the United States" was a true 13:11 across two visits
+// (one of them 12:12) and rendered as 10:59 with nothing on screen saying
+// it had been cut. A clamp that silently rewrites a number the player can
+// feel is worse than the outlier it guards against, and the owner chose
+// headroom over a "this was capped" marker.
+//
+// Sizing, from the 2026-08-13 production snapshot (2255 accepted steps):
+// p50 14s, p90 80s, p99 4.5m, max 25.7m. A 5-minute clamp would clip 17
+// steps (0.75%) and visibly reorder the top - it censors real struggle on
+// genuinely link-poor pages. 10 minutes clipped 2 steps, one of them the
+// legitimate row above. 20 minutes clips exactly one step in the whole
+// snapshot - the 25.7m outlier this constant exists for - so it still
+// closes the idle-tab hole while letting every observed real reading
+// session through. The residual, accepted: a genuine 19-minute walk-away
+// now counts as thinking time.
+//
+// Deliberately its own constant rather than a reuse of any give-up/DNF
+// threshold above: those gate "did this count as an attempt," this only
+// shapes a stats list.
+export const MAX_COUNTED_DWELL_MS = 1_200_000;
 
 export interface GiveUpChallengeInput {
   challengeId: string;
