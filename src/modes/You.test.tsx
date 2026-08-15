@@ -2,7 +2,7 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import You from "./You";
-import type { AccountStats } from "../domain/types";
+import type { AccountStats, PageStat } from "../domain/types";
 import type { VGamesIdentitySession } from "../services/vgamesIdentity";
 
 const claimedSession: VGamesIdentitySession = {
@@ -25,6 +25,7 @@ const zeroStats: AccountStats = {
     averageElapsedMs: 0,
   },
   mostVisited: [],
+  mostTimeSpent: [],
   dailyStreak: 0,
   trend30: { ranked: false, avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, guard: 3 },
 };
@@ -179,48 +180,51 @@ describe("You: RC-06 (one honest loading/error system) - three visually distinct
   });
 });
 
-describe("You: single 'Most visited pages' list (drops Top starts/Top targets)", () => {
-  it("renders one 'Most visited pages' list with per-title counts, up to 10 rows, no Top starts/Top targets sections", () => {
+function pageRow(title: string, count: number, totalMs: number | null, avgMs: number | null): PageStat {
+  return { title, count, totalMs, avgMs };
+}
+
+function pageList(): HTMLOListElement | null {
+  return document.querySelector(".you-pages ol");
+}
+
+describe("You: single page list (drops Top starts/Top targets)", () => {
+  it("renders one list with per-title counts, up to 10 rows, no Top starts/Top targets sections", () => {
     const stats: AccountStats = {
       ...zeroStats,
       mostVisited: [
-        { title: "Cat", count: 12 },
-        { title: "Dog", count: 9 },
-        { title: "Bird", count: 8 },
-        { title: "Fish", count: 7 },
-        { title: "Ant", count: 6 },
-        { title: "Bee", count: 5 },
-        { title: "Owl", count: 4 },
-        { title: "Fox", count: 3 },
-        { title: "Bat", count: 2 },
-        { title: "Elk", count: 1 },
+        pageRow("Cat", 12, 60_000, 5_000),
+        pageRow("Dog", 9, null, null),
+        pageRow("Bird", 8, null, null),
+        pageRow("Fish", 7, null, null),
+        pageRow("Ant", 6, null, null),
+        pageRow("Bee", 5, null, null),
+        pageRow("Owl", 4, null, null),
+        pageRow("Fox", 3, null, null),
+        pageRow("Bat", 2, null, null),
+        pageRow("Elk", 1, null, null),
       ],
     };
     renderYou({ stats, statsStatus: "ready" });
 
-    expect(screen.getByText("Most visited pages")).toBeVisible();
     expect(screen.queryByText("Top starts")).toBeNull();
     expect(screen.queryByText("Top targets")).toBeNull();
     expect(screen.queryByText("Visited pages")).toBeNull();
 
     expect(screen.getByText("Cat")).toBeVisible();
-    expect(screen.getByText("×12")).toBeVisible();
     expect(screen.getByText("Elk")).toBeVisible();
-    expect(screen.getByText("×1")).toBeVisible();
 
-    const list = screen.getByText("Most visited pages").closest("section")!.querySelector("ol")!;
-    expect(list.querySelectorAll("li")).toHaveLength(10);
+    expect(pageList()!.querySelectorAll("li")).toHaveLength(10);
   });
 
   it("caps the list at 10 even when the server sends more rows", () => {
     const stats: AccountStats = {
       ...zeroStats,
-      mostVisited: Array.from({ length: 12 }, (_, i) => ({ title: `Page ${i}`, count: 12 - i })),
+      mostVisited: Array.from({ length: 12 }, (_, i) => pageRow(`Page ${i}`, 12 - i, null, null)),
     };
     renderYou({ stats, statsStatus: "ready" });
 
-    const list = screen.getByText("Most visited pages").closest("section")!.querySelector("ol")!;
-    expect(list.querySelectorAll("li")).toHaveLength(10);
+    expect(pageList()!.querySelectorAll("li")).toHaveLength(10);
     expect(screen.queryByText("Page 10")).toBeNull();
     expect(screen.queryByText("Page 11")).toBeNull();
   });
@@ -228,7 +232,112 @@ describe("You: single 'Most visited pages' list (drops Top starts/Top targets)",
   it("shows 'No data yet.' when mostVisited is empty", () => {
     renderYou({ stats: zeroStats, statsStatus: "ready" });
 
-    const section = screen.getByText("Most visited pages").closest("section")!;
-    expect(section).toHaveTextContent("No data yet.");
+    expect(document.querySelector(".you-pages")).toHaveTextContent("No data yet.");
+  });
+});
+
+/**
+ * The "Most time spent" toggle (owner request, 2026-08-15). The one thing
+ * these tests exist to pin down is that the two views are two SERVER
+ * rankings, not one list re-sorted in the browser - the real data's two
+ * top-10s are near-disjoint, so a client-side re-sort would hide exactly
+ * the pages the toggle was added to surface.
+ */
+describe("You: Most visited / Most time spent toggle", () => {
+  const togglingStats: AccountStats = {
+    ...zeroStats,
+    mostVisited: [
+      pageRow("Earth", 7, 106_000, 15_143),
+      pageRow("Moon", 4, 20_000, 5_000),
+      // Only ever reached as a target: visited, never measured.
+      pageRow("Gravity", 3, null, null),
+    ],
+    mostTimeSpent: [
+      // Deliberately absent from mostVisited above - only a second server
+      // ranking can put it on screen.
+      pageRow("Supreme Court of the United States", 2, 791_000, 395_500),
+      pageRow("Earth", 7, 106_000, 15_143),
+    ],
+  };
+
+  it("opens on the visits ranking, each row carrying its count and average time", () => {
+    renderYou({ stats: togglingStats, statsStatus: "ready" });
+
+    expect(screen.getByRole("tab", { name: "Most visited" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Earth")).toBeVisible();
+    expect(screen.getByText("×7 · 0:15 avg")).toBeVisible();
+  });
+
+  it("renders an em dash, not 0:00, for a page the server has no dwell sample for", () => {
+    renderYou({ stats: togglingStats, statsStatus: "ready" });
+
+    expect(screen.getByText("×3 · —")).toBeVisible();
+  });
+
+  it("switches to the server's time ranking - not a re-sort of the visits list", async () => {
+    const user = userEvent.setup();
+    renderYou({ stats: togglingStats, statsStatus: "ready" });
+
+    expect(screen.queryByText("Supreme Court of the United States")).toBeNull();
+
+    await user.click(screen.getByRole("tab", { name: "Most time" }));
+
+    expect(screen.getByText("Supreme Court of the United States")).toBeVisible();
+    expect(screen.queryByText("Moon")).toBeNull();
+  });
+
+  it("leads a time row with the total and keeps the visit count alongside", async () => {
+    const user = userEvent.setup();
+    renderYou({ stats: togglingStats, statsStatus: "ready" });
+
+    await user.click(screen.getByRole("tab", { name: "Most time" }));
+
+    expect(screen.getByText("13:11 · ×2")).toBeVisible();
+  });
+
+  it("moves aria-selected to the active segment, like Boards' period control", async () => {
+    const user = userEvent.setup();
+    renderYou({ stats: togglingStats, statsStatus: "ready" });
+
+    await user.click(screen.getByRole("tab", { name: "Most time" }));
+
+    expect(screen.getByRole("tab", { name: "Most time" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Most visited" })).toHaveAttribute("aria-selected", "false");
+  });
+
+  // Matches Boards' period control (PKG-10, owner-proxy ruling: "keep
+  // role=tab/tablist, complete the pattern") - roving tabindex plus
+  // arrow-key automatic activation, wrapping at both ends.
+  it("activates the other segment on ArrowRight, wrapping, with a roving tabindex", async () => {
+    const user = userEvent.setup();
+    renderYou({ stats: togglingStats, statsStatus: "ready" });
+    const visitedTab = screen.getByRole("tab", { name: "Most visited" });
+    const timeTab = screen.getByRole("tab", { name: "Most time" });
+
+    expect(visitedTab).toHaveAttribute("tabindex", "0");
+    expect(timeTab).toHaveAttribute("tabindex", "-1");
+
+    visitedTab.focus();
+    await user.keyboard("{ArrowRight}");
+
+    expect(timeTab).toHaveAttribute("aria-selected", "true");
+    expect(timeTab).toHaveFocus();
+    expect(screen.getByText("Supreme Court of the United States")).toBeVisible();
+
+    await user.keyboard("{ArrowRight}");
+
+    expect(visitedTab).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("shows 'No data yet.' on the time side even when visits exist", async () => {
+    const user = userEvent.setup();
+    renderYou({
+      stats: { ...zeroStats, mostVisited: [pageRow("Earth", 7, null, null)], mostTimeSpent: [] },
+      statsStatus: "ready",
+    });
+
+    await user.click(screen.getByRole("tab", { name: "Most time" }));
+
+    expect(document.querySelector(".you-pages")).toHaveTextContent("No data yet.");
   });
 });

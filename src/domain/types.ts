@@ -162,6 +162,28 @@ export interface CountStat {
   count: number;
 }
 
+/**
+ * One row of You's page lists - a title carrying BOTH dimensions, so the
+ * "Most visited"/"Most time spent" toggle is a re-sort of the same facts
+ * rather than two unrelated readouts (owner request, 2026-08-15: "first
+ * list is # with avg time, and toggle is total time with #").
+ *
+ * `totalMs`/`avgMs` are null - not 0 - when the page has no dwell sample,
+ * and that is a real, reachable state, not a defensive branch: dwell is
+ * measured on the page a click LEAVES, so a page only ever reached as a
+ * run's final target has nothing to measure, and protocol-1 runs are
+ * excluded from timing entirely. Null renders as an em dash; a 0 would
+ * claim the player spent no time there, which is a different (false)
+ * statement. `avgMs` averages over dwell samples only, so it can have a
+ * smaller denominator than `count` - see `getAccountStats`.
+ */
+export interface PageStat {
+  title: string;
+  count: number;
+  totalMs: number | null;
+  avgMs: number | null;
+}
+
 export interface JumpStat {
   sourceTitle: string;
   destinationTitle: string;
@@ -293,8 +315,24 @@ export interface AccountStats {
    * the former topStarts/topTargets/mostVisited three-list layout):
    * server-computed from ungated `owner_runs` (starts + destinations,
    * alias-resolved), see d1TrackingRepository.ts's `getAccountStats`.
+   * Ordered by visit count desc, title asc.
    */
-  mostVisited: CountStat[];
+  mostVisited: PageStat[];
+  /**
+   * The same page facts as `mostVisited`, re-ranked by total dwell desc
+   * (title asc tiebreak) - the other half of You's list toggle (owner
+   * request, 2026-08-15).
+   *
+   * This is a SECOND top-10, not a client-side re-sort of the first, and
+   * that is load-bearing: the two rankings are near-disjoint in real data
+   * (on the 2026-08-13 snapshot's heaviest account, 3 of 10 rows overlap),
+   * so the top page by time is routinely nowhere near the top 10 by visits.
+   * Re-sorting one list would silently hide exactly the rows this toggle
+   * exists to surface. Pages with no dwell sample never appear here at all
+   * (they'd be an unranked block of nulls); they still appear in
+   * `mostVisited` with a null time.
+   */
+  mostTimeSpent: PageStat[];
   /**
    * Increment 4 (UX redesign spec §Data requirements - "Streaks"): count of
    * consecutive Central dates, ending today or yesterday, on which this

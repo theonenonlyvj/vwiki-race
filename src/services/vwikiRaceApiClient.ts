@@ -1148,10 +1148,21 @@ function isAccountStats(value: unknown): value is AccountStats {
     (totals.bestElapsedMs === null || hasNumber(totals, "bestElapsedMs")) &&
     hasNumber(totals, "averageClicks") &&
     hasNumber(totals, "averageElapsedMs") &&
-    Array.isArray(value.mostVisited) &&
-    value.mostVisited.every((row) => isRecord(row) && hasString(row, "title") && hasNumber(row, "count")) &&
+    isPageStatList(value.mostVisited) &&
+    isPageStatList(value.mostTimeSpent) &&
     hasNumber(value, "dailyStreak") &&
     isAccountTrend30(value.trend30);
+}
+
+/** You's page rows (`PageStat`). `totalMs`/`avgMs` are nullable by design -
+ * a page with no dwell sample - so null passes but a non-number does not. */
+function isPageStatList(value: unknown): value is AccountStats["mostVisited"] {
+  return Array.isArray(value) && value.every((row) =>
+    isRecord(row) &&
+    hasString(row, "title") &&
+    hasNumber(row, "count") &&
+    (row.totalMs === null || hasNumber(row, "totalMs")) &&
+    (row.avgMs === null || hasNumber(row, "avgMs")));
 }
 
 function isAccountTrend30(value: unknown): value is AccountStats["trend30"] {

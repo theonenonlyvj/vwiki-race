@@ -811,6 +811,7 @@ describe("VWiki Race API client", () => {
         averageElapsedMs: 1500,
       },
       mostVisited: [],
+      mostTimeSpent: [],
       dailyStreak: 0,
       trend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, ranked: false, guard: 10 },
     };
@@ -913,6 +914,38 @@ describe("VWiki Race API client", () => {
     const { dailyStreak: _streak, trend30: _trend30, ...withoutTrend } = accountStats(0);
     const client = createVWikiRaceApiClient(
       vi.fn(async () => Response.json({ stats: withoutTrend })),
+      { apiOrigin },
+    );
+    await expect(client.getAccountStats("jwt")).rejects.toMatchObject({
+      code: "invalid_response",
+      status: 502,
+    });
+  });
+
+  it("rejects account stats missing mostTimeSpent (You's time ranking)", async () => {
+    // Safe to demand outright rather than tolerate as optional: this repo's
+    // documented `ship it` order deploys the Worker BEFORE Pages, so a
+    // client new enough to read this field never meets a server too old to
+    // send it.
+    const { mostTimeSpent: _mostTimeSpent, ...withoutTimeSpent } = accountStats(0);
+    const client = createVWikiRaceApiClient(
+      vi.fn(async () => Response.json({ stats: withoutTimeSpent })),
+      { apiOrigin },
+    );
+    await expect(client.getAccountStats("jwt")).rejects.toMatchObject({
+      code: "invalid_response",
+      status: 502,
+    });
+  });
+
+  it("rejects a page row whose time fields are neither a number nor null", async () => {
+    const client = createVWikiRaceApiClient(
+      vi.fn(async () => Response.json({
+        stats: {
+          ...accountStats(0),
+          mostVisited: [{ title: "Earth", count: 7, totalMs: "106000", avgMs: 15143 }],
+        },
+      })),
       { apiOrigin },
     );
     await expect(client.getAccountStats("jwt")).rejects.toMatchObject({
@@ -1748,6 +1781,7 @@ function accountStats(attempts: number) {
       averageElapsedMs: 0,
     },
     mostVisited: [],
+    mostTimeSpent: [],
     dailyStreak: 0,
     trend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, ranked: false, guard: 10 },
   };

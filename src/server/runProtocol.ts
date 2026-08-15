@@ -42,6 +42,24 @@ export const MIN_COUNTED_DNF_CLICKS = 2;
 export const MIN_GIVE_UP_CLICKS = 5;
 export const MIN_GIVE_UP_WALL_MS = 180_000;
 
+// You's "Most time spent" list (owner request, 2026-08-15): the per-page
+// dwell any ONE step may contribute, before it's treated as an idle tab
+// rather than thinking. This is a READ-side outlier clamp only - it never
+// touches `runs.elapsed_ms`, the leaderboard, or ranking, so a slow race
+// still scores exactly what it scored. It exists because dwell is bounded
+// only by `RUN_EXPIRY_MS` (24h): uncapped, one lunch break plants a
+// multi-hour page at #1 on that player's list permanently.
+//
+// The value came from the 2026-08-13 production snapshot (2255 accepted
+// steps): p50 14s, p90 80s, p99 4.5m, max 25.7m. A 5-minute clamp would
+// have clipped 17 steps (0.75%) and visibly reordered the top - i.e. it
+// censors real struggle on genuinely link-poor pages. 10 minutes clips 2
+// steps (0.09%) and leaves the ranking intact, so it costs today's data
+// nothing while still closing the idle-tab hole. Deliberately its own
+// constant rather than a reuse of any give-up/DNF threshold above: those
+// gate "did this count as an attempt," this only shapes a stats list.
+export const MAX_COUNTED_DWELL_MS = 600_000;
+
 export interface GiveUpChallengeInput {
   challengeId: string;
   idempotencyKey: string;

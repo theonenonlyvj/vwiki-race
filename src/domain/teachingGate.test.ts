@@ -16,6 +16,7 @@ function stats(completed: number): AccountStats {
       averageElapsedMs: 1_500,
     },
     mostVisited: [],
+    mostTimeSpent: [],
     dailyStreak: 0,
     trend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, ranked: false, guard: 10 },
   };

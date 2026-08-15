@@ -828,6 +828,7 @@ describe("VWiki Race app", () => {
           averageClicks: 0, averageElapsedMs: 0,
         },
         mostVisited: [],
+        mostTimeSpent: [],
         dailyStreak: 6,
         trend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, ranked: false, guard: 10 },
       },
@@ -9245,6 +9246,7 @@ function createFetchMock(options?: {
             averageElapsedMs: options?.accountAverages?.averageElapsedMs ?? 0,
           },
           mostVisited: [],
+          mostTimeSpent: [],
           dailyStreak: options?.accountDailyStreak ?? 0,
           trend30: options?.accountTrend30 ?? { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, ranked: false, guard: 10 },
         },
@@ -9678,6 +9680,7 @@ function accountStatsFixture(attempts: number) {
       averageElapsedMs: 0,
     },
     mostVisited: [],
+    mostTimeSpent: [],
     dailyStreak: 0,
     trend30: { avgPlacement: null, beatRate: null, gradedCount: 0, playedCount: 0, ranked: false, guard: 10 },
   };

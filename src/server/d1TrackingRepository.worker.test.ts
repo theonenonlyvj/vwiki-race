@@ -11,6 +11,7 @@ import {
   type D1DatabaseLike,
 } from "./d1TrackingRepository";
 import { ApiError } from "./http";
+import { MAX_COUNTED_DWELL_MS } from "./runProtocol";
 import { createWorker, type WorkerTracking } from "./worker";
 
 const account: AuthorizedAccount = {
@@ -3717,6 +3718,7 @@ describe("Task 4 D1 projections", () => {
         averageElapsedMs: 0,
       },
       mostVisited: [],
+      mostTimeSpent: [],
       dailyStreak: 0,
       // Owner ruling, 2026-07-25 ("metric-independent ranking changes"):
       // `guard` is now the flat `DAILY_TREND_INCLUSION_FLOOR` (2),
@@ -3771,10 +3773,15 @@ describe("Task 4 D1 projections", () => {
         averageClicks: 2.5,
         averageElapsedMs: 4200,
       },
+      // "Moon" starts all three runs (3 visits) but only the protocol-2 one
+      // has a timed step, so its 4200ms total averages over that ONE dwell
+      // sample, not over 3 visits. "Gravity" is only ever the target - no
+      // outgoing click, so no dwell sample at all, and null (not 0) time.
       mostVisited: [
-        { title: "Moon", count: 3 },
-        { title: "Gravity", count: 1 },
+        { title: "Moon", count: 3, totalMs: 4200, avgMs: 4200 },
+        { title: "Gravity", count: 1, totalMs: null, avgMs: null },
       ],
+      mostTimeSpent: [{ title: "Moon", count: 3, totalMs: 4200, avgMs: 4200 }],
       dailyStreak: 0,
       // FB-10 (owner ruling, 2026-07-20): `trend30` now aggregates over
       // every challenge, not just dailies - this account's completed run
@@ -3868,8 +3875,185 @@ describe("Task 4 D1 projections", () => {
     const stats = await repository.getAccountStats(account);
 
     expect(stats.mostVisited).toHaveLength(10);
-    expect(stats.mostVisited[0]).toEqual({ title: "Page 00", count: 2 });
+    expect(stats.mostVisited[0]).toMatchObject({ title: "Page 00", count: 2 });
     expect(stats.mostVisited.map((row) => row.title)).not.toContain("Page 10");
+  });
+});
+
+/**
+ * Per-page dwell - You's "Most time spent" toggle (owner request,
+ * 2026-08-15). No new column and no migration: `elapsed_since_start_ms` is
+ * already the run's CUMULATIVE decision time at each accepted click
+ * (`recordClickV2` writes `decisionElapsedMs` there), and the accept guard
+ * enforces `decisionElapsedMs >= runs.elapsed_ms`, so the series is
+ * monotonic by construction. Time spent on ONE page is therefore the
+ * successive difference between neighbouring steps, and step 1's difference
+ * is the time spent on the run's START page.
+ *
+ * Two consequences are locked in by the tests below rather than left to
+ * drift, because both are visible to a player: a page reached only as a
+ * run's final target never accrues dwell (there's no outgoing click to
+ * measure against), and protocol-1 rows are excluded outright (their
+ * `elapsed_since_start_ms` is `wallElapsed` - a different clock that
+ * includes Wikipedia fetch latency, see `recordLegacyClick`).
+ */
+describe("getAccountStats per-page dwell (You's \"Most time spent\")", () => {
+  it("credits step 1's dwell to the start page and every later step to the page it left", async () => {
+    await insertRunWithPath({
+      id: "dwell-basic",
+      steps: [
+        { source: "Moon", destination: "Gravity", cumulativeMs: 5_000 },
+        { source: "Gravity", destination: "Physics", cumulativeMs: 12_000 },
+        { source: "Physics", destination: "Energy", cumulativeMs: 15_000 },
+      ],
+    });
+
+    const { repository } = fixture();
+    const stats = await repository.getAccountStats(account);
+
+    expect(stats.mostTimeSpent).toEqual([
+      { title: "Gravity", count: 1, totalMs: 7_000, avgMs: 7_000 },
+      { title: "Moon", count: 1, totalMs: 5_000, avgMs: 5_000 },
+      { title: "Physics", count: 1, totalMs: 3_000, avgMs: 3_000 },
+    ]);
+  });
+
+  it("gives a page reached only as the run's final target no dwell sample at all", async () => {
+    await insertRunWithPath({
+      id: "dwell-target",
+      steps: [
+        { source: "Moon", destination: "Gravity", cumulativeMs: 5_000 },
+        { source: "Gravity", destination: "Energy", cumulativeMs: 9_000 },
+      ],
+    });
+
+    const { repository } = fixture();
+    const stats = await repository.getAccountStats(account);
+
+    expect(stats.mostTimeSpent.map((row) => row.title)).not.toContain("Energy");
+    expect(stats.mostVisited).toContainEqual({
+      title: "Energy",
+      count: 1,
+      totalMs: null,
+      avgMs: null,
+    });
+  });
+
+  it("clamps one page's dwell at MAX_COUNTED_DWELL_MS so a tab left open can't own the list", async () => {
+    await insertRunWithPath({
+      id: "dwell-afk",
+      steps: [
+        // A 24h RUN_EXPIRY_MS window means an idle tab can legitimately
+        // produce a multi-hour "decision"; uncapped, one of those outranks
+        // every real page forever.
+        { source: "Moon", destination: "Gravity", cumulativeMs: MAX_COUNTED_DWELL_MS + 3_600_000 },
+        { source: "Gravity", destination: "Physics", cumulativeMs: MAX_COUNTED_DWELL_MS + 3_603_000 },
+      ],
+    });
+
+    const { repository } = fixture();
+    const stats = await repository.getAccountStats(account);
+
+    expect(stats.mostTimeSpent[0]).toEqual({
+      title: "Moon",
+      count: 1,
+      totalMs: MAX_COUNTED_DWELL_MS,
+      avgMs: MAX_COUNTED_DWELL_MS,
+    });
+  });
+
+  it("excludes protocol-1 runs, whose elapsed_since_start_ms is a wall clock, not the decision clock", async () => {
+    await insertRunWithPath({
+      id: "dwell-legacy",
+      protocolVersion: 1,
+      steps: [
+        { source: "Moon", destination: "Gravity", cumulativeMs: 5_000 },
+        { source: "Gravity", destination: "Physics", cumulativeMs: 12_000 },
+      ],
+    });
+
+    const { repository } = fixture();
+    const stats = await repository.getAccountStats(account);
+
+    expect(stats.mostTimeSpent).toEqual([]);
+    // The visit list is deliberately NOT narrowed to protocol 2 - that would
+    // silently shrink a already-shipped number. Only the time column is.
+    expect(stats.mostVisited).toContainEqual({
+      title: "Moon",
+      count: 1,
+      totalMs: null,
+      avgMs: null,
+    });
+  });
+
+  it("averages a repeated page over its timed samples only, not over every visit", async () => {
+    // "Gravity" is passed THROUGH twice (6s, then 4s) and reached as a
+    // final target once - three visits, two dwell samples. The average must
+    // be 5s (10s / 2), never 10s / 3.
+    await insertRunWithPath({
+      id: "dwell-avg-a",
+      steps: [
+        { source: "Moon", destination: "Gravity", cumulativeMs: 1_000 },
+        { source: "Gravity", destination: "Physics", cumulativeMs: 7_000 },
+      ],
+    });
+    await insertRunWithPath({
+      id: "dwell-avg-b",
+      steps: [
+        { source: "Sun", destination: "Gravity", cumulativeMs: 1_000 },
+        { source: "Gravity", destination: "Physics", cumulativeMs: 5_000 },
+      ],
+    });
+    await insertRunWithPath({
+      id: "dwell-avg-c",
+      steps: [{ source: "Sun", destination: "Gravity", cumulativeMs: 2_000 }],
+    });
+
+    const { repository } = fixture();
+    const stats = await repository.getAccountStats(account);
+
+    expect(stats.mostTimeSpent[0]).toEqual({
+      title: "Gravity",
+      count: 3,
+      totalMs: 10_000,
+      avgMs: 5_000,
+    });
+  });
+
+  it("ranks by total dwell descending, tie-broken by title ascending", async () => {
+    await insertRunWithPath({
+      id: "dwell-tie",
+      steps: [
+        { source: "Zebra", destination: "Apple", cumulativeMs: 3_000 },
+        { source: "Apple", destination: "Physics", cumulativeMs: 6_000 },
+      ],
+    });
+
+    const { repository } = fixture();
+    const stats = await repository.getAccountStats(account);
+
+    expect(stats.mostTimeSpent.map((row) => row.title)).toEqual(["Apple", "Zebra"]);
+  });
+
+  it("caps mostTimeSpent at 10 rows, dropping the smallest total", async () => {
+    // 11 pages chained in one run, each held 1s longer than the last, so
+    // "Page 00" (1s, the smallest) is the row the LIMIT 10 must drop.
+    const titles = Array.from({ length: 12 }, (_, i) => `Page ${String(i).padStart(2, "0")}`);
+    let cumulative = 0;
+    await insertRunWithPath({
+      id: "dwell-cap",
+      steps: titles.slice(0, 11).map((title, index) => {
+        cumulative += (index + 1) * 1_000;
+        return { source: title, destination: titles[index + 1], cumulativeMs: cumulative };
+      }),
+    });
+
+    const { repository } = fixture();
+    const stats = await repository.getAccountStats(account);
+
+    expect(stats.mostTimeSpent).toHaveLength(10);
+    expect(stats.mostTimeSpent.map((row) => row.title)).not.toContain("Page 00");
+    expect(stats.mostTimeSpent[0]).toMatchObject({ title: "Page 10", totalMs: 11_000 });
   });
 });
 
@@ -7364,6 +7548,65 @@ async function insertLegacyRun(input: {
     at,
     at,
   ).run();
+}
+
+/**
+ * A completed run plus its full `run_path_steps` chain, for the per-page
+ * dwell tests. `cumulativeMs` is what the column actually holds - the run's
+ * cumulative decision time AT that click - not the per-page delta the tests
+ * assert on; writing the fixture in the column's own units is what keeps
+ * the successive-difference math under test instead of pre-computed.
+ */
+async function insertRunWithPath(input: {
+  id: string;
+  steps: Array<{ source: string; destination: string; cumulativeMs: number }>;
+  accountId?: string;
+  protocolVersion?: 1 | 2;
+}) {
+  const accountId = input.accountId ?? account.accountId;
+  const first = input.steps[0];
+  const last = input.steps[input.steps.length - 1];
+  await env.VWIKI_RACE_DB.prepare(
+    `INSERT INTO runs
+       (id, challenge_id, account_id, canonical_account_id, status, started_at,
+        completed_at, elapsed_ms, wall_elapsed_ms, click_count, start_title,
+        target_title, final_title, start_page_id, target_page_id, last_page_id,
+        last_title, expires_at, ranked_eligible, protocol_version, created_at,
+        updated_at)
+     VALUES (?, 'challenge-0001', ?, ?, 'completed',
+             '2026-07-14T01:00:00.000Z', '2026-07-14T01:30:00.000Z', ?, ?, ?, ?,
+             ?, ?, 19331, 38579, 38579, ?,
+             '2026-07-15T01:00:00.000Z', 1, ?,
+             '2026-07-14T01:00:00.000Z', '2026-07-14T01:30:00.000Z')`,
+  ).bind(
+    input.id,
+    accountId,
+    accountId,
+    last.cumulativeMs,
+    last.cumulativeMs,
+    input.steps.length,
+    first.source,
+    last.destination,
+    last.destination,
+    last.destination,
+    input.protocolVersion ?? 2,
+  ).run();
+  for (const [index, step] of input.steps.entries()) {
+    await env.VWIKI_RACE_DB.prepare(
+      `INSERT INTO run_path_steps
+         (run_id, step_number, source_title, clicked_anchor_text,
+          destination_title, destination_page_id, elapsed_since_start_ms,
+          created_at)
+       VALUES (?, ?, ?, ?, ?, NULL, ?, '2026-07-14T01:00:00.000Z')`,
+    ).bind(
+      input.id,
+      index + 1,
+      step.source,
+      step.destination.toLowerCase(),
+      step.destination,
+      step.cumulativeMs,
+    ).run();
+  }
 }
 
 async function insertCompletedV2(input: {

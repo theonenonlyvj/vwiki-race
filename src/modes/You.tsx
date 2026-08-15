@@ -1,6 +1,8 @@
+import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import StagedLoadingNotice from "../components/StagedLoadingNotice";
+import { formatMinutesSeconds } from "../domain/formatting";
 import { formatElapsed } from "../race/shared";
-import type { AccountStats, CountStat } from "../domain/types";
+import type { AccountStats, PageStat } from "../domain/types";
 import type { VGamesIdentitySession } from "../services/vgamesIdentity";
 
 /** RC-06 ("one honest loading/error system", Judge A amendment 3 / Judge B
@@ -338,27 +340,113 @@ function StatsPanel({
           <dd>{totals ? totals.totalClicks : NO_DATA_YET}</dd>
         </div>
       </dl>
-      <StatsList title="Most visited pages" items={stats?.mostVisited ?? []} />
+      <PageLists stats={stats} />
     </section>
   );
 }
 
-function StatsList({ title, items }: { title: string; items: CountStat[] }) {
+const PAGE_VIEWS = ["visited", "time"] as const;
+type PageView = (typeof PAGE_VIEWS)[number];
+
+const PAGE_VIEW_LABEL: Record<PageView, string> = {
+  visited: "Most visited",
+  time: "Most time",
+};
+
+const YOU_PAGES_PANEL_ID = "you-pages-panel";
+const pageTabId = (view: PageView) => `you-pages-tab-${view}`;
+
+/** A page with no dwell sample - see `PageStat`. An em dash, never "0:00":
+ * we don't know the time, which is not the same as knowing it was zero. */
+const NO_TIME = "—";
+
+/**
+ * You's page lists (owner request, 2026-08-15: "toggle with total time
+ * spent, but have both"). Both rankings carry both figures, so the toggle
+ * re-sorts facts the player is already looking at rather than swapping in a
+ * separate readout:
+ *
+ *  - Most visited: `×7 · 0:15 avg` - how often, then how long it holds you.
+ *  - Most time:    `13:11 · ×7`    - total sunk, then how many visits made it.
+ *
+ * The two arrays are BOTH the server's own top-10s and are deliberately not
+ * derived from each other here (see `AccountStats.mostTimeSpent`): the real
+ * rankings barely overlap, so re-sorting one list client-side would drop
+ * exactly the pages this toggle exists to reveal.
+ *
+ * Duplicates Boards' roving-tabindex segment control rather than sharing it
+ * (`.board-segment-control` styling IS reused): Boards' version also owns
+ * the 5-segment horizontal-scroll machinery - spacer, edge fade,
+ * scrollIntoView - that a two-segment control has no use for, so the
+ * shared surface would be thinner than the seam.
+ */
+function PageLists({ stats }: { stats: AccountStats | null }) {
+  const [view, setView] = useState<PageView>("visited");
+  const tabRefs = useRef<Partial<Record<PageView, HTMLButtonElement | null>>>({});
+  const items = (view === "visited" ? stats?.mostVisited : stats?.mostTimeSpent) ?? [];
+
+  // Same WAI-ARIA "automatic activation" model as Boards (PKG-10): arrow
+  // keys move focus AND select, wrapping at both ends.
+  function handleTabKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const delta = event.key === "ArrowRight" ? 1 : -1;
+    const next = PAGE_VIEWS[(PAGE_VIEWS.indexOf(view) + delta + PAGE_VIEWS.length) % PAGE_VIEWS.length];
+    setView(next);
+    tabRefs.current[next]?.focus();
+  }
+
   return (
-    <section>
-      <h3>{title}</h3>
-      {items.length ? (
-        <ol className="compact-list">
-          {items.slice(0, 10).map((item) => (
-            <li key={item.title}>
-              <span>{item.title}</span>
-              <span className="muted">×{item.count}</span>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <p className="muted">{NO_DATA_YET}</p>
-      )}
+    <section className="you-pages">
+      <div
+        aria-label="Page ranking"
+        className="board-segment-control"
+        onKeyDown={handleTabKeyDown}
+        role="tablist"
+      >
+        {PAGE_VIEWS.map((key) => (
+          <button
+            aria-controls={YOU_PAGES_PANEL_ID}
+            aria-selected={view === key}
+            className={view === key ? "active" : undefined}
+            id={pageTabId(key)}
+            key={key}
+            onClick={() => setView(key)}
+            ref={(el) => {
+              tabRefs.current[key] = el;
+            }}
+            role="tab"
+            tabIndex={view === key ? 0 : -1}
+            type="button"
+          >
+            {PAGE_VIEW_LABEL[key]}
+          </button>
+        ))}
+      </div>
+      <div aria-labelledby={pageTabId(view)} id={YOU_PAGES_PANEL_ID} role="tabpanel">
+        {items.length ? (
+          <ol className="compact-list">
+            {items.slice(0, 10).map((item) => (
+              <li key={item.title}>
+                <span>{item.title}</span>
+                <span className="muted">{pageFigures(item, view)}</span>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="muted">{NO_DATA_YET}</p>
+        )}
+      </div>
     </section>
   );
+}
+
+/** Reuses `formatMinutesSeconds` - the app's one duration format (Global
+ * invariant #1) - rather than introducing a second one for dwell. */
+function pageFigures(stat: PageStat, view: PageView): string {
+  const count = `×${stat.count}`;
+  if (view === "time") {
+    return `${stat.totalMs === null ? NO_TIME : formatMinutesSeconds(stat.totalMs)} · ${count}`;
+  }
+  return `${count} · ${stat.avgMs === null ? NO_TIME : `${formatMinutesSeconds(stat.avgMs)} avg`}`;
 }

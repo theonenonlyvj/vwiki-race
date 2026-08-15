@@ -33,6 +33,7 @@ import type {
   DailyTrendUnrankedEntry,
   GiveUpChallengeResult,
   LeaderboardContext,
+  PageStat,
   RankedLeaderboardRow,
   RunTransition,
   ServerPathStep,
@@ -46,6 +47,7 @@ import {
   fingerprintGiveUpChallenge,
   fingerprintRunClick,
   fingerprintStartRun,
+  MAX_COUNTED_DWELL_MS,
   MAX_RUN_CLICKS,
   MIN_COUNTED_DNF_CLICKS,
   MIN_GIVE_UP_CLICKS,
@@ -3437,18 +3439,99 @@ export function createD1TrackingRepository(options: {
                 coalesce(avg(CASE WHEN status = 'completed' AND protocol_version = 2 THEN elapsed_ms END), 0) average_elapsed_ms
          FROM owner_runs`,
       ).bind(...receipt.bindings, MIN_COUNTED_DNF_CLICKS, MIN_COUNTED_DNF_CLICKS).first<AccountStatsTotalsRow>();
-      const countRows = async (sql: string): Promise<Array<{ title: string; count: number }>> => {
-        const { results } = await db.prepare(`${ownerCte} ${sql}`).bind(...receipt.bindings).all<CountRow>();
-        return results.map((row) => ({ title: row.title, count: Number(row.count) }));
-      };
-      const mostVisited = await countRows(`, visits AS (
+      // You's two page lists (owner request, 2026-08-15: "toggle with total
+      // time spent, but have both"). `visits` is unchanged from the
+      // single-list version - starts + destinations, ungated (see
+      // identityStakes.ts's note on why a ghost can carry visit history at
+      // `attempts === 0`).
+      //
+      // `dwell` is the new half, and it needs no new column:
+      // `elapsed_since_start_ms` already holds the run's CUMULATIVE
+      // decision time at each accepted click (`recordClickV2` writes
+      // `decisionElapsedMs` there). So the time spent on ONE page is the
+      // successive difference against the previous step - and step 1's
+      // difference is the time spent on the run's START page, which is why
+      // dwell keys on `source_title`, the page a click LEAVES.
+      //
+      // The previous step comes from a self-join on the
+      // (run_id, step_number) PRIMARY KEY rather than a `lag()` window:
+      // identical result, but it leans on an index this table already has
+      // instead of on an assumption about window-function support in D1.
+      //
+      // Three guards, each load-bearing:
+      //  - `protocol_version = 2` - protocol-1 rows store `wallElapsed` in
+      //    this same column (a DIFFERENT clock: it includes Wikipedia fetch
+      //    latency, see `recordLegacyClick`), so mixing them would silently
+      //    inflate legacy pages. Costs almost nothing: 3 of 297 runs on the
+      //    2026-08-13 production snapshot.
+      //  - `step_number = 1 OR prev.elapsed_since_start_ms IS NOT NULL` -
+      //    without it, a missing or untimed predecessor lets
+      //    `coalesce(..., 0)` read a CUMULATIVE total as one page's dwell,
+      //    which is the one way this math can be badly, silently wrong.
+      //  - `max(0, ...)` - the click-accept guard already enforces
+      //    monotonic decision time (0 negative deltas across all 2255
+      //    snapshot steps), so this only insures against a future write
+      //    path that forgets to.
+      const pageCtes = `, visits AS (
                      SELECT start_title title FROM owner_runs
                      UNION ALL
                      SELECT p.destination_title title
                      FROM run_path_steps p JOIN owner_runs r ON r.id = p.run_id
-                   )
-                   SELECT title, count(*) count FROM visits
-                   GROUP BY title ORDER BY count DESC, title ASC LIMIT 10`);
+                   ), visit_counts AS (
+                     SELECT title, count(*) count FROM visits GROUP BY title
+                   ), dwell AS (
+                     SELECT p.source_title title,
+                            min(?, max(0,
+                              p.elapsed_since_start_ms
+                                - coalesce(prev.elapsed_since_start_ms, 0)
+                            )) ms
+                     FROM run_path_steps p
+                     JOIN owner_runs r ON r.id = p.run_id
+                     LEFT JOIN run_path_steps prev
+                       ON prev.run_id = p.run_id
+                      AND prev.step_number = p.step_number - 1
+                     WHERE r.protocol_version = 2
+                       AND p.elapsed_since_start_ms IS NOT NULL
+                       AND (p.step_number = 1 OR prev.elapsed_since_start_ms IS NOT NULL)
+                   ), dwell_totals AS (
+                     SELECT title, sum(ms) total_ms, count(*) samples
+                     FROM dwell GROUP BY title
+                   )`;
+      const pageRows = async (sql: string): Promise<PageStat[]> => {
+        const { results } = await db.prepare(`${ownerCte}${pageCtes} ${sql}`)
+          .bind(...receipt.bindings, MAX_COUNTED_DWELL_MS).all<PageStatRow>();
+        return results.map((row) => ({
+          title: row.title,
+          count: Number(row.count),
+          totalMs: row.total_ms == null ? null : Number(row.total_ms),
+          // Averaged over dwell SAMPLES, never over `count`: a page can be
+          // visited three times and measured twice (the visit that ended
+          // the run as its target contributes no sample). Dividing by
+          // `count` would quietly under-report every target-ish page.
+          // Rounded to whole ms - `formatElapsed` renders seconds anyway,
+          // and an integer keeps the JSON payload stable.
+          avgMs: row.total_ms == null || !Number(row.samples)
+            ? null
+            : Math.round(Number(row.total_ms) / Number(row.samples)),
+        }));
+      };
+      // Two top-10s, deliberately not one list re-sorted client-side: the
+      // rankings are near-disjoint in real data (3 of 10 rows overlap on
+      // the snapshot's heaviest account), so the top page by time is
+      // routinely outside the top 10 by visits - re-sorting one list would
+      // hide exactly the rows the toggle exists to show. Pages with no
+      // dwell sample are absent from the time list (an unranked block of
+      // nulls) but still present, with a null time, in the visit list.
+      const [mostVisited, mostTimeSpent] = await Promise.all([
+        pageRows(`SELECT v.title, v.count, d.total_ms, d.samples
+                  FROM visit_counts v
+                  LEFT JOIN dwell_totals d ON d.title = v.title
+                  ORDER BY v.count DESC, v.title ASC LIMIT 10`),
+        pageRows(`SELECT d.title, coalesce(v.count, 0) count, d.total_ms, d.samples
+                  FROM dwell_totals d
+                  LEFT JOIN visit_counts v ON v.title = d.title
+                  ORDER BY d.total_ms DESC, d.title ASC LIMIT 10`),
+      ]);
       // Increment 4: streak + 30-day trend, both alias-resolved against the
       // same canonical `account.accountId` the rest of this method already
       // resolved to. `trend30` reuses `listDailyTrends` wholesale (rather
@@ -3499,6 +3582,7 @@ export function createD1TrackingRepository(options: {
           averageElapsedMs: Number(totals?.average_elapsed_ms ?? 0),
         },
         mostVisited,
+        mostTimeSpent,
         dailyStreak,
         trend30,
       } satisfies AccountStats;
@@ -6003,6 +6087,15 @@ interface AccountStatsTotalsRow {
 interface CountRow {
   title: string;
   count: number;
+}
+
+/** Raw shape of one You page-list row - `total_ms`/`samples` are NULL for a
+ * title the dwell join found nothing for (see `PageStat`). */
+interface PageStatRow {
+  title: string;
+  count: number;
+  total_ms: number | null;
+  samples: number | null;
 }
 
 interface PathStepRow {
