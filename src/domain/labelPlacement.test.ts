@@ -4,6 +4,7 @@ import {
   LABEL_PRIORITY_BREADCRUMB,
   LABEL_PRIORITY_SHARED,
   LABEL_PRIORITY_SUPPRESSED,
+  PORTRAIT_SLOTS,
   placeLabels,
   type LabelCandidate,
 } from "./labelPlacement";
@@ -25,8 +26,11 @@ function overlaps(a: ReturnType<typeof boxOf>, b: ReturnType<typeof boxOf>): boo
   return a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2;
 }
 
-function countVisibleOverlaps(candidates: LabelCandidate[]): number {
-  const placements = placeLabels(candidates);
+function countVisibleOverlaps(
+  candidates: LabelCandidate[],
+  slots?: Parameters<typeof placeLabels>[2],
+): number {
+  const placements = placeLabels(candidates, undefined, slots);
   const visible = candidates
     .map((candidate, i) => ({ candidate, placement: placements[i] }))
     .filter((entry) => !entry.placement.hidden);
@@ -137,6 +141,39 @@ describe("placeLabels", () => {
 
   it("still places labels when given no bounds at all", () => {
     expect(placeLabels([candidate({ cx: 5000, cy: 0 })])[0].hidden).toBe(false);
+  });
+
+  // Portrait piles every label on one flank unless told otherwise, which
+  // wastes the empty margin on the other side and forces harder truncation.
+  describe("side preference", () => {
+    it("puts a left-leaning node's label on its left", () => {
+      const [placement] = placeLabels(
+        [candidate({ cx: 80, cy: 300, preferSide: "left" })],
+        undefined,
+        PORTRAIT_SLOTS,
+      );
+      expect(placement.dx).toBeLessThan(0);
+    });
+
+    it("puts a right-leaning node's label on its right", () => {
+      const [placement] = placeLabels(
+        [candidate({ cx: 300, cy: 300, preferSide: "right" })],
+        undefined,
+        PORTRAIT_SLOTS,
+      );
+      expect(placement.dx).toBeGreaterThan(0);
+    });
+
+    it("still falls back to the other side when the preferred one is taken", () => {
+      const pair = [
+        candidate({ cx: 300, cy: 300, preferSide: "right", priority: LABEL_PRIORITY_ANCHOR }),
+        candidate({ cx: 300, cy: 300, preferSide: "right" }),
+      ];
+      const placements = placeLabels(pair, undefined, PORTRAIT_SLOTS);
+      expect(placements[0].dx).toBeGreaterThan(0);
+      expect(placements.every((p) => !p.hidden)).toBe(true);
+      expect(countVisibleOverlaps(pair, PORTRAIT_SLOTS)).toBe(0);
+    });
   });
 
   it("places every candidate exactly once, in input order", () => {

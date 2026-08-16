@@ -6,6 +6,8 @@ import {
   LABEL_PRIORITY_BREADCRUMB,
   LABEL_PRIORITY_SHARED,
   LABEL_PRIORITY_SUPPRESSED,
+  LANDSCAPE_SLOTS,
+  PORTRAIT_SLOTS,
   placeLabels,
 } from "../domain/labelPlacement";
 
@@ -138,6 +140,66 @@ function computeSvgHeight(laneCount: number): number {
   return Math.min(SVG_HEIGHT_MAX, Math.max(SVG_HEIGHT_MIN, raw));
 }
 
+/**
+ * GR-2: which axis carries progress.
+ *
+ * The graph has a DENSE axis (progress - up to 37 hops on a real daily) and a
+ * SPARSE one (player lanes - at most 12). Landscape gives the dense axis the
+ * fixed 1080px width and the sparse one 640px of height. On a 390x844 phone
+ * that is exactly backwards: fitting a 1080-wide canvas into 390px is a 2.8x
+ * squeeze that renders every label at 2.8-3.9px, and "explore" mode shows 27%
+ * of the canvas per sideways swipe.
+ *
+ * Portrait swaps them, so progress runs down the axis a phone actually has -
+ * and the axis whose gesture (scroll) is native rather than hostile.
+ */
+export type GraphOrientation = "landscape" | "portrait";
+
+interface GraphCanvas {
+  orientation: GraphOrientation;
+  width: number;
+  height: number;
+  marginLeft: number;
+  marginRight: number;
+  marginTop: number;
+  marginBottom: number;
+}
+
+function landscapeCanvas(laneCount: number): GraphCanvas {
+  return {
+    orientation: "landscape",
+    width: SVG_WIDTH,
+    height: computeSvgHeight(laneCount),
+    marginLeft: MARGIN_LEFT,
+    marginRight: MARGIN_RIGHT,
+    marginTop: MARGIN_TOP,
+    marginBottom: MARGIN_BOTTOM,
+  };
+}
+
+// Portrait margins are tight left/right (every pixel of width is label room
+// and there are only ~390 of them) and roomier top/bottom, where the start and
+// target anchors need space for their own labels.
+const PORTRAIT_MARGIN_X = 10;
+const PORTRAIT_MARGIN_TOP = 40;
+const PORTRAIT_MARGIN_BOTTOM = 46;
+/** Room kept below the canvas for the "Save image" row and the sheet's padding. */
+const PORTRAIT_FOOTER_PX = 76;
+/** A landscape phone is short; the canvas still needs to be worth scrolling. */
+const PORTRAIT_MIN_HEIGHT = 460;
+
+function portraitCanvas(width: number, height: number): GraphCanvas {
+  return {
+    orientation: "portrait",
+    width,
+    height,
+    marginLeft: PORTRAIT_MARGIN_X,
+    marginRight: PORTRAIT_MARGIN_X,
+    marginTop: PORTRAIT_MARGIN_TOP,
+    marginBottom: PORTRAIT_MARGIN_BOTTOM,
+  };
+}
+
 // GR-2: strand identity (hue + dash) now lives in domain/strandStyle.ts, with
 // the measurement behind the 7-hue ceiling. The prototype's 6 hues were cycled
 // by lane index, which painted five PAIRS of players identically on the
@@ -203,6 +265,7 @@ interface NodeLayout {
   alwaysLabel: boolean; // anchor, shared, or DNF terminal - never suppressed
   showLabelDesktop: boolean; // alwaysLabel || A4 breadcrumb-selected
   labelDx: number;
+  labelWidth: number;
   labelCrowdedOut: boolean; // GR-2: no collision-free slot existed
   labelText: string;
   labelFull: string;
@@ -239,20 +302,35 @@ interface GraphLayout {
   finisherCount: number;
   targetGlowOpacity: number;
   entranceTotalMs: number;
+  svgWidth: number;
+  orientation: GraphOrientation;
   svgHeight: number;
 }
 
-function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
+function buildGraph(orderedRuns: ChallengePathRun[], canvas?: GraphCanvas): GraphLayout {
   const playerOrder = orderedRuns.map((r) => r.player);
   const winnerRun = orderedRuns.find((r) => r.status === "completed") ?? null;
   const finisherCount = orderedRuns.filter((r) => r.status === "completed").length;
 
   // GX-1: lane-count-driven height - computed once, up front, so every
-  // downstream y-calculation (laneY, the weighted-mean fallback, the raw
-  // node fallback) already flows from the real height instead of the old
+  // downstream calculation (lane placement, the weighted-mean fallback, the
+  // raw node fallback) already flows from the real height instead of the old
   // fixed 560.
-  const svgHeight = computeSvgHeight(Math.max(1, playerOrder.length));
-  const plotHeight = svgHeight - MARGIN_TOP - MARGIN_BOTTOM;
+  const box = canvas ?? landscapeCanvas(Math.max(1, playerOrder.length));
+  const svgWidth = box.width;
+  const svgHeight = box.height;
+  const plotWidth = svgWidth - box.marginLeft - box.marginRight;
+  const plotHeight = svgHeight - box.marginTop - box.marginBottom;
+
+  // GR-2: everything below computes NORMALIZED progress and lane fractions;
+  // only these four values decide which screen axis each one lands on, so the
+  // whole layout heuristic (weighted means, the DAG repair pass, the
+  // start/target rescale) is shared verbatim between orientations.
+  const isPortrait = box.orientation === "portrait";
+  const progressPx = isPortrait ? plotHeight : plotWidth;
+  const lanePx = isPortrait ? plotWidth : plotHeight;
+  const progressOrigin = isPortrait ? box.marginTop : box.marginLeft;
+  const laneOrigin = isPortrait ? box.marginLeft : box.marginTop;
 
   const nodeAggs = new Map<string, NodeAgg>();
 
@@ -318,16 +396,18 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
   const laneIndex = new Map<string, number>();
   playerOrder.forEach((player, i) => laneIndex.set(player, i));
   const laneCount = Math.max(1, playerOrder.length);
-  const laneGap = plotHeight / (laneCount + 1);
-  function laneY(player: string): number {
+  const laneGap = lanePx / (laneCount + 1);
+  /** Pixel position along the LANE axis (y in landscape, x in portrait). */
+  function laneCoord(player: string): number {
     const i = laneIndex.get(player) ?? 0;
-    return MARGIN_TOP + laneGap * (i + 1);
+    return laneOrigin + laneGap * (i + 1);
   }
 
   interface Raw {
     agg: NodeAgg;
     xFrac: number;
-    cy: number;
+    /** Pixel position along the lane axis. */
+    lane: number;
     visitorCount: number;
   }
 
@@ -335,7 +415,7 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
   // progress (spec heuristic) - but WEIGHTED by each visitor's own step
   // count. See the module docblock for the full rationale.
   const weightedMeanFracByTitle = new Map<string, number>();
-  const laneYByTitle = new Map<string, number>();
+  const laneCoordByTitle = new Map<string, number>();
   const stepCountByPlayer = new Map<string, number>();
   for (const run of orderedRuns) stepCountByPlayer.set(run.player, Math.max(1, run.steps.length));
   for (const agg of nodeAggs.values()) {
@@ -348,11 +428,11 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
       const w = stepCountByPlayer.get(player) ?? 1;
       weightedSum += meanFrac * w;
       weightTotal += w;
-      ySum += laneY(player);
+      ySum += laneCoord(player);
       n += 1;
     }
     weightedMeanFracByTitle.set(agg.title, weightTotal ? weightedSum / weightTotal : 0);
-    laneYByTitle.set(agg.title, n ? ySum / n : MARGIN_TOP + plotHeight / 2);
+    laneCoordByTitle.set(agg.title, n ? ySum / n : laneOrigin + lanePx / 2);
   }
 
   // Repair pass: a valid left-to-right ORDER for every node via longest-path
@@ -408,7 +488,7 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
     for (const pred of predecessors.get(title) ?? []) {
       const gapFrac =
         (layer.get(title) ?? 0) <= 2 || (nodeAggs.get(title)?.visitors.size ?? 1) > 1
-          ? TRUNK_GAP_PX / PLOT_WIDTH
+          ? TRUNK_GAP_PX / progressPx
           : MIN_GAP_FRAC;
       const need = (rawFrac.get(pred) ?? 0) + gapFrac;
       if (need > x) x = need;
@@ -432,7 +512,7 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
     raws.push({
       agg,
       xFrac,
-      cy: laneYByTitle.get(agg.title) ?? MARGIN_TOP + plotHeight / 2,
+      lane: laneCoordByTitle.get(agg.title) ?? laneOrigin + lanePx / 2,
       visitorCount: agg.visitors.size,
     });
   }
@@ -458,7 +538,14 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
   for (const run of orderedRuns) {
     const total = run.steps.length;
     if (total === 0) continue;
-    const longRun = total > 8;
+    // GR-2: portrait has roughly a third of landscape's label room, so the
+    // breadcrumb rule tightens rather than letting the placer arbitrate by
+    // crowding alone. A stretch's FIRST and LAST node - where a player left
+    // the pack and where they rejoined it - carry nearly all the meaning; the
+    // every-5th-hop samples in between are the first thing worth dropping.
+    // Measured on the 11-strand daily: 51 default labels down to 33, all of
+    // them still attached to a visible node.
+    const longRun = total > (isPortrait ? 5 : 8);
     let stretch: Array<{ title: string; hopIndex: number }> = [];
     const flush = () => {
       if (!stretch.length) return;
@@ -467,8 +554,10 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
       } else {
         breadcrumbEligibleTitles.add(stretch[0].title);
         breadcrumbEligibleTitles.add(stretch[stretch.length - 1].title);
-        for (const s of stretch) {
-          if (s.hopIndex % 5 === 0) breadcrumbEligibleTitles.add(s.title);
+        if (!isPortrait) {
+          for (const s of stretch) {
+            if (s.hopIndex % 5 === 0) breadcrumbEligibleTitles.add(s.title);
+          }
         }
       }
       stretch = [];
@@ -495,10 +584,23 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
     const alwaysLabel = alwaysLabelTitles.has(raw.agg.title);
     const breadcrumbEligible = !alwaysLabel && breadcrumbEligibleTitles.has(raw.agg.title);
     const fontSize = big ? 14 : 12;
-    const labelText = truncateTitle(raw.agg.title, big ? 26 : 20);
+    // Portrait has ~390px of width for a label to live in, against 1080 in
+    // landscape, so titles truncate harder there or nothing else fits beside
+    // them.
+    const labelText = truncateTitle(raw.agg.title, isPortrait ? (big ? 18 : 15) : big ? 26 : 20);
+    const progress = progressOrigin + raw.xFrac * progressPx;
+    const lanePos = raw.lane;
     return {
-      cx: MARGIN_LEFT + raw.xFrac * PLOT_WIDTH,
-      cy: raw.cy,
+      cx: isPortrait ? lanePos : progress,
+      cy: isPortrait ? progress : lanePos,
+      // Spread labels OUTWARD from the middle of the canvas, into the margins
+      // that would otherwise sit empty, instead of piling every one of them on
+      // the same flank.
+      preferSide: isPortrait
+        ? lanePos < box.marginLeft + plotWidth / 2
+          ? ("left" as const)
+          : ("right" as const)
+        : undefined,
       width: estimateLabelWidth(labelText, fontSize),
       priority: big
         ? LABEL_PRIORITY_ANCHOR
@@ -516,12 +618,16 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
   });
   // Labels may use the margins (that is what they are for) but not run off the
   // canvas, where they render clipped.
-  const labelPlacements = placeLabels(labelInputs, { minX: 6, maxX: SVG_WIDTH - 6 });
+  const labelPlacements = placeLabels(
+    labelInputs,
+    { minX: 4, maxX: svgWidth - 4 },
+    isPortrait ? PORTRAIT_SLOTS : LANDSCAPE_SLOTS,
+  );
 
   const nodes: NodeLayout[] = raws.map((raw, index) => {
     const input = labelInputs[index];
     const placement = labelPlacements[index];
-    const { cx, big, alwaysLabel, showLabelDesktop, fontSize, labelText } = input;
+    const { cx, cy, big, alwaysLabel, showLabelDesktop, fontSize, labelText } = input;
 
     const visitorCount = raw.visitorCount;
     // A5: merge points read co-equal with (never above) the start/target
@@ -550,7 +656,7 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
       soleVisitor,
       dnfTerminalFor: raw.agg.dnfTerminalFor,
       cx,
-      cy: raw.cy,
+      cy,
       radius,
       alwaysLabel,
       showLabelDesktop,
@@ -558,6 +664,7 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
       labelFull: raw.agg.title,
       labelDx: placement.dx,
       labelDy: placement.dy,
+      labelWidth: input.width,
       // GR-2: the placer found no collision-free slot for this one. It stays
       // reachable through the node's <title> tooltip and the A6 focus reveal,
       // but must not render by default - an overprinted label destroys the
@@ -705,7 +812,9 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
     finisherCount,
     targetGlowOpacity,
     entranceTotalMs,
+    svgWidth,
     svgHeight,
+    orientation: box.orientation,
   };
 }
 
@@ -752,7 +861,47 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
     strandStyleForIndex(Math.max(0, playerOrder.indexOf(player)));
   const playerColorOf = (player: string) => playerStyleOf(player).color;
 
-  const graph = useMemo(() => buildGraph(orderedRuns), [orderedRuns]);
+  // GR-2: on a phone the graph is laid out in PORTRAIT against the real
+  // measured sheet, so the whole thing fits the screen it is actually on
+  // (the owner screenshots this view to share) instead of being a 1080px
+  // landscape canvas squeezed to 28%.
+  const isMobile = useIsMobile(MOBILE_BREAKPOINT);
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const [sheet, setSheet] = useState<{ width: number; height: number } | null>(null);
+  useEffect(() => {
+    if (!isMobile) {
+      setSheet(null);
+      return;
+    }
+    const measure = () => {
+      const el = shellRef.current;
+      if (!el || typeof window === "undefined") return;
+      const width = el.clientWidth;
+      if (width <= 0) return;
+      // Measure the real distance from the canvas's own top edge to the bottom
+      // of the viewport rather than subtracting a guessed chrome constant -
+      // the heading, legend and caption above it all change height with the
+      // field size and the font, and a stale constant would either overflow
+      // the sheet or leave a band of dead space under the graph.
+      const top = el.getBoundingClientRect().top;
+      const available = window.innerHeight - top - PORTRAIT_FOOTER_PX;
+      setSheet({ width, height: Math.max(PORTRAIT_MIN_HEIGHT, Math.round(available)) });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("orientationchange", measure);
+    };
+  }, [isMobile]);
+
+  const graph = useMemo(
+    () => buildGraph(orderedRuns, sheet ? portraitCanvas(sheet.width, sheet.height) : undefined),
+    [orderedRuns, sheet],
+  );
+  const isPortrait = graph.orientation === "portrait";
+  const [legendOpen, setLegendOpen] = useState(false);
 
   // A6: one shared focus state. Legend hover/click, per-player edge-group
   // hover, and node tap all funnel into this same setter.
@@ -805,11 +954,11 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
     return () => clearTimeout(timer);
   }, [graph.entranceTotalMs, reduceMotion]);
 
-  // A8: mobile defaults to a fit-to-width overview; "Explore path" swaps to
-  // the original scrollable 1080px layout.
-  const isMobile = useIsMobile(MOBILE_BREAKPOINT);
+  // A8 is retired on phones: the portrait canvas already fits the screen, so
+  // there is nothing to fit-to-width and nothing to swipe sideways through.
+  // The scroll machinery stays for the landscape canvas in a narrow window.
   const [scrollMode, setScrollMode] = useState(false);
-  const useOverview = isMobile && !scrollMode;
+  const useOverview = isMobile && !isPortrait && !scrollMode;
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [showScrollFade, setShowScrollFade] = useState(false);
   const [hintSeen, setHintSeen] = useState<boolean>(() => {
@@ -844,7 +993,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
   };
 
   return (
-    <div className="cpg-root">
+    <div className={`cpg-root${isPortrait ? " is-portrait" : ""}`} ref={shellRef}>
       <style>{`
         .cpg-root {
           font-family: var(--viota-ui-font, "Merriweather", ui-serif, Georgia, serif);
@@ -922,6 +1071,62 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
           -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 8px);
           mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 8px);
           box-shadow: none;
+        }
+        /* GR-2: the collapsed portrait legend - one row, ~44px, instead of the
+           638px the expanded list took on a 844px phone. */
+        .cpg-legend-bar {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin: 0 0 10px;
+        }
+        .cpg-legend-toggle {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          flex: 1 1 auto;
+          min-width: 0;
+          min-height: 44px;
+          padding: 4px 10px;
+          font: inherit;
+          font-size: 0.78rem;
+          color: var(--text-bright, #dffbfb);
+          background: none;
+          border: 1px solid var(--line, #295159);
+          border-radius: 999px;
+          cursor: pointer;
+        }
+        .cpg-legend-swatches {
+          display: flex;
+          align-items: center;
+          gap: 3px;
+          flex-wrap: nowrap;
+          overflow: hidden;
+        }
+        .cpg-legend-swatches .cpg-chip {
+          width: 9px;
+          height: 4px;
+          border-radius: 2px;
+        }
+        .cpg-legend-count {
+          color: var(--muted, #9fb8bd);
+          white-space: nowrap;
+        }
+        .cpg-legend-toggle::after {
+          content: "▾";
+          margin-left: auto;
+          color: var(--muted, #9fb8bd);
+        }
+        /* Expanded on a phone: one player per row reads far better than the
+           desktop's wrap-as-you-go flow at 390px. */
+        .cpg-root.is-portrait .cpg-legend {
+          gap: 2px 10px;
+          margin-bottom: 10px;
+          max-height: 46vh;
+          overflow-y: auto;
+        }
+        .cpg-root.is-portrait .cpg-legend-item {
+          flex: 1 0 100%;
         }
         .cpg-legend-name {
           font-weight: 600;
@@ -1128,6 +1333,43 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
         }
       `}</style>
 
+      {/* GR-2: on a phone the full legend measured 638px of an 844px viewport
+          - 76% of the screen, pushing the graph itself below the fold. It
+          collapses to a one-row strip of strand swatches that still says who
+          is here and still resets focus; the full list is one tap away, and
+          the shared PNG always carries the complete legend regardless of what
+          is expanded on screen. */}
+      {isPortrait && !legendOpen ? (
+        <div className="cpg-legend-bar">
+          <button
+            type="button"
+            className="cpg-legend-toggle"
+            onClick={() => setLegendOpen(true)}
+            aria-expanded={false}
+          >
+            <span className="cpg-legend-swatches" aria-hidden="true">
+              {orderedRuns.map((run) => {
+                const strand = playerStyleOf(run.player);
+                return (
+                  <span
+                    key={run.player}
+                    className={`cpg-chip${strand.dash ? " is-dashed" : ""}`}
+                    style={{ background: strand.color, color: strand.color }}
+                  />
+                );
+              })}
+            </span>
+            <span className="cpg-legend-count">
+              {orderedRuns.length} {orderedRuns.length === 1 ? "player" : "players"}
+            </span>
+          </button>
+          {activePlayer ? (
+            <button type="button" className="cpg-reset-chip" onClick={() => setActivePlayer(null)}>
+              Show all
+            </button>
+          ) : null}
+        </div>
+      ) : (
       <ul className="cpg-legend">
         <li className="cpg-legend-item">
           <button
@@ -1139,6 +1381,18 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
             Show all
           </button>
         </li>
+        {isPortrait ? (
+          <li className="cpg-legend-item">
+            <button
+              type="button"
+              className="cpg-reset-chip"
+              onClick={() => setLegendOpen(false)}
+              aria-expanded
+            >
+              Hide names
+            </button>
+          </li>
+        ) : null}
         {orderedRuns.map((run) => {
           const strand = playerStyleOf(run.player);
           const color = strand.color;
@@ -1184,17 +1438,20 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
           );
         })}
       </ul>
+      )}
 
       <div className="cpg-scroll-wrap">
         <div className="cpg-scroll" ref={scrollRef} onScroll={scrollMode ? handleScroll : undefined}>
           <svg
             className="cpg-svg"
-            viewBox={`0 0 ${SVG_WIDTH} ${graph.svgHeight}`}
-            {...(useOverview ? {} : { width: SVG_WIDTH, height: graph.svgHeight })}
+            viewBox={`0 0 ${graph.svgWidth} ${graph.svgHeight}`}
+            {...(useOverview ? {} : { width: graph.svgWidth, height: graph.svgHeight })}
             style={
               useOverview
                 ? { width: "100%", height: "auto", display: "block" }
-                : { display: "block", minWidth: SVG_WIDTH }
+                : isPortrait
+                  ? { display: "block", width: "100%", height: "auto" }
+                  : { display: "block", minWidth: graph.svgWidth }
             }
             role="img"
             aria-label="Merged graph of every player's path through this challenge"
@@ -1210,7 +1467,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
             </defs>
 
             {/* Empty-canvas tap dismisses the on-canvas callout (A6c). */}
-            <rect x={0} y={0} width={SVG_WIDTH} height={graph.svgHeight} fill="transparent" onClick={() => setCallout(null)} />
+            <rect x={0} y={0} width={graph.svgWidth} height={graph.svgHeight} fill="transparent" onClick={() => setCallout(null)} />
 
             <g>
               {graph.edgesByPlayer.map(({ player, edges }) => {
@@ -1275,8 +1532,15 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                 // viewport tier) - either way it's reveal-on-focus only.
                 // GR-2 adds a third reason: the placer found no collision-free
                 // slot, so showing it would overprint a neighbour.
+                // A4's blanket "no solo interim labels on a narrow viewport"
+                // tier existed because the old mobile overview rendered every
+                // label at ~3px, where showing more was pointless. The portrait
+                // canvas renders them at 10-13px and the placer now hides only
+                // what genuinely will not fit, so portrait uses the same
+                // structural policy as desktop and lets crowding decide.
                 const revealOnly =
-                  !node.alwaysLabel && (isMobile || !node.showLabelDesktop || node.labelCrowdedOut);
+                  !node.alwaysLabel &&
+                  ((isMobile && !isPortrait) || !node.showLabelDesktop || node.labelCrowdedOut);
                 const labelVisible = !revealOnly || activePlayer === node.soleVisitor;
 
                 const secondaryHalo = !isTarget && node.visitorCount > 1;
@@ -1377,6 +1641,27 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                       />
                     ) : null}
 
+                    {/* GR-2: a leader line. Portrait pushes labels out to the
+                        flanks to fit them, which severs the label from its
+                        node - "Physics" reads as belonging to whatever dot
+                        happens to be nearest. A hairline in the label's own
+                        colour restores the association without adding visual
+                        weight. Only drawn when the gap is big enough to be
+                        ambiguous. */}
+                    {labelVisible &&
+                    Math.abs(node.labelDx) - node.labelWidth / 2 - node.radius > 16 ? (
+                      <line
+                        x1={node.cx + Math.sign(node.labelDx) * (node.radius + 2)}
+                        y1={node.cy}
+                        x2={node.cx + node.labelDx - Math.sign(node.labelDx) * (node.labelWidth / 2 + 3)}
+                        y2={node.cy + node.labelDy - 4}
+                        stroke={labelColor}
+                        strokeWidth={1}
+                        opacity={0.35}
+                        pointerEvents="none"
+                      />
+                    ) : null}
+
                     <text
                       // GR-2: labelDx/labelDy are the FINAL offsets the
                       // collision placer chose. Adding any further nudge here
@@ -1437,8 +1722,8 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                   const width = estimateLabelWidth(callout.title, 13) + 10;
                   const height = 26;
                   const x = Math.max(
-                    MARGIN_LEFT - 24,
-                    Math.min(SVG_WIDTH - MARGIN_RIGHT + 24 - width, callout.cx - width / 2),
+                    4,
+                    Math.min(graph.svgWidth - 4 - width, callout.cx - width / 2),
                   );
                   const yAbove = callout.cy - 34;
                   const y = yAbove < 4 ? callout.cy + 20 : yAbove;
@@ -1461,16 +1746,22 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
               : null}
 
             {/* A10: axis honesty - nothing else on the canvas corrects the
-                default left-to-right "x = time/clicks" assumption. */}
+                default "distance along the axis = time/clicks" assumption.
+                Portrait moves progress onto the vertical axis, so the wording
+                follows it rather than saying "position" and leaving the reader
+                to guess which axis is meant. */}
             <text
-              x={MARGIN_LEFT}
+              x={isPortrait ? graph.svgWidth / 2 : MARGIN_LEFT}
               y={graph.svgHeight - 12}
+              textAnchor={isPortrait ? "middle" : "start"}
               fontSize={11}
               fill="var(--muted, #9fb8bd)"
               opacity={0.8}
               fontFamily="var(--viota-ui-font, Merriweather, ui-serif, Georgia, serif)"
             >
-              position = % through each player&apos;s own path — not click count
+              {isPortrait
+                ? "down = % through each player's own path"
+                : "position = % through each player's own path — not click count"}
             </text>
           </svg>
         </div>
@@ -1478,7 +1769,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
         {scrollMode && !hintSeen ? <div className="cpg-scroll-hint">swipe for full path →</div> : null}
       </div>
 
-      {isMobile ? (
+      {isMobile && !isPortrait ? (
         <button type="button" className="cpg-explore-pill" onClick={() => setScrollMode((s) => !s)}>
           {scrollMode ? "← Overview" : "Explore path →"}
         </button>

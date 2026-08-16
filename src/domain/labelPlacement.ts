@@ -46,6 +46,14 @@ export interface LabelCandidate {
   cy: number;
   width: number;
   priority: number;
+  /**
+   * Which flank to try first. Portrait puts labels beside their nodes, and
+   * without a preference every one of them lands on the same side: the empty
+   * margin on the other flank goes unused while the crowded side truncates
+   * harder. Callers set this to the side AWAY from the canvas centre so labels
+   * spread outward. Ignored by slot lists that only move vertically.
+   */
+  preferSide?: "left" | "right";
 }
 
 export interface LabelPlacement {
@@ -63,18 +71,66 @@ interface Box {
 }
 
 /**
- * Offsets are the FINAL text baseline offset from the node centre, clearance
- * included. The prototype kept a separate render-time nudge (`dy >= 0 ? +16 :
- * -10`) applied after collision detection, so the boxes the placer reasoned
- * about were never the boxes that got painted - every label was 10-16px away
- * from where it had been checked. That alone guaranteed collisions the placer
- * believed it had avoided. Nothing may be added to these at render time.
+ * A candidate position, resolved against the label's own width:
+ * `dx = dxFraction * width + dxPx`.
+ *
+ * Offsets are the FINAL offset from the node centre, clearance included. The
+ * prototype kept a separate render-time nudge (`dy >= 0 ? +16 : -10`) applied
+ * after collision detection, so the boxes the placer reasoned about were never
+ * the boxes that got painted - every label ended up 10-16px from where it had
+ * been cleared. That alone guaranteed collisions the placer believed it had
+ * avoided. Nothing may be added to these at render time.
  */
+export interface LabelSlot {
+  dxFraction: number;
+  dxPx: number;
+  dyPx: number;
+}
+
 const VERTICAL_OFFSETS = [
   16, -12, 34, -30, 52, -48, 70, -66, 88, -84, 106, -102, 124, -120,
 ];
 /** Fractions of the label's own width to slide sideways by. */
 const HORIZONTAL_FRACTIONS = [0, 0.55, -0.55, 1.05, -1.05];
+
+/**
+ * Landscape: progress runs along x, so successive hops are far apart
+ * horizontally and the cheap room is VERTICAL. Try directly under the node
+ * first, then ring outward, sliding sideways only within each ring.
+ */
+export const LANDSCAPE_SLOTS: LabelSlot[] = VERTICAL_OFFSETS.flatMap((dyPx) =>
+  HORIZONTAL_FRACTIONS.map((dxFraction) => ({ dxFraction, dxPx: 0, dyPx })),
+);
+
+/**
+ * Portrait: progress runs DOWN, so successive hops are only ~20px apart
+ * vertically and stacking labels above/below would collide immediately. The
+ * cheap room is sideways - a label sits beside its node, left or right, and
+ * only nudges vertically once both flanks at that height are taken.
+ *
+ * Deliberately SHORT. A wider ladder does fit more labels (58 rather than 30
+ * on the 11-strand daily) but they land far from their nodes, so the reader
+ * cannot tell which dot a title belongs to and the titles cover the strands
+ * they are supposed to explain. Staying near the node means crowding shows up
+ * as a hidden label - honest, and recoverable by tapping the player - instead
+ * of as a misattributed one.
+ */
+export const PORTRAIT_SLOTS: LabelSlot[] = [0, 7, -7, 15, -15, 23, -23].flatMap((dyPx) =>
+  [
+    { dxFraction: 0.5, dxPx: 12 }, // to the right of the node
+    { dxFraction: -0.5, dxPx: -12 }, // to the left of the node
+  ].map((side) => ({ ...side, dyPx })),
+);
+
+/**
+ * 0 when the slot sits on the wanted flank, 1 otherwise. A stable sort by this
+ * keeps each flank's own near-to-far ordering intact.
+ */
+function sideRank(slot: LabelSlot, side: "left" | "right"): number {
+  const offset = slot.dxFraction + slot.dxPx;
+  const onLeft = offset < 0;
+  return (side === "left") === onLeft ? 0 : 1;
+}
 
 function boxesOverlap(a: Box, b: Box): boolean {
   return a.x1 < b.x2 + LABEL_GAP_PX && b.x1 < a.x2 + LABEL_GAP_PX && a.y1 < b.y2 && b.y1 < a.y2;
@@ -100,6 +156,7 @@ export interface LabelBounds {
 export function placeLabels(
   candidates: LabelCandidate[],
   bounds?: LabelBounds,
+  slots: LabelSlot[] = LANDSCAPE_SLOTS,
 ): LabelPlacement[] {
   const withinBounds = (box: Box): boolean =>
     !bounds || (box.x1 >= bounds.minX && box.x2 <= bounds.maxX);
@@ -115,19 +172,26 @@ export function placeLabels(
     // Nearest slot wins: walk vertical rings outward, and within each ring try
     // centred first, then progressively further to either side. That keeps a
     // label as close to its own node as the crowding allows.
+    // Reorder, never filter: the far flank stays available as a fallback, so a
+    // preference costs nothing when the preferred side is full.
+    const ordered =
+      candidate.preferSide === "left"
+        ? [...slots].sort((a, b) => sideRank(a, "left") - sideRank(b, "left"))
+        : candidate.preferSide === "right"
+          ? [...slots].sort((a, b) => sideRank(a, "right") - sideRank(b, "right"))
+          : slots;
+
     let chosen: { dx: number; dy: number } | null = null;
-    outer: for (const dy of VERTICAL_OFFSETS) {
-      for (const fraction of HORIZONTAL_FRACTIONS) {
-        const dx = fraction * candidate.width;
-        const box = boxFor(candidate, dx, dy);
-        // Sliding sideways is where the extra room comes from, but a node near
-        // the margin must not be slid off the canvas - a clipped label is as
-        // unreadable as an overlapping one.
-        if (!withinBounds(box)) continue;
-        if (!taken.some((placed) => boxesOverlap(placed, box))) {
-          chosen = { dx, dy };
-          break outer;
-        }
+    for (const slot of ordered) {
+      const dx = slot.dxFraction * candidate.width + slot.dxPx;
+      const box = boxFor(candidate, dx, slot.dyPx);
+      // Sliding sideways is where the extra room comes from, but a node near
+      // the margin must not be slid off the canvas - a clipped label is as
+      // unreadable as an overlapping one.
+      if (!withinBounds(box)) continue;
+      if (!taken.some((placed) => boxesOverlap(placed, box))) {
+        chosen = { dx, dy: slot.dyPx };
+        break;
       }
     }
 
@@ -149,7 +213,12 @@ export function placeLabels(
       continue;
     }
 
-    placements[index] = { dx: 0, dy: VERTICAL_OFFSETS[VERTICAL_OFFSETS.length - 1], hidden: true };
+    const fallback = ordered[ordered.length - 1];
+    placements[index] = {
+      dx: fallback.dxFraction * candidate.width + fallback.dxPx,
+      dy: fallback.dyPx,
+      hidden: true,
+    };
   }
 
   return placements;
