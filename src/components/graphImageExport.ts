@@ -42,6 +42,7 @@ export interface GraphImageNode {
   bold: boolean;
   visitorCount: number;
   isTarget: boolean;
+  isStart: boolean;
   isDnfTerminal: boolean;
 }
 
@@ -130,6 +131,19 @@ export function drawGraphImage(
   }
 
   for (const node of request.nodes) {
+    // The SVG blooms every SHARED node faintly white ("everyone was here").
+    // Leaving it out of the export flattened the merge points, which are the
+    // reason the graph is drawn merged at all.
+    if (!node.isTarget && node.visitorCount > 1) {
+      ctx.save();
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(node.cx, node.cy, node.radius + 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
     ctx.save();
     ctx.beginPath();
     ctx.arc(node.cx, node.cy, node.radius, 0, Math.PI * 2);
@@ -144,7 +158,10 @@ export function drawGraphImage(
 
     // A5: 3+ visitors carry a small centred count - the merge points are the
     // whole reason the graph is drawn merged rather than as parallel lanes.
-    if (node.visitorCount >= 3 && !node.isTarget) {
+    // Matching the SVG exactly: start and target are excluded. The start node
+    // is visited by EVERY player, so without the exclusion the export stamped
+    // a visitor count inside the start dot that the screen never shows.
+    if (node.visitorCount >= 3 && !node.isTarget && !node.isStart) {
       ctx.save();
       ctx.font = `600 ${Math.min(11, node.radius * 1.1)}px ${request.fontFamily}`;
       ctx.fillStyle = INK;
@@ -156,7 +173,7 @@ export function drawGraphImage(
 
     if (node.isTarget) {
       ctx.save();
-      ctx.font = `600 ${Math.max(10, node.radius)}px ${request.fontFamily}`;
+      ctx.font = `600 12px ${request.fontFamily}`; // 12px, as the SVG sets
       ctx.fillStyle = INK;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -171,7 +188,8 @@ export function drawGraphImage(
       ctx.strokeStyle = DNF_MARK;
       ctx.lineWidth = 2.4;
       ctx.lineCap = "round";
-      const arm = 5;
+      ctx.globalAlpha = 0.8; // the SVG stamp is 0.8, not opaque
+      const arm = 6; // the SVG arms run +-6, not +-5
       ctx.beginPath();
       ctx.moveTo(node.cx - arm, node.cy - arm);
       ctx.lineTo(node.cx + arm, node.cy + arm);

@@ -891,11 +891,13 @@ function nodeVisuals(
           : soloColor,
     stroke: node.isStart ? START_RING_COLOR : node.isTarget ? TARGET_COLOR : "none",
     // A4: tint surviving solo labels to their owner; shared labels stay bright
-    // white ("everyone was here").
+    // white ("everyone was here"). At FULL opacity - these used to be drawn at
+    // alpha 0.65 for recession, which put bronze at 2.69:1 and violet at
+    // 3.16:1 against the 4.5:1 AA floor for 12px text. The hue by itself
+    // separates a solo label from a shared one without dimming it, since the
+    // shared ones are white.
     labelColor:
-      node.isStart || node.isTarget || node.visitorCount > 1
-        ? TEXT_BRIGHT
-        : hexToRgba(soloColor, 0.65),
+      node.isStart || node.isTarget || node.visitorCount > 1 ? TEXT_BRIGHT : soloColor,
   };
 }
 
@@ -1108,6 +1110,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
             bold: node.isStart || node.isTarget,
             visitorCount: node.visitorCount,
             isTarget: node.isTarget,
+            isStart: node.isStart,
             isDnfTerminal: node.dnfTerminalFor.size > 0,
           };
         }),

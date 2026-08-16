@@ -31,7 +31,7 @@
  *   Contrast vs surface all 7 >= 3:1                                   PASS
  *
  * The validator's one remaining complaint is its dark-mode LIGHTNESS BAND
- * (L 0.48-0.67); these sit at 0.68-0.84. That override is deliberate: the band
+ * (L 0.48-0.67); these sit at 0.60-0.84. That override is deliberate: the band
  * is calibrated for filled areas, and these are 2-3px strokes on a near-black
  * ground, where dropping into the band measurably dims the thinnest strands.
  * Do not "fix" it by darkening - re-run the validator if you change a hue.
@@ -77,4 +77,35 @@ export function strandStyleForIndex(index: number): StrandStyle {
 /** Stable identity for a style, for uniqueness checks and React keys. */
 export function strandStyleKey(style: StrandStyle): string {
   return `${style.color}|${style.dash ?? "solid"}`;
+}
+
+
+const INK_SURFACE_RGB = [0x06, 0x10, 0x14];
+
+function channelLuminance(channel: number): number {
+  const c = channel / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+/**
+ * WCAG contrast of a hue against the app's ink surface, optionally composited
+ * at `alpha` first.
+ *
+ * Compositing is done in GAMMA-ENCODED sRGB, which is what a browser does for
+ * `rgba()` - doing it in linear space instead overstates the result badly. Solo
+ * node labels used to be drawn at alpha 0.65 for visual recession, which put
+ * bronze at 2.69:1 and violet at 3.16:1, well under the 4.5:1 AA floor for
+ * 12px text. At full opacity every hue clears it, and the hue alone is enough
+ * to separate a solo label from a shared one, which is white.
+ */
+export function contrastOnInk(hex: string, alpha = 1): number {
+  const clean = hex.replace(/^#/, "");
+  const rgb = [0, 2, 4].map((i) => parseInt(clean.slice(i, i + 2), 16));
+  const composited = rgb.map((c, i) => alpha * c + (1 - alpha) * INK_SURFACE_RGB[i]);
+  const lum = (channels: number[]) =>
+    0.2126 * channelLuminance(channels[0]) +
+    0.7152 * channelLuminance(channels[1]) +
+    0.0722 * channelLuminance(channels[2]);
+  const [hi, lo] = [lum(composited), lum(INK_SURFACE_RGB)].sort((a, b) => b - a);
+  return (hi + 0.05) / (lo + 0.05);
 }
