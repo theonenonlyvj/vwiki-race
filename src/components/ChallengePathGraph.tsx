@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { formatTimeAndClicks } from "../domain/formatting";
 import { strandStyleForIndex, type StrandStyle } from "../domain/strandStyle";
 import { graphImageBlob, shareGraphImage } from "./graphImageExport";
+import { labelIsRevealOnly } from "../domain/labelVisibility";
 import {
   LABEL_PRIORITY_ANCHOR,
   LABEL_PRIORITY_BREADCRUMB,
@@ -266,7 +267,6 @@ interface NodeLayout {
   alwaysLabel: boolean; // anchor, shared, or DNF terminal - never suppressed
   showLabelDesktop: boolean; // alwaysLabel || A4 breadcrumb-selected
   labelDx: number;
-  labelWidth: number;
   labelCrowdedOut: boolean; // GR-2: no collision-free slot existed
   labelText: string;
   labelFull: string;
@@ -665,7 +665,6 @@ function buildGraph(orderedRuns: ChallengePathRun[], canvas?: GraphCanvas): Grap
       labelFull: raw.agg.title,
       labelDx: placement.dx,
       labelDy: placement.dy,
-      labelWidth: input.width,
       // GR-2: the placer found no collision-free slot for this one. It stays
       // reachable through the node's <title> tooltip and the A6 focus reveal,
       // but must not render by default - an overprinted label destroys the
@@ -906,6 +905,9 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
   const isMobile = useIsMobile(MOBILE_BREAKPOINT);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const [sheet, setSheet] = useState<{ width: number; height: number } | null>(null);
+  // Declared above the measurement effect because expanding the legend moves
+  // the canvas's top edge, so the effect depends on it.
+  const [legendOpen, setLegendOpen] = useState(false);
   useEffect(() => {
     if (!isMobile) {
       setSheet(null);
@@ -923,7 +925,16 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
       // the sheet or leave a band of dead space under the graph.
       const top = el.getBoundingClientRect().top;
       const available = window.innerHeight - top - PORTRAIT_FOOTER_PX;
-      setSheet({ width, height: Math.max(PORTRAIT_MIN_HEIGHT, Math.round(available)) });
+      const height = Math.max(PORTRAIT_MIN_HEIGHT, Math.round(available));
+      // Bail when nothing moved. Every setSheet is a new object identity, which
+      // re-runs the whole layout through useMemo; iOS fires resize continuously
+      // while the URL bar collapses, and without this the graph would relayout
+      // on every one of those frames.
+      setSheet((current) =>
+        current && current.width === width && current.height === height
+          ? current
+          : { width, height },
+      );
     };
     measure();
     window.addEventListener("resize", measure);
@@ -932,14 +943,16 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
       window.removeEventListener("resize", measure);
       window.removeEventListener("orientationchange", measure);
     };
-  }, [isMobile]);
+    // legendOpen belongs here: expanding the legend moves the canvas's own top
+    // edge down by ~200px, and without re-measuring the canvas keeps its old
+    // height and pushes its own bottom off the sheet.
+  }, [isMobile, legendOpen]);
 
   const graph = useMemo(
     () => buildGraph(orderedRuns, sheet ? portraitCanvas(sheet.width, sheet.height) : undefined),
     [orderedRuns, sheet],
   );
   const isPortrait = graph.orientation === "portrait";
-  const [legendOpen, setLegendOpen] = useState(false);
   const [exportState, setExportState] = useState<"idle" | "working" | "failed">("idle");
 
   // A6: one shared focus state. Legend hover/click, per-player edge-group
@@ -1048,8 +1061,13 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
             labelColor: visuals.labelColor,
             labelDx: node.labelDx,
             labelDy: node.labelDy,
-            labelVisible:
-              node.alwaysLabel || (node.showLabelDesktop && !node.labelCrowdedOut),
+            labelVisible: !labelIsRevealOnly({
+              alwaysLabel: node.alwaysLabel,
+              showLabelDesktop: node.showLabelDesktop,
+              crowdedOut: node.labelCrowdedOut,
+              isMobile,
+              isPortrait,
+            }),
             fontSize: node.fontSize,
             bold: node.isStart || node.isTarget,
             visitorCount: node.visitorCount,
@@ -1654,19 +1672,15 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                 // Shared with the PNG export so the two can never drift.
                 const { fill, stroke, labelColor } = nodeVisuals(node, playerColorOf);
 
-                // Suppressed on desktop (A4 structural) OR on mobile (A4
-                // viewport tier) - either way it's reveal-on-focus only.
-                // GR-2 adds a third reason: the placer found no collision-free
-                // slot, so showing it would overprint a neighbour.
-                // A4's blanket "no solo interim labels on a narrow viewport"
-                // tier existed because the old mobile overview rendered every
-                // label at ~3px, where showing more was pointless. The portrait
-                // canvas renders them at 10-13px and the placer now hides only
-                // what genuinely will not fit, so portrait uses the same
-                // structural policy as desktop and lets crowding decide.
-                const revealOnly =
-                  !node.alwaysLabel &&
-                  ((isMobile && !isPortrait) || !node.showLabelDesktop || node.labelCrowdedOut);
+                // Shared with the PNG export - see labelVisibility.ts for why
+                // crowding outranks importance.
+                const revealOnly = labelIsRevealOnly({
+                  alwaysLabel: node.alwaysLabel,
+                  showLabelDesktop: node.showLabelDesktop,
+                  crowdedOut: node.labelCrowdedOut,
+                  isMobile,
+                  isPortrait,
+                });
                 const labelVisible = !revealOnly || activePlayer === node.soleVisitor;
 
                 const secondaryHalo = !isTarget && node.visitorCount > 1;
@@ -1763,27 +1777,6 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                         fill="none"
                         stroke="var(--text-bright, #dffbfb)"
                         strokeWidth={1.5}
-                        pointerEvents="none"
-                      />
-                    ) : null}
-
-                    {/* GR-2: a leader line. Portrait pushes labels out to the
-                        flanks to fit them, which severs the label from its
-                        node - "Physics" reads as belonging to whatever dot
-                        happens to be nearest. A hairline in the label's own
-                        colour restores the association without adding visual
-                        weight. Only drawn when the gap is big enough to be
-                        ambiguous. */}
-                    {labelVisible &&
-                    Math.abs(node.labelDx) - node.labelWidth / 2 - node.radius > 16 ? (
-                      <line
-                        x1={node.cx + Math.sign(node.labelDx) * (node.radius + 2)}
-                        y1={node.cy}
-                        x2={node.cx + node.labelDx - Math.sign(node.labelDx) * (node.labelWidth / 2 + 3)}
-                        y2={node.cy + node.labelDy - 4}
-                        stroke={labelColor}
-                        strokeWidth={1}
-                        opacity={0.35}
                         pointerEvents="none"
                       />
                     ) : null}

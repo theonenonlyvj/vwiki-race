@@ -103,12 +103,28 @@ export function drawGraphImage(
   // export would read as a different, flatter graph without it.
   const target = request.nodes.find((node) => node.isTarget);
   if (target) {
+    const outer = target.radius + 6 + 2 * request.finisherCount;
     ctx.save();
     ctx.globalAlpha = request.targetGlowOpacity;
-    ctx.fillStyle = TARGET_COLOR;
-    ctx.filter = "blur(6px)";
+    // A radial gradient rather than ctx.filter = "blur(...)". Canvas filter
+    // support only arrived in Safari 16.4, and where it is missing the
+    // declaration is silently IGNORED - which would not degrade to "no glow",
+    // it would paint a hard-edged coral disc several times the target's size
+    // over the convergence. A gradient renders identically everywhere.
+    const glow = ctx.createRadialGradient(
+      target.cx,
+      target.cy,
+      Math.max(1, target.radius * 0.5),
+      target.cx,
+      target.cy,
+      outer,
+    );
+    glow.addColorStop(0, TARGET_COLOR);
+    glow.addColorStop(0.55, `${TARGET_COLOR}80`);
+    glow.addColorStop(1, `${TARGET_COLOR}00`);
+    ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(target.cx, target.cy, target.radius + 6 + 2 * request.finisherCount, 0, Math.PI * 2);
+    ctx.arc(target.cx, target.cy, outer, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
