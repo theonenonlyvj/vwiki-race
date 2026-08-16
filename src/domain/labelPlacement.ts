@@ -216,6 +216,44 @@ function forcedSlot(
   return { dx: clampDx(0), dy: 0 };
 }
 
+/**
+ * The slot that overlaps the least ink, for labels with no collision-free
+ * option. Ties break toward the earlier (nearer) slot, so a label still sits as
+ * close to its own node as the crowding allows.
+ */
+function leastCollidingSlot(
+  candidate: LabelCandidate,
+  slots: LabelSlot[],
+  taken: Box[],
+  bounds?: LabelBounds,
+): { dx: number; dy: number } {
+  let best: { dx: number; dy: number } | null = null;
+  let bestArea = Infinity;
+  for (const slot of slots) {
+    const dx = slot.dxFraction * candidate.width + slot.dxPx;
+    const box = boxFor(candidate, dx, slot.dyPx);
+    if (bounds) {
+      if (box.x1 < bounds.minX || box.x2 > bounds.maxX) continue;
+      if (bounds.minY !== undefined && box.y1 < bounds.minY) continue;
+      if (bounds.maxY !== undefined && box.y2 > bounds.maxY) continue;
+    }
+    let area = 0;
+    for (const placed of taken) {
+      const overlapX = Math.min(box.x2, placed.x2) - Math.max(box.x1, placed.x1);
+      const overlapY = Math.min(box.y2, placed.y2) - Math.max(box.y1, placed.y1);
+      if (overlapX > 0 && overlapY > 0) area += overlapX * overlapY;
+    }
+    if (area < bestArea) {
+      bestArea = area;
+      best = { dx, dy: slot.dyPx };
+    }
+    if (area === 0) break;
+  }
+  if (best) return best;
+  const last = slots[slots.length - 1];
+  return { dx: last.dxFraction * candidate.width + last.dxPx, dy: last.dyPx };
+}
+
 export function placeLabels(
   candidates: LabelCandidate[],
   bounds?: LabelBounds,
@@ -305,16 +343,13 @@ export function placeLabels(
       continue;
     }
 
-    // Exhausted every slot. Still reserve the box: these are hidden now, but a
-    // focus reveal pops a whole solo stretch in AT ONCE, and if they all share
-    // one fallback offset they stack into unreadable text at the moment they
-    // become visible - the very failure the two reservation sets exist to
-    // prevent, just displaced into this branch.
-    const fallback = ordered[ordered.length - 1];
-    const fallbackPlacement = {
-      dx: fallback.dxFraction * candidate.width + fallback.dxPx,
-      dy: fallback.dyPx,
-    };
+    // Exhausted every slot. Take the LEAST BAD one rather than a fixed one, and
+    // reserve it. These are hidden now, but a focus reveal pops a whole solo
+    // stretch in AT ONCE - and if every label that reached this branch used the
+    // same offset they would stack into unreadable text at the moment they
+    // become visible, which is the exact failure the two reservation sets exist
+    // to prevent, displaced into the fallback.
+    const fallbackPlacement = leastCollidingSlot(candidate, ordered, takenAll, bounds);
     placements[index] = { ...fallbackPlacement, hidden: true };
     takenAll.push(boxFor(candidate, fallbackPlacement.dx, fallbackPlacement.dy));
   }

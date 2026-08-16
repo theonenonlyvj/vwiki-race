@@ -1122,6 +1122,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
         caption: isPortrait
           ? "down = % through each player's own path"
           : "position = % through each player's own path — not click count",
+        captionCentred: isPortrait,
         startTitle: graph.startTitle,
         targetTitle: graph.targetTitle,
         finisherCount: graph.finisherCount,

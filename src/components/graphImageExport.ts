@@ -54,6 +54,8 @@ export interface GraphImageRequest {
   nodes: GraphImageNode[];
   legend: GraphImageLegendEntry[];
   caption: string;
+  /** Portrait centres the caption; landscape left-anchors it at the margin. */
+  captionCentred: boolean;
   /** Drives the target's convergence halo, as on the canvas. */
   finisherCount: number;
   targetGlowOpacity: number;
@@ -67,6 +69,8 @@ const BRIGHT = "#dffbfb";
 const INK = "#061014";
 const TARGET_COLOR = "#ff765f";
 const DNF_MARK = "#e0655a";
+/** MARGIN_LEFT in the landscape canvas, where the SVG anchors its caption. */
+const LANDSCAPE_CAPTION_X = 100;
 
 function applyDash(ctx: CanvasRenderingContext2D, dash: string | null): void {
   ctx.setLineDash(dash ? dash.split(/[\s,]+/).map(Number).filter((n) => Number.isFinite(n)) : []);
@@ -136,10 +140,22 @@ export function drawGraphImage(
     // reason the graph is drawn merged at all.
     if (!node.isTarget && node.visitorCount > 1) {
       ctx.save();
-      ctx.globalAlpha = 0.12;
-      ctx.fillStyle = "#ffffff";
+      // A gradient, not a flat disc: the SVG runs this through the blur filter,
+      // so a hard-edged circle read as a visible ring around every merge point
+      // in the exported image.
+      const bloom = ctx.createRadialGradient(
+        node.cx,
+        node.cy,
+        Math.max(0.5, node.radius * 0.6),
+        node.cx,
+        node.cy,
+        node.radius + 5,
+      );
+      bloom.addColorStop(0, "rgba(255,255,255,0.16)");
+      bloom.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = bloom;
       ctx.beginPath();
-      ctx.arc(node.cx, node.cy, node.radius + 4, 0, Math.PI * 2);
+      ctx.arc(node.cx, node.cy, node.radius + 5, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -163,7 +179,7 @@ export function drawGraphImage(
     // a visitor count inside the start dot that the screen never shows.
     if (node.visitorCount >= 3 && !node.isTarget && !node.isStart) {
       ctx.save();
-      ctx.font = `600 ${Math.min(11, node.radius * 1.1)}px ${request.fontFamily}`;
+      ctx.font = `600 10px ${request.fontFamily}`; // 10px, as the SVG sets
       ctx.fillStyle = INK;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -222,14 +238,24 @@ export function drawGraphImage(
   ctx.font = `400 11px ${request.fontFamily}`;
   ctx.fillStyle = MUTED;
   ctx.globalAlpha = 0.8;
-  ctx.textAlign = "center";
-  ctx.fillText(request.caption, layout.width / 2, request.height - 12);
+  // Follows the SVG: centred in portrait, left-anchored at the plot margin in
+  // landscape. Centring both made the exported landscape image differ from the
+  // screen for no reason.
+  ctx.textAlign = request.captionCentred ? "center" : "left";
+  ctx.fillText(
+    request.caption,
+    request.captionCentred ? layout.width / 2 : LANDSCAPE_CAPTION_X,
+    request.height - 12,
+  );
   ctx.restore();
 
   for (const row of layout.rows) {
     ctx.save();
     // Swatch: a short line, matching the on-screen legend and the strand it
     // stands for, dash included.
+    // Row dimming has to be set BEFORE the swatch is stroked, or an abandoned
+    // run's swatch prints at full strength beside its dimmed name.
+    ctx.globalAlpha = row.status === "abandoned" ? 0.9 : 1;
     ctx.strokeStyle = row.color;
     ctx.lineWidth = 4;
     // BUTT caps, not round. A round cap extends half the line width past each
@@ -247,10 +273,6 @@ export function drawGraphImage(
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // 0.9, matching the on-screen row: at 0.72 the DNF pill measured 3.40:1
-    // against the ink, under the 4.5:1 AA floor, and the exported PNG is read
-    // in worse conditions than the screen, not better.
-    ctx.globalAlpha = row.status === "abandoned" ? 0.9 : 1;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.font = `600 12px ${request.fontFamily}`;

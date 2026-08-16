@@ -199,12 +199,18 @@ describe("placeLabels", () => {
   });
 
   it("still lets a visible label take the slot a suppressed one wanted", () => {
+    // Enough suppressed labels to fill the ladder several times over: if they
+    // reserved against visible labels at all, the shared one could not have the
+    // nearest slot. With one of each the visible label wins on priority order
+    // alone and the test would pass either way.
     const mixed: LabelCandidate[] = [
-      candidate({ cx: 400, cy: 300, priority: LABEL_PRIORITY_SUPPRESSED }),
+      ...Array.from({ length: 20 }, () =>
+        candidate({ cx: 400, cy: 300, priority: LABEL_PRIORITY_SUPPRESSED }),
+      ),
       candidate({ cx: 400, cy: 300, priority: LABEL_PRIORITY_SHARED }),
     ];
     const placements = placeLabels(mixed);
-    expect(placements[1]).toMatchObject({ dx: 0, dy: 16, hidden: false });
+    expect(placements[20]).toMatchObject({ dx: 0, dy: 16, hidden: false });
   });
 
   // Sideways bounds alone let a label at the top or bottom of the canvas be
@@ -275,8 +281,26 @@ describe("placeLabels", () => {
     const bounds = { minX: 4, maxX: 316, minY: 2, maxY: 620 };
     const target = candidate({ cx: 160, cy: 600, width: 158, priority: LABEL_PRIORITY_ANCHOR });
     const [placement] = placeLabels([target], bounds, PORTRAIT_SLOTS);
-    const box = boxOf(target, placement);
-    expect(box.y2).toBeLessThanOrEqual(bounds.maxY);
+
+    // The name of this test is the assertion: ABOVE its node, and inside the
+    // canvas. Checking only the lower bound would pass for a label sitting on
+    // the node itself.
+    expect(placement.dy).toBeLessThan(0);
+    expect(boxOf(target, placement).y2).toBeLessThanOrEqual(bounds.maxY);
+  });
+
+  // The fallback branch used a fixed slot, so every label that exhausted the
+  // ladder collapsed onto the same offset - and a focus reveal turns a whole
+  // solo stretch on at once, so they stacked exactly when they became visible.
+  it("spreads labels that exhaust every slot instead of piling them up", () => {
+    const swarm = Array.from({ length: 14 }, () =>
+      candidate({ cx: 400, cy: 300, width: 150, priority: LABEL_PRIORITY_SUPPRESSED }),
+    );
+    const placements = placeLabels(swarm);
+    const offsets = new Set(placements.map((p) => `${p.dx}|${p.dy}`));
+
+    // Not necessarily 14 distinct - the ladder is finite - but nowhere near 1.
+    expect(offsets.size).toBeGreaterThan(6);
   });
 
   it("places every candidate exactly once, in input order", () => {

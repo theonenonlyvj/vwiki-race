@@ -27,7 +27,7 @@ function recordingContext() {
 
 const baseRequest = {
   width: 330, height: 400, background: "#061014",
-  fontFamily: "serif", caption: "c", finisherCount: 1, targetGlowOpacity: 0.3,
+  fontFamily: "serif", caption: "c", captionCentred: true, finisherCount: 1, targetGlowOpacity: 0.3,
   startTitle: "A", targetTitle: "B", edges: [], nodes: [],
 };
 
