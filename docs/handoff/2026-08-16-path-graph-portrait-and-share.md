@@ -2,7 +2,7 @@
 
 Everything below is COMMITTED LOCALLY on `main` and **not pushed, not deployed**.
 Vijay was asleep; per `AGENTS.md` (local rule: no push/deploy without an explicit
-ask) shipping waits for him. `main` is 9 commits ahead of `origin/main`.
+ask) shipping waits for him. `main` is 12 commits ahead of `origin/main`.
 
 Base for this work: `31d5e84` (the previous night's profile/Boards redesign).
 
@@ -30,7 +30,7 @@ And on desktop, at the same field size:
 
 The graph was built for 4–6 runs and the field outgrew it.
 
-## What shipped (9 commits)
+## What shipped (12 commits)
 
 | commit | what |
 |---|---|
@@ -43,6 +43,9 @@ The graph was built for 4–6 runs and the field outgrew it.
 | `4a80439` | council round 1 (iOS share, dashed swatch, measurement) |
 | `cb155da` | council round 2 (label contrast, export fidelity) |
 | `b097e2c` | council round 3 (forced anchor, tap targets, callout, export failure) |
+| `3b2a4c7` | council round 4 (a11y, focus pinning, per-node tap radii) |
+| `f96c3cd` | portrait test coverage + what it exposed |
+| `5087470` | council round 6 (two round-4 regressions, the reveal, tap floor) |
 
 ### After
 
@@ -148,9 +151,48 @@ Two of its findings were CRITICAL and would have shipped:
   bridge the gaps on a 16px swatch — so in the shared image the 8th player was
   indistinguishable from the 1st, defeating the dash entirely.
 
+**A second council then reviewed the fixes** — 70 agents, because the first had
+been reviewing a moving target. It found two regressions introduced BY round 4
+(a node tap that toggled focus off on every second tap, so walking a strand was
+impossible; and "Saved ✓" being announced after the user cancelled the share
+sheet, with no file anywhere), and it proved that a bug I had "fixed" twice was
+still live.
+
+That last one is the most useful thing either council produced. Revealing a
+player pops their whole held-back stretch on at once, and 24 of one player's 30
+titles were landing on the identical rung. Both my fixes were in the placer, and
+the council showed the placer *cannot* solve it — a portrait canvas has 14 rungs
+on one usable flank and a 30-label stretch does not fit; they simulated the
+obvious placer fix and it made things worse (187 → 192 overlaps). The fix had to
+move to the reveal: labels carry an owner, only one owner is ever revealed, and
+a label that cannot be placed clear of its own siblings is marked unrevealable.
+Measured after: **0 overlapping pairs across all 11 reveals in both
+orientations.**
+
 It also caught me being wrong about a number I had already "verified": solo
 labels at alpha 0.65 measure **2.69:1**, not the 3.5:1 I computed. I had done the
 blend in linear space. See the sRGB note above.
+
+### Three vacuous tests, one night
+
+The thing worth carrying forward. I wrote a test that passed against broken code
+**three separate times**, each time for the same reason: the fixture did not
+reach the state the bug lives in.
+
+1. A tap-target overlap test — jsdom renders the LANDSCAPE canvas, where the
+   hand-written fixture's nodes sit 72 units apart, so a flat 44-unit target
+   never overlapped.
+2. The portrait suite — the `matchMedia` stub returned true for *any*
+   `max-width` query, so all eight tests passed with the portrait layout
+   switched off entirely.
+3. Both suppressed-label tests — they used the default 70-rung LANDSCAPE ladder
+   on an unbounded canvas, where the fallback branch is never reached.
+
+Each was caught by mutating the source and re-running, never by reading the
+test. **Mutation-test every new guard**: change the line the test claims to
+protect and confirm that exact test fails. The three guards I did check this way
+(`AbortError`, `canShare`, butt caps) were all real; the ones I did not check
+were all lying.
 
 And it caught a test that proved nothing — a tap-target overlap test that passed
 against the broken code, because jsdom renders the landscape canvas where the
