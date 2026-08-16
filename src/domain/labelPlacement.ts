@@ -33,6 +33,8 @@
  */
 
 export const LABEL_HEIGHT_PX = 15;
+/** How far a forced anchor label sits from its own node's baseline. */
+const FORCED_CLEARANCE_PX = 26;
 export const LABEL_GAP_PX = 8;
 
 /** Lower sorts first and wins contested slots. */
@@ -166,6 +168,54 @@ export interface LabelBounds {
   maxY?: number;
 }
 
+/**
+ * Last resort for a label that must render. Collisions are ignored; the canvas
+ * edge is not. `dx` is clamped so the box stays on canvas rather than being
+ * abandoned, and rungs that leave the node's own baseline clear are tried
+ * before the flush ones.
+ */
+function forcedSlot(
+  candidate: LabelCandidate,
+  slots: LabelSlot[],
+  bounds?: LabelBounds,
+): { dx: number; dy: number } {
+  const half = candidate.width / 2;
+  const clampDx = (dx: number): number => {
+    if (!bounds) return dx;
+    const min = bounds.minX + half - candidate.cx;
+    const max = bounds.maxX - half - candidate.cx;
+    return max < min ? dx : Math.min(Math.max(dx, min), max);
+  };
+  const verticallyInside = (dy: number): boolean => {
+    if (!bounds) return true;
+    const halfHeight = (candidate.height ?? LABEL_HEIGHT_PX) / 2;
+    const top = candidate.cy + dy - halfHeight;
+    const bottom = candidate.cy + dy + halfHeight;
+    if (bounds.minY !== undefined && top < bounds.minY) return false;
+    if (bounds.maxY !== undefined && bottom > bounds.maxY) return false;
+    return true;
+  };
+
+  // A node near the top of the canvas gets its forced label BELOW it and one
+  // near the bottom gets it above, so the offset is always into open canvas.
+  const midY =
+    bounds && bounds.minY !== undefined && bounds.maxY !== undefined
+      ? (bounds.minY + bounds.maxY) / 2
+      : candidate.cy;
+  const away = candidate.cy <= midY ? 1 : -1;
+  const clearing = [away * FORCED_CLEARANCE_PX, -away * FORCED_CLEARANCE_PX];
+
+  for (const dy of clearing) {
+    if (verticallyInside(dy)) return { dx: clampDx(0), dy };
+  }
+  for (const slot of slots) {
+    if (verticallyInside(slot.dyPx)) {
+      return { dx: clampDx(slot.dxFraction * candidate.width + slot.dxPx), dy: slot.dyPx };
+    }
+  }
+  return { dx: clampDx(0), dy: 0 };
+}
+
 export function placeLabels(
   candidates: LabelCandidate[],
   bounds?: LabelBounds,
@@ -234,9 +284,22 @@ export function placeLabels(
     }
 
     if (mustShowEarly) {
-      // Anchors are the frame of reference; show it and accept the collision.
-      placements[index] = { dx: 0, dy: 0, hidden: false };
-      const box = boxFor(candidate, 0, 0);
+      // Anchors are the frame of reference and never hide, so when every slot
+      // is taken one has to be forced. It must NOT be forced to {0, 0}: that
+      // puts the baseline dead on the node's own centre, and the label's ink
+      // halo then erases the node and the strands converging on it. In portrait
+      // that was the guaranteed outcome for any anchor title of ~18 characters
+      // or more, because the start node always sits at the exact plot centre
+      // (every player visits it) and the side slots need width + 12 of clear
+      // room on one flank, which a ~320-unit phone canvas does not have.
+      //
+      // So: walk the ladder again ignoring collisions, but keep the box on
+      // canvas by clamping dx, and prefer the rungs that clear the node. A
+      // forced anchor may overlap a neighbour - that is the trade - but it is
+      // never illegible on top of itself.
+      const forced = forcedSlot(candidate, ordered, bounds);
+      placements[index] = { ...forced, hidden: false };
+      const box = boxFor(candidate, forced.dx, forced.dy);
       taken.push(box);
       takenAll.push(box);
       continue;

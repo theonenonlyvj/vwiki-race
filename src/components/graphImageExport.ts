@@ -324,7 +324,7 @@ export async function shareGraphImage(
   blob: Blob,
   startTitle: string | null,
   targetTitle: string | null,
-): Promise<"shared" | "downloaded"> {
+): Promise<"shared" | "downloaded" | "failed"> {
   const name = exportFileName(startTitle, targetTitle);
   const file = new File([blob], name, { type: "image/png" });
   const nav = navigator as Navigator & {
@@ -341,6 +341,13 @@ export async function shareGraphImage(
       // deliberate "no", not a failure to fall back from - downloading the
       // file anyway would be the opposite of what they just asked for.
       if (error instanceof Error && error.name === "AbortError") return "shared";
+      // The sheet said it could take the file and then refused for a real
+      // reason. Falling through to the <a download> below is not a rescue on
+      // the platform this matters for: by now we are outside the tap's
+      // activation, and iOS Safari will not honour a programmatic download
+      // there - it would report success having written nothing. Say so
+      // instead, so the button can offer a retry.
+      return "failed";
     }
   }
 

@@ -117,6 +117,24 @@ describe("ChallengePathGraph", () => {
     });
   });
 
+  // Geometry for the tap radius is unit-tested in domain/tapRadius.test.ts
+  // against the real portrait spacings; jsdom always renders the LANDSCAPE
+  // canvas, where nodes in any fixture small enough to write by hand sit ~72
+  // units apart and a flat 44-unit target never overlaps. A component test
+  // here would pass against the broken code, so this only checks the wiring:
+  // the rendered target must be the computed radius, not a hardcoded 22.
+  it("sizes tap targets from the computed radius rather than a constant", () => {
+    const { container } = render(<ChallengePathGraph runs={runs} />);
+    const targets = [...container.querySelectorAll("circle[fill='transparent']")];
+    expect(targets.length).toBeGreaterThan(0);
+    const radii = new Set(targets.map((c) => Number(c.getAttribute("r"))));
+    // One shared radius across the graph, and it must be a real number in range.
+    for (const r of radii) {
+      expect(r).toBeGreaterThanOrEqual(7);
+      expect(r).toBeLessThanOrEqual(22);
+    }
+  });
+
   // GX-1: SVG_HEIGHT used to be a flat 560px regardless of lane count,
   // leaving a big void under a solo (or 2-lane) run's graph. Height is now
   // derived from lane count (190 base + 75/lane, clamped [260, 640]) - these

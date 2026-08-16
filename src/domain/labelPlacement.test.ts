@@ -242,6 +242,43 @@ describe("placeLabels", () => {
     expect(overlaps(boxes[0], boxes[1])).toBe(false);
   });
 
+  // An anchor that finds no free slot used to be dropped at {dx:0, dy:0} -
+  // baseline dead on the node's own centre. In portrait that is guaranteed for
+  // any start/target title of ~18 characters or more: the start node always
+  // sits at the exact plot centre (every player visits it), the side slots need
+  // width+12 of clear room on one flank, and a ~320-unit phone canvas has
+  // neither. The label's 3px ink halo then erases the start ring and the strand
+  // fan converging on it. dy:0 is not even a rung of the portrait ladder.
+  it("never drops a forced anchor on top of its own node", () => {
+    const bounds = { minX: 4, maxX: 316, minY: 2, maxY: 620 };
+    const wide = candidate({
+      cx: 160,
+      cy: 40,
+      width: 158,
+      priority: LABEL_PRIORITY_ANCHOR,
+    });
+    const [placement] = placeLabels([wide], bounds, PORTRAIT_SLOTS);
+
+    expect(placement.hidden).toBe(false);
+    // It must clear the node: either offset sideways past its own half-width,
+    // or moved vertically off the node's own baseline.
+    const clearsSideways = Math.abs(placement.dx) > 20;
+    const clearsVertically = Math.abs(placement.dy) >= 20;
+    expect(clearsSideways || clearsVertically).toBe(true);
+    const box = boxOf(wide, placement);
+    expect(box.x1).toBeGreaterThanOrEqual(bounds.minX);
+    expect(box.x2).toBeLessThanOrEqual(bounds.maxX);
+    expect(box.y1).toBeGreaterThanOrEqual(bounds.minY);
+  });
+
+  it("puts a forced anchor near the bottom edge above its node, not below", () => {
+    const bounds = { minX: 4, maxX: 316, minY: 2, maxY: 620 };
+    const target = candidate({ cx: 160, cy: 600, width: 158, priority: LABEL_PRIORITY_ANCHOR });
+    const [placement] = placeLabels([target], bounds, PORTRAIT_SLOTS);
+    const box = boxOf(target, placement);
+    expect(box.y2).toBeLessThanOrEqual(bounds.maxY);
+  });
+
   it("places every candidate exactly once, in input order", () => {
     const many = Array.from({ length: 25 }, (_, i) => candidate({ cx: i * 3, cy: 200 }));
     expect(placeLabels(many)).toHaveLength(25);

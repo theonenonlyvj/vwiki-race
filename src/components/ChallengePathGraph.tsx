@@ -3,6 +3,7 @@ import { formatTimeAndClicks } from "../domain/formatting";
 import { strandStyleForIndex, type StrandStyle } from "../domain/strandStyle";
 import { graphImageBlob, shareGraphImage } from "./graphImageExport";
 import { labelIsRevealOnly } from "../domain/labelVisibility";
+import { tapRadiusFor } from "../domain/tapRadius";
 import {
   LABEL_PRIORITY_ANCHOR,
   LABEL_PRIORITY_BREADCRUMB,
@@ -317,6 +318,7 @@ interface GraphLayout {
   finisherCount: number;
   targetGlowOpacity: number;
   entranceTotalMs: number;
+  hitRadius: number;
   svgWidth: number;
   orientation: GraphOrientation;
   svgHeight: number;
@@ -533,6 +535,16 @@ function buildGraph(orderedRuns: ChallengePathRun[], canvas?: GraphCanvas): Grap
   }
 
   raws.sort((a, b) => a.xFrac - b.xFrac);
+
+  // GR-2: tap targets are sized from how close the nodes actually are - see
+  // domain/tapRadius.ts for why a flat 44 units silently handed taps to the
+  // wrong node in portrait.
+  const hitRadius = tapRadiusFor(
+    raws.map((raw) => {
+      const progress = progressOrigin + raw.xFrac * progressPx;
+      return isPortrait ? { x: raw.lane, y: progress } : { x: progress, y: raw.lane };
+    }),
+  );
 
   // A4: label density policy. Always label anchors, shared nodes and DNF
   // terminals. Solo interim nodes on runs > 8 hops instead get
@@ -829,6 +841,7 @@ function buildGraph(orderedRuns: ChallengePathRun[], canvas?: GraphCanvas): Grap
     finisherCount,
     targetGlowOpacity,
     entranceTotalMs,
+    hitRadius,
     svgWidth,
     svgHeight,
     orientation: box.orientation,
@@ -1127,7 +1140,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
         }),
       });
       void shareGraphImage(blob, graph.startTitle, graph.targetTitle)
-        .then(() => setExportState("idle"))
+        .then((outcome) => setExportState(outcome === "failed" ? "failed" : "idle"))
         .catch(() => setExportState("failed"));
     } catch {
       // Nothing here is worth a thrown error reaching the user as a blank
@@ -1860,7 +1873,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                     <circle
                       cx={node.cx}
                       cy={node.cy}
-                      r={Math.max(node.radius, 22)}
+                      r={Math.max(node.radius, graph.hitRadius)}
                       fill="transparent"
                       style={{ cursor: "pointer" }}
                       onClick={(e) => {
@@ -1878,7 +1891,21 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
 
             {callout
               ? (() => {
-                  const width = estimateLabelWidth(callout.title, 13) + 10;
+                  // GR-2: the callout is the ONLY way to read a title the
+                  // placer crowded out on a touch device, so it must never be
+                  // the thing that gets clipped. Its width was taken straight
+                  // from the untruncated title, and on a ~320-unit portrait
+                  // canvas anything past ~42 characters made the clamp
+                  // negative: the box ran off the right edge and the UA cut
+                  // the text off. Fit the box to the canvas first, then fit
+                  // the text to the box.
+                  const maxWidth = graph.svgWidth - 8;
+                  const fullWidth = estimateLabelWidth(callout.title, 13) + 10;
+                  const width = Math.min(fullWidth, maxWidth);
+                  const calloutText =
+                    fullWidth <= maxWidth
+                      ? callout.title
+                      : truncateTitle(callout.title, Math.max(6, Math.floor((maxWidth - 16) / 7.15)));
                   const height = 26;
                   const x = Math.max(
                     4,
@@ -1897,7 +1924,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                         fill="var(--text-bright, #dffbfb)"
                         fontFamily="var(--viota-ui-font, Merriweather, ui-serif, Georgia, serif)"
                       >
-                        {callout.title}
+                        {calloutText}
                       </text>
                     </g>
                   );
