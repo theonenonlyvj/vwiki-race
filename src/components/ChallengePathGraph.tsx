@@ -617,6 +617,9 @@ function buildGraph(orderedRuns: ChallengePathRun[], canvas?: GraphCanvas): Grap
           : ("right" as const)
         : undefined,
       width: estimateLabelWidth(labelText, fontSize),
+      // Merriweather's ascender-to-descender box runs ~1.35x its font size.
+      // Deliberately generous, for the same reason CHAR_WIDTH_PX is.
+      height: Math.ceil(fontSize * 1.35),
       priority: big
         ? LABEL_PRIORITY_ANCHOR
         : alwaysLabel
@@ -635,7 +638,7 @@ function buildGraph(orderedRuns: ChallengePathRun[], canvas?: GraphCanvas): Grap
   // canvas, where they render clipped.
   const labelPlacements = placeLabels(
     labelInputs,
-    { minX: 4, maxX: svgWidth - 4 },
+    { minX: 4, maxX: svgWidth - 4, minY: 2, maxY: svgHeight - 2 },
     isPortrait ? PORTRAIT_SLOTS : LANDSCAPE_SLOTS,
   );
 
@@ -930,13 +933,14 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
     const measure = () => {
       const el = shellRef.current;
       if (!el || typeof window === "undefined") return;
+      // MEASURE THE CANVAS'S OWN BOX, not the component root. The root's
+      // clientWidth includes its 32px of horizontal padding, which made the
+      // canvas 32px wider than the space it had and cost ~10% scale; and the
+      // root's top sits ABOVE the legend, so the height budget double-counted
+      // whatever the legend was occupying and the graph's bottom edge ran off
+      // the sheet whenever the width was not the binding constraint.
       const width = el.clientWidth;
       if (width <= 0) return;
-      // Measure the real distance from the canvas's own top edge to the bottom
-      // of the viewport rather than subtracting a guessed chrome constant -
-      // the heading, legend and caption above it all change height with the
-      // field size and the font, and a stale constant would either overflow
-      // the sheet or leave a band of dead space under the graph.
       const top = el.getBoundingClientRect().top;
       const available = window.innerHeight - top - PORTRAIT_FOOTER_PX;
       const height = Math.max(PORTRAIT_MIN_HEIGHT, Math.round(available));
@@ -957,10 +961,20 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
       window.removeEventListener("resize", measure);
       window.removeEventListener("orientationchange", measure);
     };
-    // legendOpen belongs here: expanding the legend moves the canvas's own top
-    // edge down by ~200px, and without re-measuring the canvas keeps its old
-    // height and pushes its own bottom off the sheet.
-  }, [isNarrow, legendOpen]);
+    // isPortrait and legendOpen both belong here, because both move the
+    // canvas's own top edge:
+    //  - The FIRST measurement necessarily runs against the landscape layout
+    //    (sheet is null until it completes), where the legend is expanded and
+    //    ~300px tall. Without re-measuring once the portrait legend collapses
+    //    to 44px, the canvas keeps a height budget computed against the tall
+    //    layout and lands on the PORTRAIT_MIN_HEIGHT floor - a 460px canvas in
+    //    620px of room.
+    //  - Expanding the legend by hand moves it back down again.
+    // Depending on `sheet` itself is what catches the first case, since
+    // orientation is derived from it further down. This converges rather than
+    // looping: setSheet returns the EXISTING object when the numbers have not
+    // moved, so identity stops changing and the effect stops re-running.
+  }, [isNarrow, legendOpen, sheet]);
 
   const graph = useMemo(
     () => buildGraph(orderedRuns, sheet ? portraitCanvas(sheet.width, sheet.height) : undefined),
@@ -1038,10 +1052,15 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
     }
   });
 
-  const handleExport = async () => {
+  // NOT async, and it must stay that way: iOS Safari only honours
+  // navigator.share() while the page holds transient activation from the tap,
+  // and any await before the share() call gives that up - the sheet then never
+  // appears on the one device this feature exists for. Everything up to and
+  // including the share() call runs in the tap's own task.
+  const handleExport = () => {
     setExportState("working");
     try {
-      const blob = await graphImageBlob({
+      const blob = graphImageBlob({
         width: graph.svgWidth,
         height: graph.svgHeight,
         background: INK,
@@ -1104,8 +1123,9 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
           };
         }),
       });
-      await shareGraphImage(blob, graph.startTitle, graph.targetTitle);
-      setExportState("idle");
+      void shareGraphImage(blob, graph.startTitle, graph.targetTitle)
+        .then(() => setExportState("idle"))
+        .catch(() => setExportState("failed"));
     } catch {
       // Nothing here is worth a thrown error reaching the user as a blank
       // modal: the graph they were looking at is still on screen and still
@@ -1138,7 +1158,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
   };
 
   return (
-    <div className={`cpg-root${isPortrait ? " is-portrait" : ""}`} ref={shellRef}>
+    <div className={`cpg-root${isPortrait ? " is-portrait" : ""}`}>
       <style>{`
         .cpg-root {
           font-family: var(--viota-ui-font, "Merriweather", ui-serif, Georgia, serif);
@@ -1614,7 +1634,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
       </ul>
       )}
 
-      <div className="cpg-scroll-wrap">
+      <div className="cpg-scroll-wrap" ref={shellRef}>
         <div className="cpg-scroll" ref={scrollRef} onScroll={scrollMode ? handleScroll : undefined}>
           <svg
             className="cpg-svg"

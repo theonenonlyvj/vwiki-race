@@ -45,6 +45,15 @@ export interface LabelCandidate {
   cx: number;
   cy: number;
   width: number;
+  /**
+   * Rendered box height. Defaults to LABEL_HEIGHT_PX, which is right for the
+   * 12px body labels but ~3px short for a 14px anchor title - and a placer
+   * that clears a box smaller than the text it is clearing room for produces
+   * exactly the overlap it exists to prevent. Same doctrine as CHAR_WIDTH_PX
+   * in ChallengePathGraph.tsx: over-estimating leaves slack, under-estimating
+   * is a visible bug.
+   */
+  height?: number;
   priority: number;
   /**
    * Which flank to try first. Portrait puts labels beside their nodes, and
@@ -140,17 +149,21 @@ function boxFor(candidate: LabelCandidate, dx: number, dy: number): Box {
   const cx = candidate.cx + dx;
   const cy = candidate.cy + dy;
   const half = candidate.width / 2;
+  const halfHeight = (candidate.height ?? LABEL_HEIGHT_PX) / 2;
   return {
     x1: cx - half,
     x2: cx + half,
-    y1: cy - LABEL_HEIGHT_PX / 2,
-    y2: cy + LABEL_HEIGHT_PX / 2,
+    y1: cy - halfHeight,
+    y2: cy + halfHeight,
   };
 }
 
 export interface LabelBounds {
   minX: number;
   maxX: number;
+  /** Optional: portrait puts the start anchor within 40px of the top edge. */
+  minY?: number;
+  maxY?: number;
 }
 
 export function placeLabels(
@@ -158,15 +171,28 @@ export function placeLabels(
   bounds?: LabelBounds,
   slots: LabelSlot[] = LANDSCAPE_SLOTS,
 ): LabelPlacement[] {
-  const withinBounds = (box: Box): boolean =>
-    !bounds || (box.x1 >= bounds.minX && box.x2 <= bounds.maxX);
+  const withinBounds = (box: Box): boolean => {
+    if (!bounds) return true;
+    if (box.x1 < bounds.minX || box.x2 > bounds.maxX) return false;
+    if (bounds.minY !== undefined && box.y1 < bounds.minY) return false;
+    if (bounds.maxY !== undefined && box.y2 > bounds.maxY) return false;
+    return true;
+  };
 
   const order = candidates
     .map((candidate, index) => ({ candidate, index }))
     .sort((a, b) => a.candidate.priority - b.candidate.priority || a.index - b.index);
 
   const placements = new Array<LabelPlacement>(candidates.length);
+  // Two reservation sets, because suppressed labels have to satisfy two rules
+  // that pull opposite ways. They must not crowd out a label that renders by
+  // default - so default-visible labels are only ever checked against `taken`.
+  // But a focus reveal pops a WHOLE solo stretch in at once, so they must also
+  // avoid each other, or every one of them takes the same nearest free slot
+  // and they stack into unreadable text. Suppressed labels are placed last
+  // (priority order), so by then `takenAll` already holds every visible box.
   const taken: Box[] = [];
+  const takenAll: Box[] = [];
 
   for (const { candidate, index } of order) {
     // Nearest slot wins: walk vertical rings outward, and within each ring try
@@ -181,6 +207,10 @@ export function placeLabels(
           ? [...slots].sort((a, b) => sideRank(a, "right") - sideRank(b, "right"))
           : slots;
 
+    const mustShowEarly = candidate.priority === LABEL_PRIORITY_ANCHOR;
+    const suppressed = candidate.priority === LABEL_PRIORITY_SUPPRESSED;
+    const against = suppressed ? takenAll : taken;
+
     let chosen: { dx: number; dy: number } | null = null;
     for (const slot of ordered) {
       const dx = slot.dxFraction * candidate.width + slot.dxPx;
@@ -189,27 +219,26 @@ export function placeLabels(
       // the margin must not be slid off the canvas - a clipped label is as
       // unreadable as an overlapping one.
       if (!withinBounds(box)) continue;
-      if (!taken.some((placed) => boxesOverlap(placed, box))) {
+      if (!against.some((placed) => boxesOverlap(placed, box))) {
         chosen = { dx, dy: slot.dyPx };
         break;
       }
     }
 
-    const mustShow = candidate.priority === LABEL_PRIORITY_ANCHOR;
-    const alreadySuppressed = candidate.priority === LABEL_PRIORITY_SUPPRESSED;
-
     if (chosen) {
-      placements[index] = { ...chosen, hidden: alreadySuppressed };
-      // An already-suppressed label renders at opacity 0, so it reserves
-      // nothing - otherwise it would crowd out labels that do render.
-      if (!alreadySuppressed) taken.push(boxFor(candidate, chosen.dx, chosen.dy));
+      placements[index] = { ...chosen, hidden: suppressed };
+      const box = boxFor(candidate, chosen.dx, chosen.dy);
+      if (!suppressed) taken.push(box);
+      takenAll.push(box);
       continue;
     }
 
-    if (mustShow) {
+    if (mustShowEarly) {
       // Anchors are the frame of reference; show it and accept the collision.
       placements[index] = { dx: 0, dy: 0, hidden: false };
-      taken.push(boxFor(candidate, 0, 0));
+      const box = boxFor(candidate, 0, 0);
+      taken.push(box);
+      takenAll.push(box);
       continue;
     }
 

@@ -214,8 +214,15 @@ export function drawGraphImage(
     // stands for, dash included.
     ctx.strokeStyle = row.color;
     ctx.lineWidth = 4;
-    ctx.lineCap = "round";
-    applyDash(ctx, row.dash);
+    // BUTT caps, not round. A round cap extends half the line width past each
+    // dash end, which on a 16px swatch bridges the gaps and paints a dashed
+    // strand as a solid one - so in the shared PNG the 8th player became
+    // indistinguishable from the 1st, which is the exact confusion the dash
+    // exists to prevent. The dash is also scaled to the swatch (5 on / 3 off)
+    // rather than reusing the strand's 9/5, which would show one dash and no
+    // gap at this length.
+    ctx.lineCap = "butt";
+    applyDash(ctx, row.dash ? "5 3" : null);
     ctx.beginPath();
     ctx.moveTo(row.x, row.y + 8);
     ctx.lineTo(row.x + 16, row.y + 8);
@@ -251,7 +258,19 @@ export function drawGraphImage(
   return { width: layout.width, height: layout.height };
 }
 
-export async function graphImageBlob(request: GraphImageRequest): Promise<Blob> {
+/**
+ * SYNCHRONOUS on purpose. iOS Safari only honours navigator.share() while the
+ * page holds transient activation from the user's tap, and an intervening
+ * `await` gives that up - so the obvious `await canvas.toBlob(...)` would make
+ * the share sheet never appear on the one device this feature is for. Drawing
+ * is synchronous anyway; the only async step was the encode, so this uses
+ * toDataURL (synchronous) and decodes the base64 itself, keeping the whole
+ * path - draw, encode, share - inside the tap's own task.
+ *
+ * The cost is holding the PNG as a base64 string briefly. At the sizes this
+ * produces (a phone export is ~1MB) that is not worth an await.
+ */
+export function graphImageBlob(request: GraphImageRequest): Blob {
   const layout = graphImageLayout({
     graphWidth: request.width,
     graphHeight: request.height,
@@ -265,9 +284,13 @@ export async function graphImageBlob(request: GraphImageRequest): Promise<Blob> 
   ctx.scale(layout.pixelWidth / layout.width, layout.pixelHeight / layout.height);
   drawGraphImage(ctx, request);
 
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-  if (!blob) throw new Error("canvas_encode_failed");
-  return blob;
+  const dataUrl = canvas.toDataURL("image/png");
+  const comma = dataUrl.indexOf(",");
+  if (!dataUrl.startsWith("data:image/png") || comma < 0) throw new Error("canvas_encode_failed");
+  const binary = atob(dataUrl.slice(comma + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: "image/png" });
 }
 
 /**

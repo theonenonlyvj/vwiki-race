@@ -14,11 +14,12 @@ const LABEL_HEIGHT_PX = 15;
 function boxOf(candidate: LabelCandidate, placement: { dx: number; dy: number }) {
   const cx = candidate.cx + placement.dx;
   const cy = candidate.cy + placement.dy;
+  const height = candidate.height ?? LABEL_HEIGHT_PX;
   return {
     x1: cx - candidate.width / 2,
     x2: cx + candidate.width / 2,
-    y1: cy - LABEL_HEIGHT_PX / 2,
-    y2: cy + LABEL_HEIGHT_PX / 2,
+    y1: cy - height / 2,
+    y2: cy + height / 2,
   };
 }
 
@@ -174,6 +175,71 @@ describe("placeLabels", () => {
       expect(placements.every((p) => !p.hidden)).toBe(true);
       expect(countVisibleOverlaps(pair, PORTRAIT_SLOTS)).toBe(0);
     });
+  });
+
+  // The prototype reserved a slot for suppressed labels precisely because a
+  // focus reveal pops a whole solo stretch in AT ONCE. Making them reserve
+  // nothing (so they cannot crowd out a visible label) reintroduced that: every
+  // revealed label in a stretch took the same nearest free slot and stacked
+  // into unreadable text. They must avoid each other while still not blocking
+  // anything that renders by default.
+  it("keeps suppressed labels from stacking on each other when revealed", () => {
+    const stretch = Array.from({ length: 6 }, () =>
+      candidate({ cx: 400, cy: 300, priority: LABEL_PRIORITY_SUPPRESSED }),
+    );
+    const placements = placeLabels(stretch);
+    const boxes = placements.map((p, i) => boxOf(stretch[i], p));
+    let collisions = 0;
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        if (overlaps(boxes[i], boxes[j])) collisions++;
+      }
+    }
+    expect(collisions).toBe(0);
+  });
+
+  it("still lets a visible label take the slot a suppressed one wanted", () => {
+    const mixed: LabelCandidate[] = [
+      candidate({ cx: 400, cy: 300, priority: LABEL_PRIORITY_SUPPRESSED }),
+      candidate({ cx: 400, cy: 300, priority: LABEL_PRIORITY_SHARED }),
+    ];
+    const placements = placeLabels(mixed);
+    expect(placements[1]).toMatchObject({ dx: 0, dy: 16, hidden: false });
+  });
+
+  // Sideways bounds alone let a label at the top or bottom of the canvas be
+  // nudged straight off it - portrait puts the start anchor within 40px of the
+  // top edge, and the ladder's negative offsets reach -23.
+  it("keeps a label inside the canvas vertically too", () => {
+    const bounds = { minX: 0, maxX: 1000, minY: 0, maxY: 500 };
+    const nearTop = [
+      candidate({ cx: 500, cy: 8, width: 80 }),
+      candidate({ cx: 500, cy: 8, width: 80 }),
+      candidate({ cx: 500, cy: 496, width: 80 }),
+    ];
+    const placements = placeLabels(nearTop, bounds);
+    for (const [i, placement] of placements.entries()) {
+      if (placement.hidden) continue;
+      const box = boxOf(nearTop[i], placement);
+      expect(box.y1).toBeGreaterThanOrEqual(bounds.minY);
+      expect(box.y2).toBeLessThanOrEqual(bounds.maxY);
+    }
+  });
+
+  // A 14px anchor title renders a box ~18px tall, but the placer assumed a
+  // flat 15px for everything. On a 360x640 phone at the 12-strand cap that
+  // shortfall put "Remote control" 1.6px into "Technology" - the placer had
+  // cleared a box smaller than the text it was clearing room for. Same failure
+  // mode the file already warns about for character WIDTH: under-estimating
+  // overlaps, over-estimating merely leaves slack.
+  it("respects a taller label's real height when clearing space", () => {
+    const tall = [
+      candidate({ cx: 500, cy: 300, width: 90, height: 19 }),
+      candidate({ cx: 500, cy: 316, width: 90, height: 19 }),
+    ];
+    const placements = placeLabels(tall);
+    const boxes = placements.map((p, i) => boxOf(tall[i], p));
+    expect(overlaps(boxes[0], boxes[1])).toBe(false);
   });
 
   it("places every candidate exactly once, in input order", () => {
