@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_TAP_RADIUS, MIN_TAP_RADIUS, tapRadiiFor, type TapPoint } from "./tapRadius";
+import { MAX_TAP_RADIUS, tapRadiiFor, type TapPoint } from "./tapRadius";
 
 const worstRadius = (points: TapPoint[]) => Math.min(...tapRadiiFor(points));
 
@@ -47,13 +47,16 @@ describe("tapRadiusFor", () => {
     expect(overlappingPairs(lanes, lanes.map(() => MAX_TAP_RADIUS))).toBeGreaterThan(0);
   });
 
-  it("never shrinks so far that the target is smaller than the dot", () => {
-    // Two nodes almost on top of each other: honouring half the gap literally
-    // would produce a sub-pixel target nobody could hit.
-    expect(tapRadiiFor([{ x: 100, y: 100 }, { x: 100.4, y: 100 }])).toEqual([
-      MIN_TAP_RADIUS,
-      MIN_TAP_RADIUS,
-    ]);
+  // A floor was tried here and it re-created the bug this module exists to
+  // prevent: it overrode the half-gap rule for every pair closer than twice
+  // the floor, which on a real portrait daily is the FIRST node of nearly
+  // every solo stretch. A target that is hard to hit beats one that reliably
+  // opens the wrong article.
+  it("honours the half-gap rule even for nodes almost on top of each other", () => {
+    const radii = tapRadiiFor([{ x: 100, y: 100 }, { x: 100.4, y: 100 }]);
+    expect(radii[0]).toBeCloseTo(0.2, 6);
+    expect(radii[1]).toBeCloseTo(0.2, 6);
+    expect(overlappingPairs([{ x: 100, y: 100 }, { x: 100.4, y: 100 }], radii)).toBe(0);
   });
 
   it("ignores coincident nodes rather than collapsing to zero", () => {
@@ -68,16 +71,36 @@ describe("tapRadiusFor", () => {
   // One tight pair deep in a solo stretch must not shrink the anchors, which
   // sit in open canvas. A single global minimum did exactly that.
   it("shrinks only the crowded nodes, not the whole graph", () => {
-    const radii = tapRadiiFor([
+    const points = [
       { x: 0, y: 0 },
       { x: 4, y: 0 },
       { x: 600, y: 600 },
       { x: 900, y: 900 },
-    ]);
+    ];
+    const radii = tapRadiiFor(points);
 
-    expect(radii[0]).toBe(MIN_TAP_RADIUS);
-    expect(radii[1]).toBe(MIN_TAP_RADIUS);
+    expect(radii[0]).toBe(2);
+    expect(radii[1]).toBe(2);
     expect(radii[2]).toBe(MAX_TAP_RADIUS);
     expect(radii[3]).toBe(MAX_TAP_RADIUS);
+    expect(overlappingPairs(points, radii)).toBe(0);
+  });
+
+  // The real portrait geometry that the floor was breaking: MIN_GAP_FRAC puts
+  // consecutive solo nodes ~5.9 units apart, and a 7-unit floor there covered
+  // each node's own centre with its neighbour's target.
+  it("never lets a node's own centre fall inside a neighbour's target", () => {
+    const stretch = Array.from({ length: 20 }, (_, i) => ({ x: 160, y: 60 + i * 5.9 }));
+    const radii = tapRadiiFor(stretch);
+
+    let stolen = 0;
+    for (let i = 0; i < stretch.length; i++) {
+      for (let j = 0; j < stretch.length; j++) {
+        if (i === j) continue;
+        const d = Math.hypot(stretch[i].x - stretch[j].x, stretch[i].y - stretch[j].y);
+        if (d < radii[j]) stolen++;
+      }
+    }
+    expect(stolen).toBe(0);
   });
 });

@@ -19,8 +19,27 @@
 
 /** A6c asked for 44-unit targets; that is the ceiling, not a guarantee. */
 export const MAX_TAP_RADIUS = 22;
-/** Below this a target is smaller than the dot it covers and stops being useful. */
-export const MIN_TAP_RADIUS = 7;
+/*
+ * There is deliberately NO minimum radius.
+ *
+ * A 7-unit floor was tried, on the reasoning that a smaller target is too hard
+ * to hit. It re-created the exact bug this module exists to prevent: the floor
+ * overrides the half-gap rule for every pair closer than 14 units, and the
+ * layout's MIN_GAP_FRAC puts consecutive solo nodes 5.9 units apart in
+ * portrait. On a real 11-strand daily that left 28 of 188 nodes with their own
+ * centre covered by a later-painted node's target - so tapping the first node
+ * of nearly every solo stretch opened the NEXT article. Those are precisely
+ * the nodes whose labels were crowded out, and for which the callout is the
+ * only read path on touch. Removing the floor takes that from 28 to 0.
+ *
+ * The trade, stated plainly: the smallest target becomes ~3 CSS px, which is
+ * hard to hit. That is hard-but-correct against easy-but-wrong. The renderer
+ * separately floors at the node's DRAWN radius, so the visible dot is always
+ * coverable. The strictly better fix, if 3px proves too small in practice, is
+ * one canvas-level handler doing nearest-centre hit-testing rather than
+ * relying on SVG topmost-wins - more work, and it wants a real device to
+ * judge.
+ */
 
 export interface TapPoint {
   x: number;
@@ -53,6 +72,6 @@ export function tapRadiiFor(points: TapPoint[]): number[] {
       if (gap > 0 && gap < closest) closest = gap;
     }
     if (!Number.isFinite(closest)) return MAX_TAP_RADIUS;
-    return Math.max(MIN_TAP_RADIUS, Math.min(MAX_TAP_RADIUS, closest / 2));
+    return Math.min(MAX_TAP_RADIUS, closest / 2);
   });
 }

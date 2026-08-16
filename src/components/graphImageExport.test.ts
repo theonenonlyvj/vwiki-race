@@ -82,13 +82,15 @@ describe("shareGraphImage", () => {
 
   // Dismissing the share sheet raises AbortError. That is a deliberate "no" -
   // downloading the file anyway would be the opposite of what was asked.
-  it("does not download behind the user's back when they dismiss the share sheet", async () => {
+  // Dismissing must not download behind their back - and must not be reported
+  // as a save either. No file exists, so "Saved" would be a plain lie.
+  it("reports a dismissed share sheet as cancelled, and downloads nothing", async () => {
     const abort = new Error("dismissed");
     abort.name = "AbortError";
     setNavigator({ share: vi.fn().mockRejectedValue(abort), canShare: () => true } as Partial<Navigator>);
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
-    await expect(shareGraphImage(blob(), "A", "B")).resolves.toBe("shared");
+    await expect(shareGraphImage(blob(), "A", "B")).resolves.toBe("cancelled");
     expect(click).not.toHaveBeenCalled();
   });
 

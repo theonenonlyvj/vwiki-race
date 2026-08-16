@@ -349,7 +349,7 @@ export async function shareGraphImage(
   blob: Blob,
   startTitle: string | null,
   targetTitle: string | null,
-): Promise<"shared" | "downloaded" | "failed"> {
+): Promise<"shared" | "cancelled" | "downloaded" | "failed"> {
   const name = exportFileName(startTitle, targetTitle);
   const file = new File([blob], name, { type: "image/png" });
   const nav = navigator as Navigator & {
@@ -365,7 +365,10 @@ export async function shareGraphImage(
       // A user dismissing the share sheet raises AbortError. That is a
       // deliberate "no", not a failure to fall back from - downloading the
       // file anyway would be the opposite of what they just asked for.
-      if (error instanceof Error && error.name === "AbortError") return "shared";
+      // Dismissed. Distinct from "shared": no file exists, so the caller must
+      // not report a save - but we also must not download behind their back,
+      // which is the opposite of what they just asked for.
+      if (error instanceof Error && error.name === "AbortError") return "cancelled";
       // The sheet said it could take the file and then refused for a real
       // reason. Fall through to the download below rather than giving up: on a
       // desktop browser that genuinely works, and refusing to try left those

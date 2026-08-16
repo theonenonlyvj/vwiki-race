@@ -58,6 +58,14 @@ export interface LabelCandidate {
   height?: number;
   priority: number;
   /**
+   * Who reveals this label. Only ONE player's held-back labels are ever shown
+   * at a time (the A6 focus reveal), so a suppressed label needs to avoid its
+   * OWN owner's other held-back labels and the always-visible ones - not the
+   * ~150 belonging to players who are not on screen. Ignored for labels that
+   * render by default.
+   */
+  owner?: string;
+  /**
    * Which flank to try first. Portrait puts labels beside their nodes, and
    * without a preference every one of them lands on the same side: the empty
    * margin on the other flank goes unused while the crowded side truncates
@@ -72,6 +80,20 @@ export interface LabelPlacement {
   dy: number;
   /** True when no free slot existed and the label must not render by default. */
   hidden: boolean;
+  /**
+   * For a hidden label: whether the focus reveal may show it.
+   *
+   * False when it could not be placed clear of its owner's other revealed
+   * labels. Revealing it anyway is not a smaller problem than hiding it - each
+   * title carries a 3px ink halo, so an overlap destroys BOTH, and a reveal
+   * turns a whole solo stretch on at once. On a real portrait daily that put
+   * 24 of one player's 30 titles on the same rung, 6px apart inside 17px
+   * boxes. Held-back titles stay reachable through the node's tooltip and the
+   * tap callout.
+   *
+   * Always true for a label that renders by default.
+   */
+  revealable: boolean;
 }
 
 interface Box {
@@ -281,6 +303,18 @@ export function placeLabels(
   // (priority order), so by then `takenAll` already holds every visible box.
   const taken: Box[] = [];
   const takenAll: Box[] = [];
+  // Per owner, the boxes their revealed labels will occupy. Separate from
+  // `takenAll` because a reveal shows one owner at a time.
+  const takenByOwner = new Map<string, Box[]>();
+  const ownerBoxes = (owner: string | undefined): Box[] => {
+    if (owner === undefined) return [];
+    let list = takenByOwner.get(owner);
+    if (!list) {
+      list = [];
+      takenByOwner.set(owner, list);
+    }
+    return list;
+  };
 
   for (const { candidate, index } of order) {
     // Nearest slot wins: walk vertical rings outward, and within each ring try
@@ -297,7 +331,11 @@ export function placeLabels(
 
     const mustShowEarly = candidate.priority === LABEL_PRIORITY_ANCHOR;
     const suppressed = candidate.priority === LABEL_PRIORITY_SUPPRESSED;
-    const against = suppressed ? takenAll : taken;
+    // A default-visible label answers only to other default-visible labels.
+    // A suppressed one answers to those PLUS its own owner's other held-back
+    // labels, since a reveal turns that owner's whole stretch on at once - but
+    // NOT to other owners', who are never on screen at the same time.
+    const against = suppressed ? [...taken, ...ownerBoxes(candidate.owner)] : taken;
 
     let chosen: { dx: number; dy: number } | null = null;
     for (const slot of ordered) {
@@ -314,14 +352,16 @@ export function placeLabels(
     }
 
     if (chosen) {
-      placements[index] = { ...chosen, hidden: suppressed };
+      placements[index] = { ...chosen, hidden: suppressed, revealable: true };
       const box = boxFor(candidate, chosen.dx, chosen.dy);
       if (!suppressed) taken.push(box);
+      else ownerBoxes(candidate.owner).push(box);
       takenAll.push(box);
       continue;
     }
 
     if (mustShowEarly) {
+      /* falls through to the forced-slot branch below */
       // Anchors are the frame of reference and never hide, so when every slot
       // is taken one has to be forced. It must NOT be forced to {0, 0}: that
       // puts the baseline dead on the node's own centre, and the label's ink
@@ -336,7 +376,7 @@ export function placeLabels(
       // forced anchor may overlap a neighbour - that is the trade - but it is
       // never illegible on top of itself.
       const forced = forcedSlot(candidate, ordered, bounds);
-      placements[index] = { ...forced, hidden: false };
+      placements[index] = { ...forced, hidden: false, revealable: true };
       const box = boxFor(candidate, forced.dx, forced.dy);
       taken.push(box);
       takenAll.push(box);
@@ -350,7 +390,7 @@ export function placeLabels(
     // become visible, which is the exact failure the two reservation sets exist
     // to prevent, displaced into the fallback.
     const fallbackPlacement = leastCollidingSlot(candidate, ordered, takenAll, bounds);
-    placements[index] = { ...fallbackPlacement, hidden: true };
+    placements[index] = { ...fallbackPlacement, hidden: true, revealable: false };
     takenAll.push(boxFor(candidate, fallbackPlacement.dx, fallbackPlacement.dy));
   }
 

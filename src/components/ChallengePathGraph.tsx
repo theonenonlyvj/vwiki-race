@@ -284,6 +284,8 @@ interface NodeLayout {
   alwaysLabel: boolean; // anchor, shared, or DNF terminal - never suppressed
   showLabelDesktop: boolean; // alwaysLabel || A4 breadcrumb-selected
   labelDx: number;
+  /** GR-2: false when revealing this label would overprint a co-revealed one. */
+  labelRevealable: boolean;
   /** GR-2: this node's own collision-free tap radius. */
   hitRadius: number;
   labelCrowdedOut: boolean; // GR-2: no collision-free slot existed
@@ -636,6 +638,9 @@ function buildGraph(orderedRuns: ChallengePathRun[], canvas?: GraphCanvas): Grap
       // Merriweather's ascender-to-descender box runs ~1.35x its font size.
       // Deliberately generous, for the same reason CHAR_WIDTH_PX is.
       height: Math.ceil(fontSize * 1.35),
+      // Only a SOLO node can be revealed by focusing a player, so only a solo
+      // node has an owner to avoid siblings of.
+      owner: raw.agg.visitors.size === 1 ? [...raw.agg.visitors.keys()][0] : undefined,
       priority: big
         ? LABEL_PRIORITY_ANCHOR
         : alwaysLabel
@@ -698,6 +703,7 @@ function buildGraph(orderedRuns: ChallengePathRun[], canvas?: GraphCanvas): Grap
       labelFull: raw.agg.title,
       hitRadius: hitRadii[index],
       labelDx: placement.dx,
+      labelRevealable: placement.revealable,
       labelDy: placement.dy,
       // GR-2: the placer found no collision-free slot for this one. It stays
       // reachable through the node's <title> tooltip and the A6 focus reveal,
@@ -1180,7 +1186,15 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
         }),
       });
       void shareGraphImage(blob, graph.startTitle, graph.targetTitle)
-        .then((outcome) => setExportState(outcome === "failed" ? "failed" : "done"))
+        .then((outcome) =>
+          // A dismissed share sheet resolves as "shared" so we do not download
+          // behind the user's back - but it is NOT a save, and claiming
+          // "Saved" (and announcing "Image ready") after they explicitly
+          // cancelled is a plain lie. Only a delivered file says done.
+          setExportState(
+            outcome === "failed" ? "failed" : outcome === "cancelled" ? "idle" : "done",
+          ),
+        )
         .catch(() => setExportState("failed"));
     } catch {
       // Nothing here is worth a thrown error reaching the user as a blank
@@ -1807,7 +1821,13 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                   isMobile: isNarrow,
                   isPortrait,
                 });
-                const labelVisible = !revealOnly || activePlayer === node.soleVisitor;
+                // A reveal turns a whole solo stretch on AT ONCE, and each
+                // title carries a 3px ink halo, so showing one that could not
+                // be placed clear of its siblings destroys both of them. The
+                // placer says which are safe; the rest stay on the node's
+                // tooltip and the tap callout.
+                const labelVisible =
+                  !revealOnly || (activePlayer === node.soleVisitor && node.labelRevealable);
 
                 const secondaryHalo = !isTarget && node.visitorCount > 1;
 
@@ -1959,7 +1979,12 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                       style={{ cursor: "pointer" }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (node.soleVisitor) togglePin(node.soleVisitor);
+                        // SET, never toggle. Walking a strand dot by dot is
+                        // the only way to read crowded-out titles on touch,
+                        // and toggling flipped the reveal off on every second
+                        // tap. Toggling belongs on the legend row, where
+                        // "that player again" genuinely means "stop".
+                        if (node.soleVisitor) setPinnedPlayer(node.soleVisitor);
                         setCallout((cur) =>
                           cur && cur.title === node.labelFull ? null : { title: node.labelFull, cx: node.cx, cy: node.cy },
                         );

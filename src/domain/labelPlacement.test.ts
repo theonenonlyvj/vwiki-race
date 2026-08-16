@@ -184,17 +184,38 @@ describe("placeLabels", () => {
   // into unreadable text. They must avoid each other while still not blocking
   // anything that renders by default.
   it("keeps suppressed labels from stacking on each other when revealed", () => {
-    const stretch = Array.from({ length: 6 }, () =>
-      candidate({ cx: 400, cy: 300, priority: LABEL_PRIORITY_SUPPRESSED }),
+    // PORTRAIT geometry, with real bounds. The previous version of this test
+    // used the default 70-rung LANDSCAPE ladder on an unbounded canvas, where
+    // the fallback branch is never reached - so it passed against the very bug
+    // it was written to catch. A phone has 14 rungs and a hard right edge.
+    const stretch = Array.from({ length: 15 }, (_, i) =>
+      candidate({
+        cx: 36,
+        cy: 60 + i * 6,
+        width: 117.6,
+        height: 17,
+        priority: LABEL_PRIORITY_SUPPRESSED,
+        owner: "P1",
+      }),
     );
-    const placements = placeLabels(stretch);
-    const boxes = placements.map((p, i) => boxOf(stretch[i], p));
+    const placements = placeLabels(
+      stretch,
+      { minX: 4, maxX: 318, minY: 2, maxY: 622 },
+      PORTRAIT_SLOTS,
+    );
+
+    // Whatever is REVEALABLE must be mutually legible; the rest stay held back
+    // and reachable through the tooltip and the callout.
+    const shown = placements
+      .map((placement, i) => ({ placement, box: boxOf(stretch[i], placement) }))
+      .filter((entry) => entry.placement.revealable);
     let collisions = 0;
-    for (let i = 0; i < boxes.length; i++) {
-      for (let j = i + 1; j < boxes.length; j++) {
-        if (overlaps(boxes[i], boxes[j])) collisions++;
+    for (let i = 0; i < shown.length; i++) {
+      for (let j = i + 1; j < shown.length; j++) {
+        if (overlaps(shown[i].box, shown[j].box)) collisions++;
       }
     }
+    expect(shown.length).toBeGreaterThan(3);
     expect(collisions).toBe(0);
   });
 
@@ -292,15 +313,43 @@ describe("placeLabels", () => {
   // The fallback branch used a fixed slot, so every label that exhausted the
   // ladder collapsed onto the same offset - and a focus reveal turns a whole
   // solo stretch on at once, so they stacked exactly when they became visible.
-  it("spreads labels that exhaust every slot instead of piling them up", () => {
-    const swarm = Array.from({ length: 14 }, () =>
-      candidate({ cx: 400, cy: 300, width: 150, priority: LABEL_PRIORITY_SUPPRESSED }),
+  it("marks a label unrevealable rather than letting it overprint a sibling", () => {
+    // Same portrait geometry: far more candidates than the ladder has rungs,
+    // so most MUST be held back. The contract is not "everything gets a slot",
+    // it is "nothing that renders destroys something else that renders".
+    const swarm = Array.from({ length: 30 }, (_, i) =>
+      candidate({
+        cx: 36,
+        cy: 60 + i * 6,
+        width: 117.6,
+        height: 17,
+        priority: LABEL_PRIORITY_SUPPRESSED,
+        owner: "P1",
+      }),
     );
-    const placements = placeLabels(swarm);
-    const offsets = new Set(placements.map((p) => `${p.dx}|${p.dy}`));
+    const placements = placeLabels(
+      swarm,
+      { minX: 4, maxX: 318, minY: 2, maxY: 622 },
+      PORTRAIT_SLOTS,
+    );
 
-    // Not necessarily 14 distinct - the ladder is finite - but nowhere near 1.
-    expect(offsets.size).toBeGreaterThan(6);
+    expect(placements.some((p) => !p.revealable)).toBe(true);
+    expect(placements.some((p) => p.revealable)).toBe(true);
+  });
+
+  it("lets two different players' held-back labels share a slot", () => {
+    // Only one player's stretch is revealed at a time, so their labels never
+    // need to avoid another player's - and making them try would waste the
+    // ladder and hide far more than necessary.
+    const two = [
+      candidate({ cx: 200, cy: 300, width: 100, priority: LABEL_PRIORITY_SUPPRESSED, owner: "P1" }),
+      candidate({ cx: 200, cy: 300, width: 100, priority: LABEL_PRIORITY_SUPPRESSED, owner: "P2" }),
+    ];
+    const placements = placeLabels(two, undefined, PORTRAIT_SLOTS);
+
+    expect(placements.every((p) => p.revealable)).toBe(true);
+    expect(placements[0].dx).toBe(placements[1].dx);
+    expect(placements[0].dy).toBe(placements[1].dy);
   });
 
   it("places every candidate exactly once, in input order", () => {
