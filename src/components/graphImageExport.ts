@@ -1,0 +1,304 @@
+/**
+ * GR-2: draw "Everyone's path" to a PNG for sharing.
+ *
+ * Canvas2D, NOT SVG serialization. Rasterizing an SVG goes through
+ * `new Image()` with a data: URL, and an image loaded that way is its own
+ * document: it cannot see the page's webfonts, so every label silently falls
+ * back to a default serif and the shared PNG looks nothing like the screen.
+ * Embedding the font as a base64 @font-face would fix that at the cost of
+ * shipping ~40KB of Merriweather through a data URI on every export.
+ *
+ * Canvas2D avoids the problem outright - `fillText` uses the fonts the
+ * DOCUMENT has already loaded - and `new Path2D(d)` accepts SVG path syntax,
+ * so the bezier edges the layout already computed are reused verbatim rather
+ * than re-derived.
+ */
+import {
+  exportFileName,
+  graphImageLayout,
+  type GraphImageLegendEntry,
+} from "../domain/graphImageLayout";
+
+export interface GraphImageEdge {
+  d: string;
+  color: string;
+  dash: string | null;
+  opacity: number;
+  strokeWidth: number;
+}
+
+export interface GraphImageNode {
+  cx: number;
+  cy: number;
+  radius: number;
+  fill: string;
+  stroke: string;
+  labelText: string;
+  labelColor: string;
+  labelDx: number;
+  labelDy: number;
+  labelVisible: boolean;
+  fontSize: number;
+  bold: boolean;
+  visitorCount: number;
+  isTarget: boolean;
+  isDnfTerminal: boolean;
+}
+
+export interface GraphImageRequest {
+  width: number;
+  height: number;
+  background: string;
+  edges: GraphImageEdge[];
+  nodes: GraphImageNode[];
+  legend: GraphImageLegendEntry[];
+  caption: string;
+  /** Drives the target's convergence halo, as on the canvas. */
+  finisherCount: number;
+  targetGlowOpacity: number;
+  startTitle: string | null;
+  targetTitle: string | null;
+  fontFamily: string;
+}
+
+const MUTED = "#9fb8bd";
+const BRIGHT = "#dffbfb";
+const INK = "#061014";
+const TARGET_COLOR = "#ff765f";
+const DNF_MARK = "#e0655a";
+
+function applyDash(ctx: CanvasRenderingContext2D, dash: string | null): void {
+  ctx.setLineDash(dash ? dash.split(/[\s,]+/).map(Number).filter((n) => Number.isFinite(n)) : []);
+}
+
+export function drawGraphImage(
+  ctx: CanvasRenderingContext2D,
+  request: GraphImageRequest,
+): { width: number; height: number } {
+  const layout = graphImageLayout({
+    graphWidth: request.width,
+    graphHeight: request.height,
+    legend: request.legend,
+  });
+
+  ctx.save();
+  ctx.fillStyle = request.background;
+  ctx.fillRect(0, 0, layout.width, layout.height);
+
+  // Edges first, then nodes, then labels - same paint order as the SVG, so a
+  // node never has an edge drawn across its face.
+  for (const edge of request.edges) {
+    ctx.save();
+    ctx.globalAlpha = edge.opacity;
+    ctx.strokeStyle = edge.color;
+    ctx.lineWidth = edge.strokeWidth;
+    ctx.lineCap = "round";
+    applyDash(ctx, edge.dash);
+    ctx.stroke(new Path2D(edge.d));
+    ctx.restore();
+  }
+
+  // A7: the target's halo scales with how many players actually finished. It
+  // is the picture's payoff - "this is where everyone ended up" - so the
+  // export would read as a different, flatter graph without it.
+  const target = request.nodes.find((node) => node.isTarget);
+  if (target) {
+    ctx.save();
+    ctx.globalAlpha = request.targetGlowOpacity;
+    ctx.fillStyle = TARGET_COLOR;
+    ctx.filter = "blur(6px)";
+    ctx.beginPath();
+    ctx.arc(target.cx, target.cy, target.radius + 6 + 2 * request.finisherCount, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  for (const node of request.nodes) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(node.cx, node.cy, node.radius, 0, Math.PI * 2);
+    ctx.fillStyle = node.fill;
+    ctx.fill();
+    if (node.stroke !== "none") {
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = node.stroke;
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // A5: 3+ visitors carry a small centred count - the merge points are the
+    // whole reason the graph is drawn merged rather than as parallel lanes.
+    if (node.visitorCount >= 3 && !node.isTarget) {
+      ctx.save();
+      ctx.font = `600 ${Math.min(11, node.radius * 1.1)}px ${request.fontFamily}`;
+      ctx.fillStyle = INK;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(node.visitorCount), node.cx, node.cy);
+      ctx.restore();
+    }
+
+    if (node.isTarget) {
+      ctx.save();
+      ctx.font = `600 ${Math.max(10, node.radius)}px ${request.fontFamily}`;
+      ctx.fillStyle = INK;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("\u2605", node.cx, node.cy + 1);
+      ctx.restore();
+    }
+
+    // The DNF cross: without it an abandoned run just stops, and the export
+    // reads as though that player is still out there somewhere.
+    if (node.isDnfTerminal) {
+      ctx.save();
+      ctx.strokeStyle = DNF_MARK;
+      ctx.lineWidth = 2.4;
+      ctx.lineCap = "round";
+      const arm = 5;
+      ctx.beginPath();
+      ctx.moveTo(node.cx - arm, node.cy - arm);
+      ctx.lineTo(node.cx + arm, node.cy + arm);
+      ctx.moveTo(node.cx + arm, node.cy - arm);
+      ctx.lineTo(node.cx - arm, node.cy + arm);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  for (const node of request.nodes) {
+    if (!node.labelVisible || !node.labelText) continue;
+    ctx.save();
+    ctx.font = `${node.bold ? 600 : 500} ${node.fontSize}px ${request.fontFamily}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    // The SVG paints a halo behind label text (paint-order: stroke) so titles
+    // stay readable where they cross a strand; without it the PNG loses
+    // legibility exactly where the graph is busiest.
+    ctx.lineWidth = 3;
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = request.background;
+    ctx.strokeText(node.labelText, node.cx + node.labelDx, node.cy + node.labelDy);
+    ctx.fillStyle = node.labelColor;
+    ctx.fillText(node.labelText, node.cx + node.labelDx, node.cy + node.labelDy);
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.font = `400 11px ${request.fontFamily}`;
+  ctx.fillStyle = MUTED;
+  ctx.globalAlpha = 0.8;
+  ctx.textAlign = "center";
+  ctx.fillText(request.caption, layout.width / 2, request.height - 12);
+  ctx.restore();
+
+  for (const row of layout.rows) {
+    ctx.save();
+    // Swatch: a short line, matching the on-screen legend and the strand it
+    // stands for, dash included.
+    ctx.strokeStyle = row.color;
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+    applyDash(ctx, row.dash);
+    ctx.beginPath();
+    ctx.moveTo(row.x, row.y + 8);
+    ctx.lineTo(row.x + 16, row.y + 8);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.globalAlpha = row.status === "abandoned" ? 0.72 : 1;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.font = `600 12px ${request.fontFamily}`;
+    ctx.fillStyle = BRIGHT;
+    const nameX = row.x + 24;
+    ctx.fillText(row.player, nameX, row.y + 8);
+    const nameWidth = ctx.measureText(row.player).width;
+
+    ctx.font = `400 12px ${request.fontFamily}`;
+    ctx.fillStyle = MUTED;
+    const statX = nameX + nameWidth + 8;
+    ctx.fillText(row.stat, statX, row.y + 8);
+    const statWidth = ctx.measureText(row.stat).width;
+
+    if (row.isWinner) {
+      ctx.fillStyle = row.color;
+      ctx.fillText("★ 1st", statX + statWidth + 8, row.y + 8);
+    } else if (row.status === "abandoned") {
+      ctx.fillStyle = "#e0655a";
+      ctx.fillText("DNF", statX + statWidth + 8, row.y + 8);
+    }
+    ctx.restore();
+  }
+
+  ctx.restore();
+  return { width: layout.width, height: layout.height };
+}
+
+export async function graphImageBlob(request: GraphImageRequest): Promise<Blob> {
+  const layout = graphImageLayout({
+    graphWidth: request.width,
+    graphHeight: request.height,
+    legend: request.legend,
+  });
+  const canvas = document.createElement("canvas");
+  canvas.width = layout.pixelWidth;
+  canvas.height = layout.pixelHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas_unavailable");
+  ctx.scale(layout.pixelWidth / layout.width, layout.pixelHeight / layout.height);
+  drawGraphImage(ctx, request);
+
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("canvas_encode_failed");
+  return blob;
+}
+
+/**
+ * Hand the image to the OS share sheet where that exists (which is the whole
+ * point on a phone - it puts the PNG straight into a message thread), and fall
+ * back to a download everywhere else.
+ *
+ * `canShare` must be consulted with the actual file: Safari reports
+ * `navigator.share` present but refuses file payloads in some contexts, and an
+ * unguarded call rejects after the user has already tapped.
+ */
+export async function shareGraphImage(
+  blob: Blob,
+  startTitle: string | null,
+  targetTitle: string | null,
+): Promise<"shared" | "downloaded"> {
+  const name = exportFileName(startTitle, targetTitle);
+  const file = new File([blob], name, { type: "image/png" });
+  const nav = navigator as Navigator & {
+    canShare?: (data: { files: File[] }) => boolean;
+    share?: (data: { files: File[]; title?: string }) => Promise<void>;
+  };
+
+  if (typeof nav.share === "function" && nav.canShare?.({ files: [file] })) {
+    try {
+      await nav.share({ files: [file], title: "Everyone's path" });
+      return "shared";
+    } catch (error) {
+      // A user dismissing the share sheet raises AbortError. That is a
+      // deliberate "no", not a failure to fall back from - downloading the
+      // file anyway would be the opposite of what they just asked for.
+      if (error instanceof Error && error.name === "AbortError") return "shared";
+    }
+  }
+
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    // Revoking synchronously can cancel the download in Safari; one frame is
+    // enough for the navigation to have been taken.
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+  return "downloaded";
+}

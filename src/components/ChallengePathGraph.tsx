@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { formatTimeAndClicks } from "../domain/formatting";
 import { strandStyleForIndex, type StrandStyle } from "../domain/strandStyle";
+import { graphImageBlob, shareGraphImage } from "./graphImageExport";
 import {
   LABEL_PRIORITY_ANCHOR,
   LABEL_PRIORITY_BREADCRUMB,
@@ -845,6 +846,43 @@ function useIsMobile(breakpointPx: number): boolean {
   return useMediaQuery(`(max-width: ${breakpointPx}px)`);
 }
 
+/**
+ * GR-2: how a node is painted, as literal colours.
+ *
+ * The SVG could use `var(--ink-soft, #102329)`, but Canvas2D cannot resolve a
+ * CSS custom property, and the shared PNG must look like the screen. Rather
+ * than keep two copies of the rules - which WOULD drift, since the only thing
+ * checking them is a human comparing a screenshot to a download - both
+ * renderers read from here. The literals are the same values the var()
+ * fallbacks already carried, and this app ships a single dark theme.
+ */
+const INK = "#061014";
+const INK_SOFT = "#102329";
+const TEXT_BRIGHT = "#dffbfb";
+
+function nodeVisuals(
+  node: NodeLayout,
+  playerColorOf: (player: string) => string,
+): { fill: string; stroke: string; labelColor: string } {
+  const soloColor = playerColorOf(node.soleVisitor ?? "");
+  return {
+    fill: node.isStart
+      ? INK_SOFT
+      : node.isTarget
+        ? TARGET_COLOR
+        : node.visitorCount > 1
+          ? TEXT_BRIGHT
+          : soloColor,
+    stroke: node.isStart ? START_RING_COLOR : node.isTarget ? TARGET_COLOR : "none",
+    // A4: tint surviving solo labels to their owner; shared labels stay bright
+    // white ("everyone was here").
+    labelColor:
+      node.isStart || node.isTarget || node.visitorCount > 1
+        ? TEXT_BRIGHT
+        : hexToRgba(soloColor, 0.65),
+  };
+}
+
 export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] }) {
   // Legend/lane order: finishers fastest-first, then DNFs - tells the story
   // top-to-bottom (winners, then the odyssey, then the one who bailed) and
@@ -902,6 +940,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
   );
   const isPortrait = graph.orientation === "portrait";
   const [legendOpen, setLegendOpen] = useState(false);
+  const [exportState, setExportState] = useState<"idle" | "working" | "failed">("idle");
 
   // A6: one shared focus state. Legend hover/click, per-player edge-group
   // hover, and node tap all funnel into this same setter.
@@ -968,6 +1007,77 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
       return false;
     }
   });
+
+  const handleExport = async () => {
+    setExportState("working");
+    try {
+      const blob = await graphImageBlob({
+        width: graph.svgWidth,
+        height: graph.svgHeight,
+        background: INK,
+        fontFamily: '"Merriweather", ui-serif, Georgia, serif',
+        caption: isPortrait
+          ? "down = % through each player's own path"
+          : "position = % through each player's own path — not click count",
+        startTitle: graph.startTitle,
+        targetTitle: graph.targetTitle,
+        finisherCount: graph.finisherCount,
+        targetGlowOpacity: graph.targetGlowOpacity,
+        // The export is deliberately independent of the focus state: it always
+        // draws every strand undimmed and every label the layout could place,
+        // so what gets shared is the whole picture rather than whichever
+        // player happened to be highlighted when the button was tapped.
+        edges: graph.edgesByPlayer.flatMap((group) =>
+          group.edges.map((edge) => ({
+            d: edge.d,
+            color: edge.color,
+            dash: edge.dash,
+            opacity: edge.opacity,
+            strokeWidth: edge.strokeWidth,
+          })),
+        ),
+        nodes: graph.nodes.map((node) => {
+          const visuals = nodeVisuals(node, playerColorOf);
+          return {
+            cx: node.cx,
+            cy: node.cy,
+            radius: node.radius,
+            fill: visuals.fill,
+            stroke: visuals.stroke,
+            labelText: node.labelText,
+            labelColor: visuals.labelColor,
+            labelDx: node.labelDx,
+            labelDy: node.labelDy,
+            labelVisible:
+              node.alwaysLabel || (node.showLabelDesktop && !node.labelCrowdedOut),
+            fontSize: node.fontSize,
+            bold: node.isStart || node.isTarget,
+            visitorCount: node.visitorCount,
+            isTarget: node.isTarget,
+            isDnfTerminal: node.dnfTerminalFor.size > 0,
+          };
+        }),
+        legend: orderedRuns.map((run) => {
+          const strand = playerStyleOf(run.player);
+          return {
+            player: run.player,
+            color: strand.color,
+            dash: strand.dash,
+            stat: formatTimeAndClicks(run.elapsedMs, run.clicks),
+            status: run.status,
+            isWinner: winnerRun !== null && run.player === winnerRun.player,
+          };
+        }),
+      });
+      await shareGraphImage(blob, graph.startTitle, graph.targetTitle);
+      setExportState("idle");
+    } catch {
+      // Nothing here is worth a thrown error reaching the user as a blank
+      // modal: the graph they were looking at is still on screen and still
+      // fine. Surface it on the button itself and let them retry.
+      setExportState("failed");
+    }
+  };
 
   const updateScrollFade = () => {
     const el = scrollRef.current;
@@ -1177,7 +1287,6 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
           display: inline-flex;
           align-items: center;
           gap: 4px;
-          margin: 8px 0 0;
           font: inherit;
           font-size: 0.78rem;
           font-weight: 600;
@@ -1188,6 +1297,36 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
           padding: 5px 12px;
           min-height: 44px;
           cursor: pointer;
+        }
+        .cpg-actions {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 8px;
+          margin-top: 8px;
+        }
+        .cpg-share-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          font: inherit;
+          font-size: 0.78rem;
+          font-weight: 600;
+          color: var(--text-bright, #dffbfb);
+          background: none;
+          border: 1px solid var(--line, #295159);
+          border-radius: 999px;
+          padding: 5px 14px;
+          min-height: 44px;
+          cursor: pointer;
+        }
+        .cpg-share-pill:hover:not(:disabled),
+        .cpg-share-pill:focus-visible {
+          border-color: var(--text-bright, #dffbfb);
+        }
+        .cpg-share-pill:disabled {
+          opacity: 0.6;
+          cursor: progress;
         }
         .cpg-scroll-fade {
           position: absolute;
@@ -1512,21 +1651,8 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                 const isTarget = node.isTarget;
                 const dimmed = activePlayer !== null && !node.visitorPlayers.includes(activePlayer);
 
-                const fill = node.isStart
-                  ? "var(--ink-soft, #102329)"
-                  : isTarget
-                    ? TARGET_COLOR
-                    : node.visitorCount > 1
-                      ? "var(--text-bright, #dffbfb)"
-                      : playerColorOf(node.soleVisitor ?? "");
-                const stroke = node.isStart ? START_RING_COLOR : isTarget ? TARGET_COLOR : "none";
-
-                // A4: tint surviving solo labels to their owner; shared
-                // labels stay bright white ("everyone was here").
-                const labelColor =
-                  node.isStart || isTarget || node.visitorCount > 1
-                    ? "var(--text-bright, #dffbfb)"
-                    : hexToRgba(playerColorOf(node.soleVisitor ?? ""), 0.65);
+                // Shared with the PNG export so the two can never drift.
+                const { fill, stroke, labelColor } = nodeVisuals(node, playerColorOf);
 
                 // Suppressed on desktop (A4 structural) OR on mobile (A4
                 // viewport tier) - either way it's reveal-on-focus only.
@@ -1769,11 +1895,31 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
         {scrollMode && !hintSeen ? <div className="cpg-scroll-hint">swipe for full path →</div> : null}
       </div>
 
-      {isMobile && !isPortrait ? (
-        <button type="button" className="cpg-explore-pill" onClick={() => setScrollMode((s) => !s)}>
-          {scrollMode ? "← Overview" : "Explore path →"}
+      <div className="cpg-actions">
+        {isMobile && !isPortrait ? (
+          <button type="button" className="cpg-explore-pill" onClick={() => setScrollMode((s) => !s)}>
+            {scrollMode ? "← Overview" : "Explore path →"}
+          </button>
+        ) : null}
+        {/* GR-2, owner brief: "i love sending screenshots of the whole graph to
+            friends in a thread to discuss." A screenshot cannot do that job on
+            a phone - iOS will not usefully full-page-capture a web view, and
+            the on-screen legend is collapsed so the graph gets the whole sheet,
+            so a screenshot would share a graph with no key. This composes the
+            graph AND the complete legend into one PNG. */}
+        <button
+          type="button"
+          className="cpg-share-pill"
+          onClick={handleExport}
+          disabled={exportState === "working"}
+        >
+          {exportState === "working"
+            ? "Saving…"
+            : exportState === "failed"
+              ? "Couldn't save — retry"
+              : "Save image"}
         </button>
-      ) : null}
+      </div>
     </div>
   );
 }
