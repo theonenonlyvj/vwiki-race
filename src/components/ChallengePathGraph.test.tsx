@@ -65,6 +65,58 @@ describe("ChallengePathGraph", () => {
     expect(screen.getByText("DNF")).toBeVisible();
   });
 
+  // GR-2: identity across a big field. 2026-07-20's daily served 11 strands
+  // against a 6-hue palette cycled by lane index, so five PAIRS of players
+  // drew in the identical color and the legend chip - the only name-to-strand
+  // mapping there is - could not tell them apart either. 7 hues is the
+  // measured ceiling for color alone on this ground (see strandStyle.ts), so
+  // past that identity needs a second channel.
+  describe("strand identity across a large field", () => {
+    function bigField(count: number): ChallengePathRun[] {
+      return Array.from({ length: count }, (_, i) => ({
+        player: `P${i + 1}`,
+        status: "completed" as const,
+        elapsedMs: 1_000 * (i + 1),
+        clicks: 2,
+        steps: [
+          { n: 1, from: "Start", to: `Mid${i}` },
+          { n: 2, from: `Mid${i}`, to: "Target" },
+        ],
+      }));
+    }
+
+    it("gives all 11 strands a distinct identity, where the old 6-hue cycle repeated 5 pairs", () => {
+      const { container } = render(<ChallengePathGraph runs={bigField(11)} />);
+
+      const chips = [...container.querySelectorAll(".cpg-chip")];
+      expect(chips).toHaveLength(11);
+      const identities = chips.map(
+        (chip) =>
+          `${(chip as HTMLElement).style.color}|${chip.getAttribute("data-dash") ?? "solid"}`,
+      );
+      expect(new Set(identities).size).toBe(11);
+    });
+
+    it("keeps the first seven strands on plain undashed hues", () => {
+      const { container } = render(<ChallengePathGraph runs={bigField(7)} />);
+
+      const chips = [...container.querySelectorAll(".cpg-chip")];
+      expect(chips.every((chip) => chip.getAttribute("data-dash") === null)).toBe(true);
+      expect(new Set(chips.map((chip) => (chip as HTMLElement).style.color)).size).toBe(7);
+    });
+
+    // The A9 entrance animates `stroke-dasharray`/`stroke-dashoffset` to draw
+    // each strand in. A dash applied while that is still running would fight
+    // the animation and the strand would never draw, so the dash waits.
+    it("does not dash a strand while it is still drawing in", () => {
+      const { container } = render(<ChallengePathGraph runs={bigField(11)} />);
+
+      const drawing = [...container.querySelectorAll("path.cpg-edge-anim")];
+      expect(drawing.length).toBeGreaterThan(0);
+      expect(drawing.every((path) => !path.getAttribute("stroke-dasharray"))).toBe(true);
+    });
+  });
+
   // GX-1: SVG_HEIGHT used to be a flat 560px regardless of lane count,
   // leaving a big void under a solo (or 2-lane) run's graph. Height is now
   // derived from lane count (190 base + 75/lane, clamped [260, 640]) - these

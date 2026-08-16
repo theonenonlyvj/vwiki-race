@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { formatTimeAndClicks } from "../domain/formatting";
+import { strandStyleForIndex, type StrandStyle } from "../domain/strandStyle";
 
 /**
  * GR-1 ("View graph"): ported verbatim from the visualize-graph branch
@@ -130,11 +131,11 @@ function computeSvgHeight(laneCount: number): number {
   return Math.min(SVG_HEIGHT_MAX, Math.max(SVG_HEIGHT_MIN, raw));
 }
 
-// Four player hues that read well on the dark ink palette, kept clear of
-// --cyan (reserved for the start ring) and --coral (reserved for the
-// target). Cycled by player index if a challenge ever has more than four
-// runs - a prototype limitation, noted in PROTOTYPE.md.
-const PLAYER_PALETTE = ["#2fe4d0", "#ffc857", "#b48cff", "#7bdc8f", "#ff9f6e", "#66c2ff"];
+// GR-2: strand identity (hue + dash) now lives in domain/strandStyle.ts, with
+// the measurement behind the 7-hue ceiling. The prototype's 6 hues were cycled
+// by lane index, which painted five PAIRS of players identically on the
+// 11-strand 2026-07-20 daily. 82% of challenges to date field <= 7 strands and
+// so never repeat a hue at all; the rest are told apart by the dash.
 const DNF_MARK_COLOR = "#e0655a";
 const START_RING_COLOR = "#8ff3e6";
 const TARGET_COLOR = "#ff765f";
@@ -205,6 +206,8 @@ interface EdgeLayout {
   key: string;
   player: string;
   color: string;
+  /** GR-2: SVG `stroke-dasharray` for strands past the 7 distinct hues. */
+  dash: string | null;
   opacity: number;
   strokeWidth: number;
   d: string;
@@ -569,10 +572,8 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
   }
   const groupSeen = new Map<string, number>();
 
-  const playerColor = (player: string) => {
-    const i = laneIndex.get(player) ?? 0;
-    return PLAYER_PALETTE[i % PLAYER_PALETTE.length];
-  };
+  const playerStyle = (player: string): StrandStyle =>
+    strandStyleForIndex(laneIndex.get(player) ?? 0);
 
   // A7: the abandoned run's last three edges taper from the DNF baseline
   // opacity/width down toward the mark, so it reads as losing steam rather
@@ -637,7 +638,8 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
       rawEdges.push({
         key: `${run.player}-${step.n}-${step.from}-${step.to}`,
         player: run.player,
-        color: playerColor(run.player),
+        color: playerStyle(run.player).color,
+        dash: playerStyle(run.player).dash,
         opacity,
         strokeWidth,
         d: `M ${from.cx} ${from.cy} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${to.cx} ${to.cy}`,
@@ -703,8 +705,7 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
 // A8: viewport-responsive tier - kept out of buildGraph (pure, layout-only)
 // since it never affects node/edge positions, only default label/SVG-sizing
 // decisions at render time.
-function useIsMobile(breakpointPx: number): boolean {
-  const query = `(max-width: ${breakpointPx}px)`;
+function useMediaQuery(query: string): boolean {
   const [isMobile, setIsMobile] = useState<boolean>(() =>
     typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia(query).matches : false,
   );
@@ -724,6 +725,10 @@ function useIsMobile(breakpointPx: number): boolean {
   return isMobile;
 }
 
+function useIsMobile(breakpointPx: number): boolean {
+  return useMediaQuery(`(max-width: ${breakpointPx}px)`);
+}
+
 export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] }) {
   // Legend/lane order: finishers fastest-first, then DNFs - tells the story
   // top-to-bottom (winners, then the odyssey, then the one who bailed) and
@@ -736,8 +741,9 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
   }, [runs]);
 
   const playerOrder = useMemo(() => orderedRuns.map((r) => r.player), [orderedRuns]);
-  const playerColorOf = (player: string) =>
-    PLAYER_PALETTE[(playerOrder.indexOf(player) >= 0 ? playerOrder.indexOf(player) : 0) % PLAYER_PALETTE.length];
+  const playerStyleOf = (player: string): StrandStyle =>
+    strandStyleForIndex(Math.max(0, playerOrder.indexOf(player)));
+  const playerColorOf = (player: string) => playerStyleOf(player).color;
 
   const graph = useMemo(() => buildGraph(orderedRuns), [orderedRuns]);
 
@@ -773,6 +779,24 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
     }
     return last;
   }, [activePlayer, winnerRun, orderedRuns, graph.targetTitle]);
+
+  // GR-2: the A9 entrance draws each strand in by animating
+  // `stroke-dasharray`/`stroke-dashoffset`, so a strand that carries its own
+  // dash (the 8th and beyond - see strandStyle.ts) can only take it once that
+  // animation is finished; applying both at once leaves the strand undrawn.
+  // Reduced-motion skips the entrance entirely, so the dash is there from the
+  // first paint.
+  const reduceMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const [entranceDone, setEntranceDone] = useState(false);
+  useEffect(() => {
+    if (reduceMotion) {
+      setEntranceDone(true);
+      return;
+    }
+    setEntranceDone(false);
+    const timer = setTimeout(() => setEntranceDone(true), graph.entranceTotalMs + 80);
+    return () => clearTimeout(timer);
+  }, [graph.entranceTotalMs, reduceMotion]);
 
   // A8: mobile defaults to a fit-to-width overview; "Explore path" swaps to
   // the original scrollable 1080px layout.
@@ -873,12 +897,24 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
           color: var(--text-bright, #dffbfb);
           border-color: var(--text-bright, #dffbfb);
         }
+        /* GR-2: a line swatch, not a dot - the legend stands for a STRAND, and
+           past 7 players a strand is identified by hue AND dash, which a dot
+           cannot show. Mirroring the mark also makes the mapping literal. */
         .cpg-chip {
-          width: 11px;
-          height: 11px;
-          border-radius: 50%;
+          width: 16px;
+          height: 4px;
+          border-radius: 2px;
           flex: none;
           box-shadow: 0 0 6px currentColor;
+        }
+        /* Punch the gaps with a mask rather than repainting the background, so
+           the swatch keeps its hue as a real background-color (a gradient
+           built from currentColor would report as transparent, and would drop
+           the hue entirely wherever mask support is missing). */
+        .cpg-chip.is-dashed {
+          -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 8px);
+          mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 8px);
+          box-shadow: none;
         }
         .cpg-legend-name {
           font-weight: 600;
@@ -1097,7 +1133,8 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
           </button>
         </li>
         {orderedRuns.map((run) => {
-          const color = playerColorOf(run.player);
+          const strand = playerStyleOf(run.player);
+          const color = strand.color;
           const isWinner = winnerRun !== null && run.player === winnerRun.player;
           return (
             <li
@@ -1112,7 +1149,14 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                 onPointerLeave={() => setActivePlayer((cur) => (cur === run.player ? null : cur))}
                 onClick={() => setActivePlayer((cur) => (cur === run.player ? null : run.player))}
               >
-                <span className="cpg-chip" style={{ background: color, color }} />
+                {/* GR-2: the chip is the only thing mapping a name to a
+                    strand, so past the 7 distinct hues it has to carry the
+                    dash too - otherwise two players read as one. */}
+                <span
+                  className={`cpg-chip${strand.dash ? " is-dashed" : ""}`}
+                  style={{ background: color, color }}
+                  {...(strand.dash ? { "data-dash": strand.dash } : {})}
+                />
                 <span className="cpg-legend-name">{run.player}</span>
                 <span className="cpg-legend-stat">{formatTimeAndClicks(run.elapsedMs, run.clicks)}</span>
                 {run.status === "completed" ? (
@@ -1176,13 +1220,17 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                       <g key={edge.key}>
                         <path
                           d={edge.d}
-                          pathLength={1}
+                          {...(entranceDone ? {} : { pathLength: 1 })}
                           fill="none"
                           stroke={edge.color}
                           strokeWidth={edge.strokeWidth}
                           strokeLinecap="round"
                           opacity={edge.opacity}
-                          className={`cpg-edge cpg-edge-anim${dimmed ? " is-dimmed" : ""}${active ? " is-active" : ""}`}
+                          // GR-2: the dash only lands once the draw-in is
+                          // done - until then `cpg-edge-anim` owns
+                          // stroke-dasharray and the two would fight.
+                          {...(entranceDone && edge.dash ? { strokeDasharray: edge.dash } : {})}
+                          className={`cpg-edge${entranceDone ? "" : " cpg-edge-anim"}${dimmed ? " is-dimmed" : ""}${active ? " is-active" : ""}`}
                           style={{ "--delay": `${edge.delayMs}ms`, "--dur": `${edge.durMs}ms` } as CSSProperties}
                         />
                         {/* Invisible wide hit-path - the 2.25px visible stroke is too thin to hover reliably. */}
