@@ -226,7 +226,21 @@ const LABEL_GAP_PX = 8;
  */
 const CHAR_WIDTH_PX = 6.6;
 
-const MOBILE_BREAKPOINT = 480;
+/**
+ * GR-2: below this width the graph lays out in PORTRAIT.
+ *
+ * Was 480 (A8's "phone" tier). Raised to 900 after measuring the middle
+ * widths, which were the worst of both worlds: at 768px the landscape canvas
+ * rendered at full size but 35% of it sat outside the modal, so reading the
+ * graph meant swiping sideways through it. Portrait at the same width shows
+ * the whole thing at once - 71 visible labels at >=10.5px, no sideways scroll.
+ *
+ * 900 rather than 1080 because the modal is min(1200px, 92vw): a 1080px canvas
+ * needs roughly 1175px of window before it fits without scrolling, and between
+ * 900 and 1175 landscape still reads well enough that flipping the axis would
+ * be more disruptive than the scroll.
+ */
+const PORTRAIT_BREAKPOINT = 900;
 const SCROLL_HINT_KEY = "cpg-scroll-hint-seen";
 
 function truncateTitle(title: string, max = 20): string {
@@ -902,14 +916,14 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
   // measured sheet, so the whole thing fits the screen it is actually on
   // (the owner screenshots this view to share) instead of being a 1080px
   // landscape canvas squeezed to 28%.
-  const isMobile = useIsMobile(MOBILE_BREAKPOINT);
+  const isNarrow = useIsMobile(PORTRAIT_BREAKPOINT);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const [sheet, setSheet] = useState<{ width: number; height: number } | null>(null);
   // Declared above the measurement effect because expanding the legend moves
   // the canvas's top edge, so the effect depends on it.
   const [legendOpen, setLegendOpen] = useState(false);
   useEffect(() => {
-    if (!isMobile) {
+    if (!isNarrow) {
       setSheet(null);
       return;
     }
@@ -946,7 +960,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
     // legendOpen belongs here: expanding the legend moves the canvas's own top
     // edge down by ~200px, and without re-measuring the canvas keeps its old
     // height and pushes its own bottom off the sheet.
-  }, [isMobile, legendOpen]);
+  }, [isNarrow, legendOpen]);
 
   const graph = useMemo(
     () => buildGraph(orderedRuns, sheet ? portraitCanvas(sheet.width, sheet.height) : undefined),
@@ -1010,7 +1024,10 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
   // there is nothing to fit-to-width and nothing to swipe sideways through.
   // The scroll machinery stays for the landscape canvas in a narrow window.
   const [scrollMode, setScrollMode] = useState(false);
-  const useOverview = isMobile && !isPortrait && !scrollMode;
+  // Fallback only: reachable in the frame before the sheet has been measured
+  // (or if it ever measures 0 width), where the landscape canvas would
+  // otherwise overflow a narrow container with no way to see the whole shape.
+  const useOverview = isNarrow && !isPortrait && !scrollMode;
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [showScrollFade, setShowScrollFade] = useState(false);
   const [hintSeen, setHintSeen] = useState<boolean>(() => {
@@ -1065,7 +1082,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
               alwaysLabel: node.alwaysLabel,
               showLabelDesktop: node.showLabelDesktop,
               crowdedOut: node.labelCrowdedOut,
-              isMobile,
+              isMobile: isNarrow,
               isPortrait,
             }),
             fontSize: node.fontSize,
@@ -1678,7 +1695,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                   alwaysLabel: node.alwaysLabel,
                   showLabelDesktop: node.showLabelDesktop,
                   crowdedOut: node.labelCrowdedOut,
-                  isMobile,
+                  isMobile: isNarrow,
                   isPortrait,
                 });
                 const labelVisible = !revealOnly || activePlayer === node.soleVisitor;
@@ -1889,7 +1906,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
       </div>
 
       <div className="cpg-actions">
-        {isMobile && !isPortrait ? (
+        {isNarrow && !isPortrait ? (
           <button type="button" className="cpg-explore-pill" onClick={() => setScrollMode((s) => !s)}>
             {scrollMode ? "← Overview" : "Explore path →"}
           </button>
