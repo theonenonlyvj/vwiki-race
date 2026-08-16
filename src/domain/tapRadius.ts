@@ -28,20 +28,31 @@ export interface TapPoint {
 }
 
 /**
- * Half the closest gap between any two nodes, clamped. Half, because two
- * neighbouring targets of that radius meet exactly rather than overlapping.
+ * Half the distance from each node to ITS OWN nearest neighbour, clamped.
+ *
+ * Per node, not one global figure. A single tight pair anywhere on the canvas
+ * would otherwise shrink every target in the graph to the floor - and a real
+ * daily has exactly that: a couple of nodes a few units apart deep in one
+ * player's solo stretch, while the anchors sit in open space and deserve the
+ * full 44.
+ *
+ * Half the gap, because two neighbouring targets of that radius meet exactly
+ * rather than overlapping. Note that a node's radius is its own half of the
+ * pair, so two nodes with different radii still cannot overlap: each is at most
+ * half the distance to the other.
  *
  * O(n^2) over up to ~140 nodes, run once per layout - about 10k distance
- * checks, which is cheaper than the label placer that runs beside it.
+ * checks, cheaper than the label placer beside it.
  */
-export function tapRadiusFor(points: TapPoint[]): number {
-  let closest = Infinity;
-  for (let i = 0; i < points.length; i++) {
-    for (let j = i + 1; j < points.length; j++) {
-      const gap = Math.hypot(points[i].x - points[j].x, points[i].y - points[j].y);
+export function tapRadiiFor(points: TapPoint[]): number[] {
+  return points.map((point, i) => {
+    let closest = Infinity;
+    for (let j = 0; j < points.length; j++) {
+      if (j === i) continue;
+      const gap = Math.hypot(point.x - points[j].x, point.y - points[j].y);
       if (gap > 0 && gap < closest) closest = gap;
     }
-  }
-  if (!Number.isFinite(closest)) return MAX_TAP_RADIUS;
-  return Math.max(MIN_TAP_RADIUS, Math.min(MAX_TAP_RADIUS, closest / 2));
+    if (!Number.isFinite(closest)) return MAX_TAP_RADIUS;
+    return Math.max(MIN_TAP_RADIUS, Math.min(MAX_TAP_RADIUS, closest / 2));
+  });
 }

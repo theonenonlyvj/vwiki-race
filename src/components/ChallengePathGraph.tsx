@@ -3,7 +3,7 @@ import { formatTimeAndClicks } from "../domain/formatting";
 import { strandStyleForIndex, type StrandStyle } from "../domain/strandStyle";
 import { graphImageBlob, shareGraphImage } from "./graphImageExport";
 import { labelIsRevealOnly } from "../domain/labelVisibility";
-import { tapRadiusFor } from "../domain/tapRadius";
+import { tapRadiiFor } from "../domain/tapRadius";
 import {
   LABEL_PRIORITY_ANCHOR,
   LABEL_PRIORITY_BREADCRUMB,
@@ -183,6 +183,8 @@ function landscapeCanvas(laneCount: number): GraphCanvas {
 // Portrait margins are tight left/right (every pixel of width is label room
 // and there are only ~390 of them) and roomier top/bottom, where the start and
 // target anchors need space for their own labels.
+/** Ties the collapsed legend's disclosure button to the list it reveals. */
+const LEGEND_LIST_ID = "cpg-legend-list";
 const PORTRAIT_MARGIN_X = 10;
 const PORTRAIT_MARGIN_TOP = 40;
 const PORTRAIT_MARGIN_BOTTOM = 46;
@@ -282,6 +284,8 @@ interface NodeLayout {
   alwaysLabel: boolean; // anchor, shared, or DNF terminal - never suppressed
   showLabelDesktop: boolean; // alwaysLabel || A4 breadcrumb-selected
   labelDx: number;
+  /** GR-2: this node's own collision-free tap radius. */
+  hitRadius: number;
   labelCrowdedOut: boolean; // GR-2: no collision-free slot existed
   labelText: string;
   labelFull: string;
@@ -318,7 +322,6 @@ interface GraphLayout {
   finisherCount: number;
   targetGlowOpacity: number;
   entranceTotalMs: number;
-  hitRadius: number;
   svgWidth: number;
   orientation: GraphOrientation;
   svgHeight: number;
@@ -536,10 +539,11 @@ function buildGraph(orderedRuns: ChallengePathRun[], canvas?: GraphCanvas): Grap
 
   raws.sort((a, b) => a.xFrac - b.xFrac);
 
-  // GR-2: tap targets are sized from how close the nodes actually are - see
-  // domain/tapRadius.ts for why a flat 44 units silently handed taps to the
-  // wrong node in portrait.
-  const hitRadius = tapRadiusFor(
+  // GR-2: tap targets are sized per node from how close that node's own
+  // nearest neighbour is - see domain/tapRadius.ts for why a flat 44 units
+  // silently handed taps to the wrong node, and why one global minimum would
+  // have shrunk every target in the graph to the floor.
+  const hitRadii = tapRadiiFor(
     raws.map((raw) => {
       const progress = progressOrigin + raw.xFrac * progressPx;
       return isPortrait ? { x: raw.lane, y: progress } : { x: progress, y: raw.lane };
@@ -692,6 +696,7 @@ function buildGraph(orderedRuns: ChallengePathRun[], canvas?: GraphCanvas): Grap
       showLabelDesktop,
       labelText,
       labelFull: raw.agg.title,
+      hitRadius: hitRadii[index],
       labelDx: placement.dx,
       labelDy: placement.dy,
       // GR-2: the placer found no collision-free slot for this one. It stays
@@ -841,7 +846,6 @@ function buildGraph(orderedRuns: ChallengePathRun[], canvas?: GraphCanvas): Grap
     finisherCount,
     targetGlowOpacity,
     entranceTotalMs,
-    hitRadius,
     svgWidth,
     svgHeight,
     orientation: box.orientation,
@@ -940,6 +944,19 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
   // Declared above the measurement effect because expanding the legend moves
   // the canvas's top edge, so the effect depends on it.
   const [legendOpen, setLegendOpen] = useState(false);
+  // Toggling the legend UNMOUNTS the button that was just activated, which
+  // drops keyboard focus to <body> - a keyboard user loses their place and has
+  // to tab in from the top of the dialog again. Move focus onto the control
+  // that replaced it.
+  const legendToggleRef = useRef<HTMLButtonElement | null>(null);
+  const legendHideRef = useRef<HTMLButtonElement | null>(null);
+  const [focusLegendControl, setFocusLegendControl] = useState<"show" | "hide" | null>(null);
+  useEffect(() => {
+    if (!focusLegendControl) return;
+    const target = focusLegendControl === "hide" ? legendHideRef.current : legendToggleRef.current;
+    target?.focus();
+    setFocusLegendControl(null);
+  }, [focusLegendControl, legendOpen]);
   useEffect(() => {
     if (!isNarrow) {
       setSheet(null);
@@ -996,11 +1013,33 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
     [orderedRuns, sheet],
   );
   const isPortrait = graph.orientation === "portrait";
-  const [exportState, setExportState] = useState<"idle" | "working" | "failed">("idle");
+  // "done" is distinct from "idle" so a completed save is visible at all: the
+  // button used to return straight to "Save image", which is exactly what it
+  // says when nothing has happened.
+  const [exportState, setExportState] = useState<"idle" | "working" | "done" | "failed">("idle");
 
   // A6: one shared focus state. Legend hover/click, per-player edge-group
   // hover, and node tap all funnel into this same setter.
-  const [activePlayer, setActivePlayer] = useState<string | null>(null);
+  // A6 focus, split into HOVER and PIN.
+  //
+  // It used to be one value driven by pointerenter/pointerleave/click, which
+  // made clicking useless with a mouse: entering the row already set it, so the
+  // click's toggle immediately CLEARED it, and leaving the row cleared it
+  // again. There was no way to pin a player and then go read their strand -
+  // exactly what the affordance exists for. A pin now outranks a hover and
+  // survives the pointer leaving.
+  const [pinnedPlayer, setPinnedPlayer] = useState<string | null>(null);
+  const [hoveredPlayer, setHoveredPlayer] = useState<string | null>(null);
+  const activePlayer = pinnedPlayer ?? hoveredPlayer;
+  const clearFocus = () => {
+    setPinnedPlayer(null);
+    setHoveredPlayer(null);
+  };
+  const hoverOn = (player: string) => setHoveredPlayer(player);
+  const hoverOff = (player: string) =>
+    setHoveredPlayer((cur) => (cur === player ? null : cur));
+  const togglePin = (player: string) =>
+    setPinnedPlayer((cur) => (cur === player ? null : player));
   const [callout, setCallout] = useState<{ title: string; cx: number; cy: number } | null>(null);
 
   const winnerRun = useMemo(
@@ -1140,7 +1179,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
         }),
       });
       void shareGraphImage(blob, graph.startTitle, graph.targetTitle)
-        .then((outcome) => setExportState(outcome === "failed" ? "failed" : "idle"))
+        .then((outcome) => setExportState(outcome === "failed" ? "failed" : "done"))
         .catch(() => setExportState("failed"));
     } catch {
       // Nothing here is worth a thrown error reaching the user as a blank
@@ -1255,6 +1294,18 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
         }
         /* GR-2: the collapsed portrait legend - one row, ~44px, instead of the
            638px the expanded list took on a 844px phone. */
+        .cpg-visually-hidden {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          margin: -1px;
+          padding: 0;
+          overflow: hidden;
+          clip: rect(0 0 0 0);
+          clip-path: inset(50%);
+          white-space: nowrap;
+          border: 0;
+        }
         .cpg-legend-bar {
           display: flex;
           align-items: center;
@@ -1316,8 +1367,12 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
         .cpg-legend-stat {
           color: var(--muted, #9fb8bd);
         }
+        /* 0.72 put the DNF pill at 3.40:1 against the ink - under the 4.5:1
+           AA floor for its small text - because a row's opacity applies to
+           every descendant, pill included. 0.9 keeps the row reading as
+           secondary while the pill measures 4.76:1. */
         .cpg-legend-item.is-dnf {
-          opacity: 0.72;
+          opacity: 0.9;
         }
         .cpg-flag {
           margin-left: 1px;
@@ -1554,8 +1609,13 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
           <button
             type="button"
             className="cpg-legend-toggle"
-            onClick={() => setLegendOpen(true)}
+            ref={legendToggleRef}
+            onClick={() => {
+              setLegendOpen(true);
+              setFocusLegendControl("hide");
+            }}
             aria-expanded={false}
+            aria-controls={LEGEND_LIST_ID}
           >
             <span className="cpg-legend-swatches" aria-hidden="true">
               {orderedRuns.map((run) => {
@@ -1569,23 +1629,28 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                 );
               })}
             </span>
+            {/* "Show N players" rather than "N players": with the list
+                collapsed this is a disclosure control, and its name has to say
+                that activating it reveals the names, times and results. The
+                swatch strip beside it is decorative (aria-hidden) - it repeats
+                colours the list already carries. */}
             <span className="cpg-legend-count">
-              {orderedRuns.length} {orderedRuns.length === 1 ? "player" : "players"}
+              Show {orderedRuns.length} {orderedRuns.length === 1 ? "player" : "players"}
             </span>
           </button>
           {activePlayer ? (
-            <button type="button" className="cpg-reset-chip" onClick={() => setActivePlayer(null)}>
+            <button type="button" className="cpg-reset-chip" onClick={clearFocus}>
               Show all
             </button>
           ) : null}
         </div>
       ) : (
-      <ul className="cpg-legend">
+      <ul className="cpg-legend" id={LEGEND_LIST_ID}>
         <li className="cpg-legend-item">
           <button
             type="button"
             className="cpg-reset-chip"
-            onClick={() => setActivePlayer(null)}
+            onClick={clearFocus}
             aria-pressed={activePlayer === null}
           >
             Show all
@@ -1596,8 +1661,13 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
             <button
               type="button"
               className="cpg-reset-chip"
-              onClick={() => setLegendOpen(false)}
+              ref={legendHideRef}
+              onClick={() => {
+                setLegendOpen(false);
+                setFocusLegendControl("show");
+              }}
               aria-expanded
+              aria-controls={LEGEND_LIST_ID}
             >
               Hide names
             </button>
@@ -1615,10 +1685,12 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
               <button
                 type="button"
                 className="cpg-legend-btn"
-                aria-pressed={activePlayer === run.player}
-                onPointerEnter={() => setActivePlayer(run.player)}
-                onPointerLeave={() => setActivePlayer((cur) => (cur === run.player ? null : cur))}
-                onClick={() => setActivePlayer((cur) => (cur === run.player ? null : run.player))}
+                aria-pressed={pinnedPlayer === run.player}
+                onPointerEnter={() => hoverOn(run.player)}
+                onPointerLeave={() => hoverOff(run.player)}
+                onFocus={() => hoverOn(run.player)}
+                onBlur={() => hoverOff(run.player)}
+                onClick={() => togglePin(run.player)}
               >
                 {/* GR-2: the chip is the only thing mapping a name to a
                     strand, so past the 7 distinct hues it has to carry the
@@ -1687,8 +1759,8 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                   <g
                     key={player}
                     data-player={player}
-                    onPointerEnter={() => setActivePlayer(player)}
-                    onPointerLeave={() => setActivePlayer((cur) => (cur === player ? null : cur))}
+                    onPointerEnter={() => hoverOn(player)}
+                    onPointerLeave={() => hoverOff(player)}
                   >
                     {edges.map((edge) => (
                       <g key={edge.key}>
@@ -1873,12 +1945,20 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                     <circle
                       cx={node.cx}
                       cy={node.cy}
-                      r={Math.max(node.radius, graph.hitRadius)}
+                      // Floored at the DRAWN radius so the whole dot is
+                      // tappable. That can exceed the collision-free radius
+                      // for a 12-unit merge node, but only where two dots are
+                      // already overlapping on screen - and there the
+                      // topmost-wins rule at least picks the one painted on
+                      // top. The dense case is solo nodes at radius 2.5-3,
+                      // where the safe radius is the larger of the two and
+                      // this floor never binds.
+                      r={Math.max(node.radius, node.hitRadius)}
                       fill="transparent"
                       style={{ cursor: "pointer" }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (node.soleVisitor) setActivePlayer(node.soleVisitor);
+                        if (node.soleVisitor) togglePin(node.soleVisitor);
                         setCallout((cur) =>
                           cur && cur.title === node.labelFull ? null : { title: node.labelFull, cx: node.cx, cy: node.cy },
                         );
@@ -1977,8 +2057,22 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
             ? "Saving…"
             : exportState === "failed"
               ? "Couldn't save — retry"
-              : "Save image"}
+              : exportState === "done"
+                ? "Saved ✓"
+                : "Save image"}
         </button>
+        {/* The button's own label changing is not announced, because the button
+            keeps focus while it changes - a screen reader user taps Save and
+            hears nothing at all. A polite live region says what happened. */}
+        <span className="cpg-visually-hidden" role="status" aria-live="polite">
+          {exportState === "working"
+            ? "Preparing image"
+            : exportState === "failed"
+              ? "Could not save the image"
+              : exportState === "done"
+                ? "Image ready"
+                : ""}
+        </span>
       </div>
     </div>
   );

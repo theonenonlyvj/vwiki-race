@@ -305,12 +305,18 @@ export function placeLabels(
       continue;
     }
 
+    // Exhausted every slot. Still reserve the box: these are hidden now, but a
+    // focus reveal pops a whole solo stretch in AT ONCE, and if they all share
+    // one fallback offset they stack into unreadable text at the moment they
+    // become visible - the very failure the two reservation sets exist to
+    // prevent, just displaced into this branch.
     const fallback = ordered[ordered.length - 1];
-    placements[index] = {
+    const fallbackPlacement = {
       dx: fallback.dxFraction * candidate.width + fallback.dxPx,
       dy: fallback.dyPx,
-      hidden: true,
     };
+    placements[index] = { ...fallbackPlacement, hidden: true };
+    takenAll.push(boxFor(candidate, fallbackPlacement.dx, fallbackPlacement.dy));
   }
 
   return placements;

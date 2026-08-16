@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import ChallengePathGraph, { type ChallengePathRun } from "./ChallengePathGraph";
 
@@ -114,6 +115,46 @@ describe("ChallengePathGraph", () => {
       const drawing = [...container.querySelectorAll("path.cpg-edge-anim")];
       expect(drawing.length).toBeGreaterThan(0);
       expect(drawing.every((path) => !path.getAttribute("stroke-dasharray"))).toBe(true);
+    });
+  });
+
+  // A6 focus used to be a single value driven by pointerenter/leave/click, so
+  // with a mouse the click was useless: entering the legend row already set the
+  // player, the click's toggle immediately cleared it, and leaving cleared it
+  // again. There was no way to pin a player and go read their strand.
+  describe("pinning a player", () => {
+    it("keeps a clicked player focused after the pointer leaves", async () => {
+      const user = userEvent.setup();
+      const { container } = render(<ChallengePathGraph runs={runs} />);
+      const row = screen.getByRole("button", { name: /slow/i });
+
+      await user.click(row);
+      expect(row).toHaveAttribute("aria-pressed", "true");
+
+      // Leaving the row must NOT drop the pin.
+      fireEvent.pointerLeave(row);
+      expect(row).toHaveAttribute("aria-pressed", "true");
+      expect(container.querySelectorAll(".cpg-edge.is-dimmed").length).toBeGreaterThan(0);
+    });
+
+    it("unpins on a second click", async () => {
+      const user = userEvent.setup();
+      render(<ChallengePathGraph runs={runs} />);
+      const row = screen.getByRole("button", { name: /slow/i });
+
+      await user.click(row);
+      await user.click(row);
+      expect(row).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("lets Show all release a pin", async () => {
+      const user = userEvent.setup();
+      render(<ChallengePathGraph runs={runs} />);
+      const row = screen.getByRole("button", { name: /slow/i });
+
+      await user.click(row);
+      await user.click(screen.getByRole("button", { name: /show all/i }));
+      expect(row).toHaveAttribute("aria-pressed", "false");
     });
   });
 

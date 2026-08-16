@@ -247,7 +247,10 @@ export function drawGraphImage(
     ctx.stroke();
     ctx.setLineDash([]);
 
-    ctx.globalAlpha = row.status === "abandoned" ? 0.72 : 1;
+    // 0.9, matching the on-screen row: at 0.72 the DNF pill measured 3.40:1
+    // against the ink, under the 4.5:1 AA floor, and the exported PNG is read
+    // in worse conditions than the screen, not better.
+    ctx.globalAlpha = row.status === "abandoned" ? 0.9 : 1;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.font = `600 12px ${request.fontFamily}`;
@@ -342,12 +345,17 @@ export async function shareGraphImage(
       // file anyway would be the opposite of what they just asked for.
       if (error instanceof Error && error.name === "AbortError") return "shared";
       // The sheet said it could take the file and then refused for a real
-      // reason. Falling through to the <a download> below is not a rescue on
-      // the platform this matters for: by now we are outside the tap's
-      // activation, and iOS Safari will not honour a programmatic download
-      // there - it would report success having written nothing. Say so
-      // instead, so the button can offer a retry.
-      return "failed";
+      // reason. Fall through to the download below rather than giving up: on a
+      // desktop browser that genuinely works, and refusing to try left those
+      // users with no file at all - which was a worse outcome than the false
+      // "downloaded" it was meant to prevent.
+      //
+      // The residual risk is narrow and stated here rather than papered over:
+      // on iOS, after a share rejection, we are outside the tap's activation
+      // and the programmatic download may do nothing, so "downloaded" can
+      // still over-claim. That needs BOTH the sync-share path to fail AND the
+      // platform to be iOS, and the alternative penalises every other browser
+      // for it.
     }
   }
 

@@ -92,21 +92,19 @@ describe("shareGraphImage", () => {
     expect(click).not.toHaveBeenCalled();
   });
 
-  // Falling back to <a download> here is not a rescue on the platform that
-  // matters: by the time the sheet has rejected we are outside the tap's
-  // activation window, and iOS Safari will not honour a programmatic download
-  // there. Reporting "downloaded" would tell the user a file was written when
-  // none was - the button would say "Saving...", return to normal, and nothing
-  // would exist.
-  it("reports failure rather than pretending a download happened", async () => {
+  // A share sheet that accepts files and then rejects for a real reason must
+  // still leave the user with a file where that is possible - on a desktop
+  // browser the download works, and refusing to try left those users with
+  // nothing at all.
+  it("still delivers a file when the share sheet rejects for a real reason", async () => {
     setNavigator({
       share: vi.fn().mockRejectedValue(new Error("NotAllowedError")),
       canShare: () => true,
     } as Partial<Navigator>);
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
-    await expect(shareGraphImage(blob(), "A", "B")).resolves.toBe("failed");
-    expect(click).not.toHaveBeenCalled();
+    await expect(shareGraphImage(blob(), "A", "B")).resolves.toBe("downloaded");
+    expect(click).toHaveBeenCalledTimes(1);
   });
 
   it("leaves no anchor behind in the document after downloading", async () => {
