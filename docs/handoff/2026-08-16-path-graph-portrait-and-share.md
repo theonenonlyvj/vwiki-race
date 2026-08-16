@@ -2,7 +2,7 @@
 
 Everything below is COMMITTED LOCALLY on `main` and **not pushed, not deployed**.
 Vijay was asleep; per `AGENTS.md` (local rule: no push/deploy without an explicit
-ask) shipping waits for him. `main` is 12 commits ahead of `origin/main`.
+ask) shipping waits for him. `main` is 14 commits ahead of `origin/main` (`origin/main` = `31d5e84`).
 
 Base for this work: `31d5e84` (the previous night's profile/Boards redesign).
 
@@ -30,7 +30,7 @@ And on desktop, at the same field size:
 
 The graph was built for 4–6 runs and the field outgrew it.
 
-## What shipped (12 commits)
+## What shipped (14 commits)
 
 | commit | what |
 |---|---|
@@ -46,6 +46,7 @@ The graph was built for 4–6 runs and the field outgrew it.
 | `3b2a4c7` | council round 4 (a11y, focus pinning, per-node tap radii) |
 | `f96c3cd` | portrait test coverage + what it exposed |
 | `5087470` | council round 6 (two round-4 regressions, the reveal, tap floor) |
+| `a364b02`, `f9c58a4` | this handoff |
 
 ### After
 
