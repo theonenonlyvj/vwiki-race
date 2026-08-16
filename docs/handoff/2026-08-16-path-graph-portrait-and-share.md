@@ -2,7 +2,7 @@
 
 Everything below is COMMITTED LOCALLY on `main` and **not pushed, not deployed**.
 Vijay was asleep; per `AGENTS.md` (local rule: no push/deploy without an explicit
-ask) shipping waits for him. `main` is 8 commits ahead of `origin/main`.
+ask) shipping waits for him. `main` is 9 commits ahead of `origin/main`.
 
 Base for this work: `31d5e84` (the previous night's profile/Boards redesign).
 
@@ -30,7 +30,7 @@ And on desktop, at the same field size:
 
 The graph was built for 4–6 runs and the field outgrew it.
 
-## What shipped (8 commits)
+## What shipped (9 commits)
 
 | commit | what |
 |---|---|
@@ -42,6 +42,7 @@ The graph was built for 4–6 runs and the field outgrew it.
 | `3bff031` | portrait up to 900px, not just phones |
 | `4a80439` | council round 1 (iOS share, dashed swatch, measurement) |
 | `cb155da` | council round 2 (label contrast, export fidelity) |
+| `b097e2c` | council round 3 (forced anchor, tap targets, callout, export failure) |
 
 ### After
 
@@ -130,6 +131,35 @@ label would fall back to a default serif. Canvas2D `fillText` uses the document'
 loaded fonts, and `new Path2D(d)` accepts SVG path syntax so the bezier edges are
 reused verbatim.
 
+## The council
+
+An adversarial council reviewed the work: **115 agents**, 8 lenses, every finding
+re-checked by two independent skeptics (one told to refute it, one told to work
+out whether it reaches a real user), both defaulting to "refuted" when unsure.
+**53 findings raised, 15 survived.** A second council then reviewed the fixes
+themselves, since the first one had been reviewing a moving target.
+
+Two of its findings were CRITICAL and would have shipped:
+
+- **`navigator.share()` was called after two awaits**, which drops iOS's
+  transient activation. Save image would have silently done nothing on the one
+  device the feature exists for.
+- **The dashed legend swatch printed SOLID in the PNG**, because round line caps
+  bridge the gaps on a 16px swatch — so in the shared image the 8th player was
+  indistinguishable from the 1st, defeating the dash entirely.
+
+It also caught me being wrong about a number I had already "verified": solo
+labels at alpha 0.65 measure **2.69:1**, not the 3.5:1 I computed. I had done the
+blend in linear space. See the sRGB note above.
+
+And it caught a test that proved nothing — a tap-target overlap test that passed
+against the broken code, because jsdom renders the landscape canvas where the
+hand-written fixture's nodes sit 72 units apart and a flat 44-unit target never
+overlaps. Confirmed by mutation, deleted, replaced with real unit tests in
+`domain/tapRadius.ts`. **Mutation-test every new guard** — three of them here
+(`AbortError`, `canShare`, butt caps) were confirmed to fail exactly the test
+that should catch them, and the one that wasn't checked was the one that lied.
+
 ## Verification
 
 - **1344 client tests, 289 worker tests**, `tsc --noEmit` clean,
@@ -178,7 +208,24 @@ Playwright browsers are at `~/Library/Caches/ms-playwright`; the binary is
    played" list — or ←/→ day-stepping inside the graph modal — is a pure client
    change. Held back because he was ambivalent about the problem and it adds a
    new UI surface; it wants his call, not an overnight decision.
-4. **Landing page** — still wants to be "sleeker"; untouched.
+4. **Landing page — diagnosed, untouched.** Screenshotted the LIVE site (local
+   dev cannot render it: the API's `ALLOWED_ORIGINS` is the Pages origin only, so
+   a dev-server load shows the CORS error state, not the page). Measured on
+   1440×900 and 390×844:
+   - **Desktop wastes about a third of the first screen.** Real content ends
+     around y=515 and the footer sits at ~730, leaving a large empty band —
+     which is the void Vijay described. The PHONE layout does not have this
+     problem and reads well as-is; this is a desktop-only complaint.
+   - **A column of four bare em-dashes** where yesterday's times should be. Not
+     a bug: it is the deliberate spoiler mask
+     (`pathsUnlocked ? formatTimeAndClicks(...) : "—"`, Boards.tsx:970). But as
+     rendering it reads as missing data rather than "hidden until you play".
+     Saying it once and dropping the column would read better — his copy call,
+     not mine.
+   - **"Start your streak today"** floats between the hero card and the results
+     card with no container of its own.
+   - The hero title truncates on phone ("Cooper's Hill Cheese-Rolling and W…").
+   Screenshots: `agents-shared/scratch/2026-08-15-vwiki-viewgraph/shots/prod-landing-{phone,desktop}.png`.
 5. `truncateTitle` collisions: two different articles can share a truncated
    label ("Semiconductor d…" appears twice in the 11-strand export). Cosmetic.
 6. Pre-existing `npm audit --omit=dev`: nanoid (high), postcss (moderate).
