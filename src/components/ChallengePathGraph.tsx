@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { formatTimeAndClicks } from "../domain/formatting";
 import { strandStyleForIndex, type StrandStyle } from "../domain/strandStyle";
+import {
+  LABEL_PRIORITY_ANCHOR,
+  LABEL_PRIORITY_BREADCRUMB,
+  LABEL_PRIORITY_SHARED,
+  LABEL_PRIORITY_SUPPRESSED,
+  placeLabels,
+} from "../domain/labelPlacement";
 
 /**
  * GR-1 ("View graph"): ported verbatim from the visualize-graph branch
@@ -195,6 +202,8 @@ interface NodeLayout {
   radius: number;
   alwaysLabel: boolean; // anchor, shared, or DNF terminal - never suppressed
   showLabelDesktop: boolean; // alwaysLabel || A4 breadcrumb-selected
+  labelDx: number;
+  labelCrowdedOut: boolean; // GR-2: no collision-free slot existed
   labelText: string;
   labelFull: string;
   labelDy: number;
@@ -475,52 +484,44 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
     flush();
   }
 
-  // Label placement: a real 2D collision check against every previously
-  // placed label's actual on-screen box (see module docblock). Only labels
-  // that will actually render by default (alwaysLabel or breadcrumb-
-  // Every node still competes for a collision-safe slot, including labels
-  // A4 suppresses by default - they're silent (opacity 0) until a focus
-  // reveal (A6), but when revealed, an entire long solo stretch can pop in
-  // at once (e.g. rnaik24's ~7 surviving labels), and without a reserved
-  // slot each they'd all default to the same nearest-row offset and stack
-  // into unreadable overlapping text. Reserving the slot up front costs
-  // nothing while hidden and guarantees revealed labels are already legible.
-  const LABEL_HEIGHT_PX = 15;
-  const placedLabelBoxes: Array<{ x1: number; x2: number; y1: number; y2: number }> = [];
-  function boxesOverlap(
-    a: { x1: number; x2: number; y1: number; y2: number },
-    b: { x1: number; x2: number; y1: number; y2: number },
-  ): boolean {
-    return a.x1 < b.x2 + LABEL_GAP_PX && b.x1 < a.x2 + LABEL_GAP_PX && a.y1 < b.y2 && b.y1 < a.y2;
-  }
-
-  const nodes: NodeLayout[] = raws.map((raw) => {
-    const cx = MARGIN_LEFT + raw.xFrac * PLOT_WIDTH;
+  // Label placement now lives in domain/labelPlacement.ts - see that file for
+  // why priority order, sideways slots and suppression-instead-of-collision
+  // replaced the prototype's "try 11 vertical offsets, then overprint anyway".
+  // It runs as its own pass because the placer needs EVERY candidate's box up
+  // front to sort by priority; the old inline version could only ever see the
+  // labels that happened to come earlier in layout order.
+  const labelInputs = raws.map((raw) => {
     const big = raw.agg.isStart || raw.agg.isTarget;
     const alwaysLabel = alwaysLabelTitles.has(raw.agg.title);
     const breadcrumbEligible = !alwaysLabel && breadcrumbEligibleTitles.has(raw.agg.title);
-    const showLabelDesktop = alwaysLabel || breadcrumbEligible;
     const fontSize = big ? 14 : 12;
     const labelText = truncateTitle(raw.agg.title, big ? 26 : 20);
-    const width = estimateLabelWidth(labelText, fontSize);
-    const half = width / 2;
+    return {
+      cx: MARGIN_LEFT + raw.xFrac * PLOT_WIDTH,
+      cy: raw.cy,
+      width: estimateLabelWidth(labelText, fontSize),
+      priority: big
+        ? LABEL_PRIORITY_ANCHOR
+        : alwaysLabel
+          ? LABEL_PRIORITY_SHARED
+          : breadcrumbEligible
+            ? LABEL_PRIORITY_BREADCRUMB
+            : LABEL_PRIORITY_SUPPRESSED,
+      big,
+      alwaysLabel,
+      showLabelDesktop: alwaysLabel || breadcrumbEligible,
+      fontSize,
+      labelText,
+    };
+  });
+  // Labels may use the margins (that is what they are for) but not run off the
+  // canvas, where they render clipped.
+  const labelPlacements = placeLabels(labelInputs, { minX: 6, maxX: SVG_WIDTH - 6 });
 
-    let chosenDy = LABEL_ROW_OFFSETS[LABEL_ROW_OFFSETS.length - 1];
-    let chosenBox: null | { x1: number; x2: number; y1: number; y2: number } = null;
-    for (const dy of LABEL_ROW_OFFSETS) {
-      const y = raw.cy + dy;
-      const box = { x1: cx - half, x2: cx + half, y1: y - LABEL_HEIGHT_PX / 2, y2: y + LABEL_HEIGHT_PX / 2 };
-      if (!placedLabelBoxes.some((placed) => boxesOverlap(placed, box))) {
-        chosenDy = dy;
-        chosenBox = box;
-        break;
-      }
-    }
-    if (!chosenBox) {
-      const y = raw.cy + chosenDy;
-      chosenBox = { x1: cx - half, x2: cx + half, y1: y - LABEL_HEIGHT_PX / 2, y2: y + LABEL_HEIGHT_PX / 2 };
-    }
-    placedLabelBoxes.push(chosenBox);
+  const nodes: NodeLayout[] = raws.map((raw, index) => {
+    const input = labelInputs[index];
+    const placement = labelPlacements[index];
+    const { cx, big, alwaysLabel, showLabelDesktop, fontSize, labelText } = input;
 
     const visitorCount = raw.visitorCount;
     // A5: merge points read co-equal with (never above) the start/target
@@ -555,7 +556,13 @@ function buildGraph(orderedRuns: ChallengePathRun[]): GraphLayout {
       showLabelDesktop,
       labelText,
       labelFull: raw.agg.title,
-      labelDy: chosenDy,
+      labelDx: placement.dx,
+      labelDy: placement.dy,
+      // GR-2: the placer found no collision-free slot for this one. It stays
+      // reachable through the node's <title> tooltip and the A6 focus reveal,
+      // but must not render by default - an overprinted label destroys the
+      // label it lands on as well as itself.
+      labelCrowdedOut: placement.hidden && input.priority !== LABEL_PRIORITY_SUPPRESSED,
       fontSize,
       arrivalMs: 0, // filled in below, once edge timing is known
     };
@@ -1266,7 +1273,10 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
 
                 // Suppressed on desktop (A4 structural) OR on mobile (A4
                 // viewport tier) - either way it's reveal-on-focus only.
-                const revealOnly = !node.alwaysLabel && (isMobile || !node.showLabelDesktop);
+                // GR-2 adds a third reason: the placer found no collision-free
+                // slot, so showing it would overprint a neighbour.
+                const revealOnly =
+                  !node.alwaysLabel && (isMobile || !node.showLabelDesktop || node.labelCrowdedOut);
                 const labelVisible = !revealOnly || activePlayer === node.soleVisitor;
 
                 const secondaryHalo = !isTarget && node.visitorCount > 1;
@@ -1368,8 +1378,13 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                     ) : null}
 
                     <text
-                      x={node.cx}
-                      y={node.cy + node.labelDy + (node.labelDy >= 0 ? 16 : -10)}
+                      // GR-2: labelDx/labelDy are the FINAL offsets the
+                      // collision placer chose. Adding any further nudge here
+                      // would move the label away from the box that was
+                      // collision-checked - exactly the bug that let 87 label
+                      // pairs overlap.
+                      x={node.cx + node.labelDx}
+                      y={node.cy + node.labelDy}
                       textAnchor="middle"
                       fontSize={node.fontSize}
                       fontWeight={node.isStart || isTarget ? 600 : 500}
@@ -1382,6 +1397,16 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                       pointerEvents="none"
                       className={revealOnly ? "cpg-label-hidden" : undefined}
                       style={revealOnly ? { opacity: labelVisible ? 1 : 0 } : undefined}
+                      // Why this label is (or isn't) on screen. Makes label
+                      // density measurable from outside - the 87-overlap
+                      // regression was invisible to every unit test we had.
+                      data-label={
+                        !revealOnly
+                          ? "shown"
+                          : node.labelCrowdedOut
+                            ? "crowded-out"
+                            : "suppressed"
+                      }
                     >
                       {node.labelText}
                     </text>
