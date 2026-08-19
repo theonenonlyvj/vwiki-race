@@ -1,8 +1,17 @@
 # 2026-08-16 — path graph: portrait layout, strand identity, share image
 
-Everything below is COMMITTED LOCALLY on `main` and **not pushed, not deployed**.
-Vijay was asleep; per `AGENTS.md` (local rule: no push/deploy without an explicit
-ask) shipping waits for him. `main` is 14 commits ahead of `origin/main` (`origin/main` = `31d5e84`).
+**SHIPPED 2026-08-18 20:2x CDT.** Pushed (`31d5e84..398610a`) and deployed to
+Pages production; live bundle `index-KtJcCDZ4.js`, smoke-checked on phone and
+desktop with zero console errors.
+
+**Deploy gotcha, and it is not fixed:** the GitHub -> Pages auto-deploy did NOT
+fire. Pushing `main` created no build after 12 minutes, and `31d5e84` (pushed
+2026-08-16) never produced a deployment either - so the git integration has been
+dead since at least then, and anything "pushed" between those dates was never
+live. Shipped instead with `npx wrangler pages deploy dist --project-name
+vwikirace --branch main`, which works. Until the GitHub App connection is
+repaired in the Cloudflare dashboard, PUSHING IS NOT DEPLOYING - always confirm
+the live bundle hash changed.
 
 Base for this work: `31d5e84` (the previous night's profile/Boards redesign).
 
