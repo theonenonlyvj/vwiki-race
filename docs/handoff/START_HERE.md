@@ -1,12 +1,18 @@
 # VWiki Race: Start Here
 
-Last updated: 2026-07-26
+Last updated: 2026-08-18
 
 This is the canonical cold-start orientation for VWiki Race. Read this file
-before changing the product. It describes the current whole system as of
-`736eab5` and points to authoritative detail rather than re-narrating it.
+before changing the product. It describes the whole system and points to authoritative detail rather than
+re-narrating it. Its architecture and invariants still hold as of `736eab5`;
+the state and open work have moved on - see the dated handoffs below.
 
-**Read `docs/handoff/2026-07-26-agent-handoff.md` next, in full, before
+**Read `docs/handoff/2026-08-18-agent-handoff.md` FIRST** - it carries the
+current state, the open work, and one live landmine that will silently waste a
+session (the GitHub -> Pages auto-deploy is broken: pushing does not deploy, and
+production ran stale code for two days because of it).
+
+**Then read `docs/handoff/2026-07-26-agent-handoff.md` in full, before
 shipping anything.** That document is the narrative arc of everything that
 happened after this file's previous version went stale (the UX redesign
 shipping 2026-07-18 through the daily-difficulty-floor work on 2026-07-26),
@@ -29,14 +35,14 @@ hand-holding.
 - Canonical API (fallback/rollback path): <https://vwikirace-api.theonenonlyvj.workers.dev>
 - VGames identity (separate repo, read-only from here): <https://vgames-identity.theonenonlyvj.workers.dev>, source at `/Users/vijayram/Cursor/vgames-platform/services/identity`
 - Protected Daily moderation route: <https://vwikirace.pages.dev/admin/dailies>
-- `main` is clean and matches `origin/main` at `736eab5`.
+- `main` is clean and matches `origin/main` at `8d767d8` (2026-08-18).
 - Live Worker version: `4e4a3cac` (`wrangler deployments list --config
-  wrangler.api.toml`, deployed 2026-07-26T16:26 UTC).
-- Live Pages bundle: `index-DTsZ8f1q.js` (confirmed live via direct fetch of
-  `vwikirace.pages.dev/` at doc time; predates `736eab5` because that commit
-  was a server-only diff with no client-visible surface, so no Pages
-  redeploy was required for it to be live). **Always reconfirm both of these
-  yourself** (`wrangler deployments list`, and curl/view-source the live
+  wrangler.api.toml`, deployed 2026-07-26T16:26 UTC). Still current: nothing
+  since has touched `src/server/`.
+- Live Pages bundle: `index-KtJcCDZ4.js` (the 2026-08-16 path-graph work,
+  deployed 2026-08-18). **Pushing `main` will NOT deploy this** - the GitHub
+  integration is broken; see the 2026-08-18 handoff. **Always reconfirm both of
+  these yourself** (`wrangler deployments list`, and curl/view-source the live
   page for its `index-*.js` filename) rather than trusting this document's
   numbers as still current — they drift with every ship.
 - Tests, verified at doc time: **1163 client tests / 236 Worker tests, all
