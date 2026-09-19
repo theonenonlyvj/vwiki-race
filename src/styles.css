@@ -1195,6 +1195,23 @@ h1 {
   clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
 }
 
+.daily-update-notice {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--coral);
+  background: var(--ink-raised);
+  padding: 12px 16px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.daily-update-notice p {
+  margin: 0;
+}
+
+.daily-update-notice p + p {
+  margin-top: 4px;
+}
+
 .daily-hero {
   border-left: 5px solid var(--coral);
 }

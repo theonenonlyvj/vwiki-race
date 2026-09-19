@@ -331,3 +331,23 @@ describe("Home: pre-finish spoiler mask on 'Yesterday's results' (owner ask, 202
     expect(screen.queryByText("0:20 · 3 clk")).toBeNull();
   });
 });
+
+
+describe("Home: temporary weekday update", () => {
+  it.each(["2026-09-19", "2026-09-25"])("shows the apology on %s", (todayCentral) => {
+    renderHome({ todayCentral });
+    expect(screen.getByRole("note", { name: "Daily picks update" })).toHaveTextContent(
+      "Sorry about the tough Thursday and Friday races—we’ve fixed the daily picks.",
+    );
+  });
+
+  it.each(["2026-09-18", "2026-09-26", "2027-09-19"])("hides the apology on %s", (todayCentral) => {
+    renderHome({ todayCentral });
+    expect(screen.queryByRole("note", { name: "Daily picks update" })).toBeNull();
+  });
+
+  it("shows the notice while the daily is loading", () => {
+    renderHome({ todayCentral: "2026-09-19", hero: null, catalogStatus: "loading" });
+    expect(screen.getByRole("note", { name: "Daily picks update" })).toBeVisible();
+  });
+});

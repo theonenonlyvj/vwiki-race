@@ -137,6 +137,12 @@ export default function Home({
   sessionDnfChallengeIds: ReadonlySet<string>;
   todayCentral: string;
 }) {
+  const dailyUpdateNotice = todayCentral >= "2026-09-19" && todayCentral < "2026-09-26" ? (
+    <aside className="daily-update-notice" role="note" aria-label="Daily picks update">
+      <p>Sorry about the tough Thursday and Friday races—we’ve fixed the daily picks.</p>
+      <p>Monday–Friday now uses Recognizable picks; weekends stay Hard.</p>
+    </aside>
+  ) : null;
   const heroChallenge = hero?.challenge ?? null;
   const yesterdayCentral = useMemo(
     () => previousCentralDate(todayCentral),
@@ -258,6 +264,7 @@ export default function Home({
     // settled failed yet) keeps the original heading unchanged.
     return (
       <section className="home-layout">
+        {dailyUpdateNotice}
         <section className="empty-state">
           <span>Challenge</span>
           {catalogStatus === "failed" ? (
@@ -370,6 +377,7 @@ export default function Home({
 
   return (
     <section className="home-layout">
+      {dailyUpdateNotice}
       <div
         className="daily-hero challenge-route route-header"
         aria-label={heroIsYesterday ? "Yesterday's daily" : "Today's daily"}

@@ -6946,7 +6946,7 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
     // Scoped to the first-visit strip specifically - QF-05 added a second,
     // permanent "how to play" trigger in the footer that opens the exact
     // same popup, so an unscoped query now matches both.
-    const strip = await screen.findByRole("note");
+    const strip = await screen.findByRole("note", { name: "" });
     await user.click(within(strip).getByRole("button", { name: /how to play/i }));
     const dialog = await screen.findByRole("dialog", { name: /how to play/i });
     expect(within(dialog).getByText(/get from/i)).toHaveTextContent(/apple/i);
@@ -7477,7 +7477,7 @@ describe("PKG-07 (council 2026-07-19, owner-proxy ruling): daily ritual identity
     // Scoped to the first-visit strip specifically - QF-05 added a second,
     // permanent "how to play" trigger in the footer that opens the exact
     // same popup, so an unscoped query now matches both.
-    const strip = await screen.findByRole("note");
+    const strip = await screen.findByRole("note", { name: "" });
     await user.click(within(strip).getByRole("button", { name: /how to play/i }));
     const dialog = await screen.findByRole("dialog", { name: /how to play/i });
     expect(
