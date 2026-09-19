@@ -7,7 +7,7 @@ before changing the product. It describes the whole system and points to authori
 re-narrating it. Its architecture and invariants still hold as of `736eab5`;
 the state and open work have moved on - see the dated handoffs below.
 
-**Read `docs/handoff/2026-09-19-weekday-dailies-release.md` FIRST** for the current release, verification, and follow-ups. Then read `docs/handoff/2026-08-18-agent-handoff.md` for prior context and one live landmine that will silently waste a
+**Read `docs/handoff/2026-09-19-login-and-ux-release.md` FIRST** for the current release, verification, and follow-ups. Then read `docs/handoff/2026-08-18-agent-handoff.md` for prior context and one live landmine that will silently waste a
 session (the GitHub -> Pages auto-deploy is broken: pushing does not deploy, and
 production ran stale code for two days because of it).
 
@@ -34,15 +34,16 @@ A temporary landing apology shipped after that release; see `docs/superpowers/pl
 - Production: <https://vwikirace.pages.dev>
 - GitHub: <https://github.com/theonenonlyvj/vwiki-race>
 - Canonical API (fallback/rollback path): <https://vwikirace-api.theonenonlyvj.workers.dev>
-- VGames identity (separate repo, read-only from here): <https://vgames-identity.theonenonlyvj.workers.dev>, source at `/Users/vijayram/Cursor/vgames-platform/services/identity`
+- VGames identity (separate repo): <https://vgames-identity.theonenonlyvj.workers.dev>, source at `/Users/vijayram/Cursor/games/vgames-platform/services/identity`
 - Protected Daily moderation route: <https://vwikirace.pages.dev/admin/dailies>
-- Runtime release commit: `ec209f2`, pushed to `origin/main` on 2026-09-19. Later documentation-only commits do not change the deployed artifact.
-- Live Worker version: `ff4c8704-7810-4181-b990-570a25ab6897`.
-- Live Pages deployment: `b48e0f6d`; bundle `index-BbYoRW7-.js`. Deploy Pages explicitly; pushing main alone is insufficient. Reconfirm live identifiers before the next release.
-- Verified release gates: **1377 client tests passing / 290 Worker tests passed for the preceding unchanged Worker release**, production build and bundle check, Worker dry run, independent review, live API and browser gameplay smoke.
+- Runtime release commit: `e20f8c5` (login/UX implementation `2976b6d`), pushed to `origin/main` on 2026-09-19. Later documentation-only commits do not change the deployed artifact.
+- Live Worker version: `fe7f19b5-1ea8-4998-aeb1-14f4fc7b3657`.
+- Live Pages deployment: `55243024`; bundle `index-85wJm5XH.js`. Deploy Pages explicitly; pushing main alone is insufficient. Reconfirm live identifiers before the next release.
+- Verified release gates: **1411 client tests / 290 Worker tests / 130 identity tests passing**, production build and bundle check, Worker dry run, independent review, live API and browser gameplay smoke.
 - Dependency audit has four pre-existing advisories (two high, two moderate); upgrades remain follow-up. See the release receipt for packages and evidence.
 - Production migration ledger contains `0001` through `0007`, matching local inventory. No migration was needed for this release. Never replay an applied migration.
 - Automatic dailies: Recognizable Monday–Friday, Hard weekends. Historical Weird metadata remains readable; new queue entries must use Recognizable or Hard. Sanitizer-verified path gating remains follow-up.
+- Remembered login: same-origin HttpOnly cookie, 30-day idle / 90-day absolute expiry; existing 24-hour access tokens renew automatically. See latest receipt for migration and rollback details.
 - `MAINTENANCE_MODE=false` (normal production mode).
 - **The UX redesign (modes, not tabs) shipped 2026-07-18 and has since been
   through two full UX council review cycles (2026-07-19), a routing/Back-ladder
@@ -395,7 +396,7 @@ Browser
   option.
 - VGames owns credentials, uniqueness, ghost accounts, sessions, and account
   merging, from a **separate repository**
-  (`/Users/vijayram/Cursor/vgames-platform/services/identity`) — read-only
+  (`/Users/vijayram/Cursor/games/vgames-platform/services/identity`) — read-only
   from this repo. VWiki Race stores only canonical IDs/aliases needed to own
   game history.
 
