@@ -1,0 +1,131 @@
+.browse-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.browse-toolbar h2 {
+  margin: 0;
+}
+
+.browse-secondary-action {
+  min-height: 38px;
+  border-color: var(--line-strong);
+  background: transparent;
+  color: var(--cyan);
+}
+
+.browse-create-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  background: var(--ink-soft);
+  padding: 12px;
+}
+
+.browse-create-panel .create-challenge-form {
+  margin-top: 0;
+}
+
+.browse-create-panel .browse-random-challenge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-top: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.browse-filter-control {
+  display: flex;
+  gap: 6px;
+  margin: 14px 0 10px;
+}
+
+.browse-filter-control button {
+  flex: 1 1 0;
+  min-height: 38px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.browse-filter-control button[aria-pressed="true"] {
+  border-color: var(--cyan);
+  background: rgba(13, 235, 215, 0.1);
+  color: var(--text-bright);
+}
+
+.browse-archive {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.browse-archive-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(170px, auto);
+  gap: 12px;
+  align-items: end;
+}
+
+.browse-archive-controls h3,
+.browse-archive-controls p {
+  margin: 0;
+}
+
+.browse-archive-controls p {
+  margin-top: 4px;
+}
+
+.browse-date-control select {
+  min-height: 38px;
+}
+
+.challenge-list .browse-archive-state {
+  flex: 0 0 auto;
+  border: 1px solid var(--line-strong);
+  background: var(--ink);
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 5px 7px;
+  white-space: nowrap;
+}
+
+.challenge-list .browse-archive-state-completed {
+  border-color: rgba(13, 235, 215, 0.6);
+  background: rgba(13, 235, 215, 0.12);
+  color: var(--cyan);
+}
+
+@media (max-width: 640px) {
+  .browse-toolbar,
+  .browse-archive-controls {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .browse-toolbar {
+    display: grid;
+  }
+
+  .browse-secondary-action,
+  .browse-date-control select {
+    width: 100%;
+  }
+
+  .browse-create-panel,
+  .browse-create-panel .create-challenge-form {
+    grid-template-columns: 1fr;
+  }
+
+  .browse-card-title-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

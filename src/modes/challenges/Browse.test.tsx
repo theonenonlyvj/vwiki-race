@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import ChallengeBrowser from "./Browse";
 import type { HomeHeroSelection } from "../../domain/challengeSelection";
-import type { Challenge } from "../../domain/types";
+import type { Challenge, ChallengeOutcomeEntry } from "../../domain/types";
 import type { VWikiRaceApiClient } from "../../services/vwikiRaceApiClient";
 
 const todayCentral = "2026-07-18";
@@ -27,6 +27,25 @@ const challengeTwo: Challenge = {
   ruleset: "ranked_classic",
   source: "curated",
 };
+
+function pastDaily(
+  id: string,
+  dailyDate: string,
+  startTitle: string,
+  targetTitle: string,
+): Challenge {
+  return {
+    id,
+    label: `Daily ${dailyDate}`,
+    mode: "daily",
+    origin: "daily",
+    dailyDate,
+    start: { title: startTitle },
+    target: { title: targetTitle },
+    ruleset: "ranked_classic",
+    source: "curated",
+  };
+}
 
 function mockApiClient(overrides: Partial<VWikiRaceApiClient> = {}): VWikiRaceApiClient {
   return {
@@ -87,7 +106,7 @@ function renderBrowse(overrides: Partial<Parameters<typeof ChallengeBrowser>[0]>
 }
 
 describe("Browse: full card spec (Increment 5)", () => {
-  it("renders each card's meta line from the summary endpoint, omitting best when null", async () => {
+  it("hides best metrics until the viewer has finished or given up", async () => {
     const apiClient = mockApiClient({
       getChallengesSummary: vi.fn(async () => [
         { challengeId: "challenge-0001", playerCount: 5, best: { elapsedMs: 38_000, clickCount: 5 } },
@@ -97,9 +116,42 @@ describe("Browse: full card spec (Increment 5)", () => {
     renderBrowse({ apiClient });
 
     const cardOne = await screen.findByRole("button", { name: /challenge #1/i });
-    expect(within(cardOne).getByText("5 players · best 0:38 · 5 clk")).toBeVisible();
+    expect(within(cardOne).getByText("5 players")).toBeVisible();
+    expect(within(cardOne).queryByText(/best 0:38/i)).toBeNull();
     const cardTwo = screen.getByRole("button", { name: /challenge #2/i });
     expect(within(cardTwo).getByText("2 players")).toBeVisible();
+  });
+
+  it.each([
+    ["completed", { challengeId: "challenge-0001", outcome: "completed" as const, best: { elapsedMs: 42_000, clickCount: 6 } }],
+    ["given up", { challengeId: "challenge-0001", outcome: "dnf" as const, best: null, peeked: true }],
+  ])("shows best metrics after the viewer has %s", async (_label, outcome) => {
+    const apiClient = mockApiClient({
+      getChallengesSummary: vi.fn(async () => [
+        { challengeId: "challenge-0001", playerCount: 5, best: { elapsedMs: 38_000, clickCount: 5 } },
+      ]),
+      getAccountChallengeOutcomes: vi.fn(async () => [outcome]),
+    });
+    renderBrowse({ apiClient, identityToken: "jwt-claimed" });
+
+    const cardOne = await screen.findByRole("button", { name: /challenge #1/i });
+    expect(within(cardOne).getByText("5 players · best 0:38 · 5 clk")).toBeVisible();
+  });
+
+  it("keeps best metrics hidden for an unfinished viewer who has not given up", async () => {
+    const apiClient = mockApiClient({
+      getChallengesSummary: vi.fn(async () => [
+        { challengeId: "challenge-0001", playerCount: 5, best: { elapsedMs: 38_000, clickCount: 5 } },
+      ]),
+      getAccountChallengeOutcomes: vi.fn(async () => [
+        { challengeId: "challenge-0001", outcome: "dnf" as const, best: null, peeked: false },
+      ]),
+    });
+    renderBrowse({ apiClient, identityToken: "jwt-claimed" });
+
+    const cardOne = await screen.findByRole("button", { name: /challenge #1/i });
+    expect(within(cardOne).getByText("5 players")).toBeVisible();
+    expect(within(cardOne).queryByText(/best 0:38/i)).toBeNull();
   });
 
   it("shows no meta line for a challenge absent from the summary response", async () => {
@@ -149,6 +201,95 @@ describe("Browse: full card spec (Increment 5)", () => {
     const cardOne = await screen.findByRole("button", { name: /challenge #1/i });
     expect(within(cardOne).queryByText(/new|dnf|✓/i)).toBeNull();
     expect(outcomes).not.toHaveBeenCalled();
+  });
+
+  it("does not show one account's outcomes while a newly selected account is loading", async () => {
+    let resolveSecondAccount!: (entries: ChallengeOutcomeEntry[]) => void;
+    const secondAccount = new Promise<ChallengeOutcomeEntry[]>((resolve) => {
+      resolveSecondAccount = resolve;
+    });
+    const outcomes = vi.fn((token: string) => token === "token-a"
+      ? Promise.resolve([
+          {
+            challengeId: challengeOne.id,
+            outcome: "completed" as const,
+            best: { elapsedMs: 42_000, clickCount: 6 },
+          },
+        ])
+      : secondAccount);
+    const apiClient = mockApiClient({
+      getChallengesSummary: vi.fn(async () => [
+        {
+          challengeId: challengeOne.id,
+          playerCount: 5,
+          best: { elapsedMs: 38_000, clickCount: 5 },
+        },
+      ]),
+      getAccountChallengeOutcomes: outcomes,
+    });
+    const props = {
+      apiClient,
+      canNominateForDaily: false,
+      challenges: [challengeOne, challengeTwo],
+      heroSelection: null,
+      identityToken: "token-a" as string | null,
+      onCreateChallenge: vi.fn(async () => undefined),
+      onCreateRandomChallenge: vi.fn(),
+      onGoHome: vi.fn(),
+      onOpenChallenge: vi.fn(),
+      randomChallengeBusy: false,
+      randomChallengeError: null,
+      selectedChallengeId: null,
+      todayCentral,
+    };
+    const view = render(<ChallengeBrowser {...props} />);
+
+    const firstAccountCard = await screen.findByRole("button", { name: /challenge #1/i });
+    expect(within(firstAccountCard).getByText("✓ 0:42 · 6 clk")).toBeVisible();
+    expect(within(firstAccountCard).getByText("5 players · best 0:38 · 5 clk")).toBeVisible();
+
+    view.rerender(<ChallengeBrowser {...props} identityToken="token-b" />);
+
+    const secondAccountCard = screen.getByRole("button", { name: /challenge #1/i });
+    expect(within(secondAccountCard).queryByText(/✓|NEW|DNF/)).toBeNull();
+    expect(within(secondAccountCard).queryByText(/best 0:38/i)).toBeNull();
+    expect(within(secondAccountCard).getByText("5 players")).toBeVisible();
+
+    resolveSecondAccount([]);
+    await waitFor(() => expect(within(secondAccountCard).getByText("NEW")).toBeVisible());
+    expect(outcomes).toHaveBeenCalledWith("token-b");
+  });
+
+  it("reports unavailable history without inventing new or not-played states", async () => {
+    const oldDaily = pastDaily("daily-0717-history-error", "2026-07-17", "Moon", "Tide");
+    const apiClient = mockApiClient({
+      getChallengesSummary: vi.fn(async () => [
+        {
+          challengeId: challengeOne.id,
+          playerCount: 5,
+          best: { elapsedMs: 38_000, clickCount: 5 },
+        },
+      ]),
+      getAccountChallengeOutcomes: vi.fn(async () => {
+        throw new Error("history unavailable");
+      }),
+    });
+    const user = userEvent.setup();
+    renderBrowse({
+      apiClient,
+      challenges: [challengeOne, oldDaily],
+      identityToken: "token-a",
+    });
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/history is unavailable/i);
+    const card = screen.getByRole("button", { name: /challenge #1/i });
+    expect(within(card).queryByText(/✓|NEW|DNF/)).toBeNull();
+    expect(within(card).queryByText(/best 0:38/i)).toBeNull();
+    expect(within(card).getByText("5 players")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: /^past dailies$/i }));
+    const archive = screen.getByRole("region", { name: /past daily archive/i });
+    expect(within(archive).queryByText(/not played|unfinished|completed/i)).toBeNull();
   });
 
   it("fetches the summary once per view and reuses it for every card (no per-card calls)", async () => {
@@ -219,6 +360,7 @@ describe("Browse: full card spec (Increment 5)", () => {
     const { onCreateRandomChallenge } = renderBrowse();
 
     await screen.findByRole("button", { name: /challenge #1/i });
+    await user.click(screen.getByRole("button", { name: /^create a challenge$/i }));
     const randomButton = screen.getByRole("button", { name: /create a random new one/i });
     await user.click(randomButton);
     expect(onCreateRandomChallenge).toHaveBeenCalledTimes(1);
@@ -228,6 +370,7 @@ describe("Browse: full card spec (Increment 5)", () => {
     const user = userEvent.setup();
     const { onCreateRandomChallenge } = renderBrowse({ randomChallengeBusy: true });
 
+    await user.click(screen.getByRole("button", { name: /^create a challenge$/i }));
     const button = screen.getByRole("button", { name: /rolling the dice on wikipedia/i });
     expect(button).toBeDisabled();
     await user.click(button);
@@ -239,6 +382,23 @@ describe("Browse: full card spec (Increment 5)", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Wikipedia wasn't cooperating — try again.",
     );
+  });
+
+  it("keeps creation discoverable at the top while its form starts collapsed", async () => {
+    const user = userEvent.setup();
+    renderBrowse();
+
+    const toggle = screen.getByRole("button", { name: /^create a challenge$/i });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByLabelText(/start article/i)).toBeNull();
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText(/start article/i)).toBeVisible();
+    expect(screen.getByLabelText(/target article/i)).toBeVisible();
+    const search = screen.getByRole("searchbox", { name: /search challenges/i });
+    expect(toggle.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   // QF-07: `submitChallenge` only gated on `isCreating` (an async state
@@ -270,6 +430,7 @@ describe("Browse: full card spec (Increment 5)", () => {
     );
 
     const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^create a challenge$/i }));
     await user.type(screen.getByLabelText(/start article/i), "Mars");
     await user.type(screen.getByLabelText(/target article/i), "Water");
     const form = screen.getByLabelText(/start article/i).closest("form") as HTMLFormElement;
@@ -287,6 +448,68 @@ describe("Browse: full card spec (Increment 5)", () => {
     resolveCreate();
     await waitFor(() => expect(screen.getByLabelText(/start article/i)).toHaveValue(""));
     expect(onCreateChallenge).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Browse: past daily archive", () => {
+  const july15 = pastDaily("daily-0715", "2026-07-15", "Saturn", "Rings");
+  const july16 = pastDaily("daily-0716", "2026-07-16", "Oak", "Forest");
+  const july17 = pastDaily("daily-0717", "2026-07-17", "Moon", "Tide");
+  const today = pastDaily("daily-0718", "2026-07-18", "Coffee", "Flood");
+
+  it("shows only past dailies newest-first and navigates to a selected date", async () => {
+    const user = userEvent.setup();
+    renderBrowse({
+      challenges: [july15, challengeOne, today, july17, july16],
+      heroSelection: { challenge: today, kind: "today-daily" },
+    });
+
+    await user.click(screen.getByRole("button", { name: /^past dailies$/i }));
+
+    const archive = screen.getByRole("region", { name: /past daily archive/i });
+    const cards = within(archive).getAllByRole("button", { name: /→/ });
+    expect(cards.map((card) => card.textContent)).toEqual([
+      expect.stringContaining("Moon"),
+      expect.stringContaining("Oak"),
+      expect.stringContaining("Saturn"),
+    ]);
+    expect(within(archive).queryByText("Coffee")).toBeNull();
+    expect(within(archive).queryByText("Apple")).toBeNull();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /past daily date/i }), "2026-07-15");
+    expect(within(archive).getByRole("button", { name: /saturn.*rings/i })).toBeVisible();
+    expect(within(archive).queryByRole("button", { name: /moon.*tide/i })).toBeNull();
+  });
+
+  it("uses explicit completed, unfinished, and not-played states", async () => {
+    const user = userEvent.setup();
+    const apiClient = mockApiClient({
+      getAccountChallengeOutcomes: vi.fn(async () => [
+        { challengeId: july17.id, outcome: "completed" as const, best: { elapsedMs: 42_000, clickCount: 6 } },
+        { challengeId: july16.id, outcome: "dnf" as const, best: null },
+      ]),
+    });
+    renderBrowse({
+      apiClient,
+      challenges: [july15, july16, july17],
+      identityToken: "jwt-claimed",
+    });
+
+    await user.click(screen.getByRole("button", { name: /^past dailies$/i }));
+
+    expect(await screen.findByText("Completed · 0:42 · 6 clk")).toBeVisible();
+    expect(screen.getByText("Unfinished")).toBeVisible();
+    expect(screen.getByText("Not played")).toBeVisible();
+  });
+
+  it("opens an archived daily through the ordinary challenge-detail callback", async () => {
+    const user = userEvent.setup();
+    const { onOpenChallenge } = renderBrowse({ challenges: [july17] });
+
+    await user.click(screen.getByRole("button", { name: /^past dailies$/i }));
+    await user.click(screen.getByRole("button", { name: /moon.*tide/i }));
+
+    expect(onOpenChallenge).toHaveBeenCalledWith(july17.id);
   });
 });
 

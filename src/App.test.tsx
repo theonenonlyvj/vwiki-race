@@ -1098,6 +1098,18 @@ describe("VWiki Race app", () => {
     );
   });
 
+  it("offers owner-issued password recovery from the login form", async () => {
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={memoryStorage()} />);
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(screen.getByRole("button", { name: /^log in$/i }));
+    await user.click(screen.getByText("Forgot password?"));
+    expect(screen.getByText(/ask vijay for a one-use reset link/i)).toBeVisible();
+    expect(screen.getByRole("link", { name: "Contact Vijay" })).toHaveAttribute("href", "https://theonenonlyvj.github.io/personal-site/contact");
+    expect(screen.getByText(/never send your password/i)).toBeVisible();
+  });
+
   it("submits password-manager autofill values even when React change events did not fire", async () => {
     const fetchImpl = createFetchMock();
     const user = userEvent.setup();
@@ -3391,6 +3403,7 @@ describe("VWiki Race app", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
 
     await user.click(await screen.findByRole("button", { name: /challenges/i }));
+    await user.click(screen.getByRole("button", { name: "Create a challenge" }));
     await user.type(screen.getByLabelText(/start article/i), "Mars");
     await user.type(screen.getByLabelText(/target article/i), "Water");
     await user.click(screen.getByRole("checkbox", { name: /nominate for a future daily/i }));
@@ -3626,6 +3639,7 @@ describe("VWiki Race app", () => {
 
     const nav = await screen.findByRole("navigation", { name: /vwiki race views/i });
     await user.click(within(nav).getByRole("button", { name: "Challenges" }));
+    await user.click(screen.getByRole("button", { name: "Create a challenge" }));
     await screen.findByLabelText(/start article/i);
     await act(async () => {
       window.dispatchEvent(new Event("focus"));
@@ -3740,6 +3754,7 @@ describe("VWiki Race app", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
 
     await user.click(await screen.findByRole("button", { name: /challenges/i }));
+    await user.click(screen.getByRole("button", { name: "Create a challenge" }));
     await user.type(screen.getByLabelText(/start article/i), "Mars");
     await user.type(screen.getByLabelText(/target article/i), "Water");
     await user.click(screen.getByRole("button", { name: /create challenge/i }));
@@ -3786,6 +3801,7 @@ describe("VWiki Race app", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
 
     await user.click(await screen.findByRole("button", { name: /^challenges$/i }));
+    await user.click(screen.getByRole("button", { name: "Create a challenge" }));
     await user.type(screen.getByLabelText(/start article/i), "Mars");
     await user.type(screen.getByLabelText(/target article/i), "Water");
     await user.click(screen.getByRole("button", { name: /create challenge/i }));
@@ -3810,6 +3826,7 @@ describe("VWiki Race app", () => {
     );
 
     await userEvent.setup().click(await screen.findByRole("button", { name: /^challenges$/i }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Create a challenge" }));
     expect(screen.getByRole("checkbox", { name: /nominate for a future daily/i })).toBeVisible();
     claimedView.unmount();
 
@@ -3821,6 +3838,7 @@ describe("VWiki Race app", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={ghostStorage} />);
 
     await userEvent.setup().click(await screen.findByRole("button", { name: /^challenges$/i }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Create a challenge" }));
     expect(screen.queryByRole("checkbox", { name: /nominate for a future daily/i })).toBeNull();
   });
 
@@ -3835,6 +3853,7 @@ describe("VWiki Race app", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={ghostStorage} />);
 
     await user.click(await screen.findByRole("button", { name: /^challenges$/i }));
+    await user.click(screen.getByRole("button", { name: "Create a challenge" }));
     await user.type(screen.getByLabelText(/start article/i), "Mars");
     await user.type(screen.getByLabelText(/target article/i), "Water");
     await user.click(screen.getByRole("button", { name: /create challenge/i }));
@@ -3866,6 +3885,7 @@ describe("VWiki Race app", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: /^challenges$/i }));
+    await user.click(screen.getByRole("button", { name: "Create a challenge" }));
     await user.click(await screen.findByRole("checkbox", { name: /nominate for a future daily/i }));
     view.rerender(
       <App apiOrigin={apiOrigin} fetchImpl={fetchImpl} identityRepository={ghostRepository} />,
@@ -3873,6 +3893,7 @@ describe("VWiki Race app", () => {
     await waitFor(() => {
       expect(screen.queryByRole("checkbox", { name: /nominate for a future daily/i })).toBeNull();
     });
+    await user.click(screen.getByRole("button", { name: "Create a challenge" }));
     await user.type(screen.getByLabelText(/start article/i), "Mars");
     await user.type(screen.getByLabelText(/target article/i), "Water");
     await user.click(screen.getByRole("button", { name: /create challenge/i }));
@@ -3920,6 +3941,7 @@ describe("VWiki Race app", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
     await user.click(await screen.findByRole("button", { name: /^challenges$/i }));
+    await user.click(screen.getByRole("button", { name: "Create a challenge" }));
     await user.type(screen.getByLabelText(/start article/i), "Mars");
     await user.type(screen.getByLabelText(/target article/i), "Water");
     if (nomination !== "not_requested") {
@@ -3977,6 +3999,7 @@ describe("VWiki Race app", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: /^challenges$/i }));
+    await user.click(screen.getByRole("button", { name: "Create a challenge" }));
     await user.type(screen.getByLabelText(/start article/i), "Mars");
     await user.type(screen.getByLabelText(/target article/i), "Water");
     await user.click(screen.getByRole("checkbox", { name: /nominate for a future daily/i }));
@@ -4022,6 +4045,7 @@ describe("VWiki Race app", () => {
 
     await waitFor(() => expect(leaderboardCalls(fetchImpl, existingChallenge.id)).toBe(1));
     await user.click(await screen.findByRole("button", { name: /^challenges$/i }));
+    await user.click(screen.getByRole("button", { name: "Create a challenge" }));
     await user.type(screen.getByLabelText(/start article/i), "Mars");
     await user.type(screen.getByLabelText(/target article/i), "Water");
     await user.click(screen.getByRole("checkbox", { name: /nominate for a future daily/i }));
@@ -4076,6 +4100,7 @@ describe("VWiki Race app", () => {
 
     await waitFor(() => expect(leaderboardReads).toBe(1));
     await user.click(screen.getByRole("button", { name: /^challenges$/i }));
+    await user.click(screen.getByRole("button", { name: "Create a challenge" }));
     await user.type(screen.getByLabelText(/start article/i), "Mars");
     await user.type(screen.getByLabelText(/target article/i), "Water");
     await user.click(screen.getByRole("checkbox", { name: /nominate for a future daily/i }));
@@ -8408,6 +8433,7 @@ describe("Increment 5: Play-another suggestion + create-random (Browse full card
 
     const nav = await screen.findByRole("navigation", { name: /vwiki race views/i });
     await user.click(within(nav).getByRole("button", { name: "Challenges" }));
+    await user.click(screen.getByRole("button", { name: "Create a challenge" }));
     await user.click(await screen.findByRole("button", { name: /create a random new one/i }));
 
     const identityDialog = await screen.findByRole("dialog", { name: /save your stats/i });

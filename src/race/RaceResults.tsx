@@ -27,6 +27,7 @@ import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 import type { VGamesIdentityStatus } from "../services/vgamesIdentity";
 import { WikipediaArticlePanel } from "./RaceMode";
 import { ShareResultButton } from "./shared";
+import "./RaceResults.continuity.css";
 
 function emptyBoard(challengeId: string): ChallengeBoardResponse {
   return { challengeId, placements: [], dnfs: [] };
@@ -339,6 +340,14 @@ export default function RaceResults({
           </p>
         ) : null}
 
+        {outcome.runId && identityStatus ? (
+          <p className="result-persistence" role="status">
+            {isGuest
+              ? "Result saved to this guest profile on this device."
+              : "Result saved to your VGames account."}
+          </p>
+        ) : null}
+
         {/* PKG-05 (council 2026-07-19): Share and (for a still-unclaimed
             guest) the claim nudge move directly under the header - un-gated
             from `status === "completed"` so a DNF is no longer a dead end
@@ -353,13 +362,17 @@ export default function RaceResults({
             onClaimIdentity={onClaimIdentity}
           />
         ) : null}
-        <ShareResultButton
-          challenge={challenge}
-          clicks={justFinishedRow.clickCount}
-          elapsedMs={justFinishedRow.elapsedMs}
-          rank={justFinishedRow.rank}
-          status={justFinishedRow.status}
-        />
+        <section aria-label="Challenge a friend" className="result-share-invitation">
+          <h3>Challenge a friend</h3>
+          <p>Share your result and the challenge link.</p>
+          <ShareResultButton
+            challenge={challenge}
+            clicks={justFinishedRow.clickCount}
+            elapsedMs={justFinishedRow.elapsedMs}
+            rank={justFinishedRow.rank}
+            status={justFinishedRow.status}
+          />
+        </section>
 
         {/* Hierarchy (PKG-05): the clock-commit action gets the same coral
             `.start-race-button` class PreRacePreview's "Start race" uses -
@@ -416,6 +429,7 @@ export default function RaceResults({
         <BoardSnippet
           title={isDailyToday ? "Today's board" : "Leaderboard"}
           rows={boardSnippetRowsForResult(board, identityAccountId, boardLoaded ? justFinishedRow : null)}
+          unlocked={outcome.status === "completed" || peeked}
         >
           {/* GR-1 ("View graph"): a completed outcome always qualifies for
               disclosure (the run that just landed here IS the viewer's own
@@ -560,9 +574,9 @@ function ClaimCta({
   onClaimIdentity: (mode: "create" | "login") => void;
 }) {
   return (
-    <section aria-label="Keep your spot" className="claim-cta">
-      <h3>Keep your spot</h3>
-      <p>You&apos;re on the board as {displayName}. Claim it so it stays yours.</p>
+    <section aria-label="Keep your name and stats — keep your spot" className="claim-cta">
+      <h3>Keep your name and stats</h3>
+      <p>Create a VGames account to keep {displayName} and this result with you.</p>
       <div className="claim-cta-actions">
         {/* PKG-11 (council 2026-07-19): "Make a name" was flagged in the
             design spec's own council notes as "a pun that may not parse for
@@ -572,6 +586,9 @@ function ClaimCta({
         <button type="button" onClick={() => onClaimIdentity("create")}>
           Create account
         </button>
+        <span className="claim-cta-existing">
+          Already have a VGames account? Log in to return to its saved history.
+        </span>
         <button className="link-button" type="button" onClick={() => onClaimIdentity("login")}>
           Log in
         </button>
@@ -579,4 +596,3 @@ function ClaimCta({
     </section>
   );
 }
-

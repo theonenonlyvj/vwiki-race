@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import StagedLoadingNotice from "./StagedLoadingNotice";
 import { NO_ATTEMPTS_LABEL, windowBoardRows, type BoardSnippetRow } from "../domain/boardSnippet";
 import { formatTimeAndClicks } from "../domain/formatting";
+import "./BoardSnippet.clarity.css";
 
 // BD-1 ("windowed board snippet: top 2 + your neighborhood + inline
 // expanders"): the fixed windowing shape shared by every compact snippet
@@ -36,27 +37,30 @@ function BoardSnippetRowItem({
   // construction - see BoardSnippet's own doc comment) stay unaffected.
   unlocked: boolean;
 }) {
+  const isDnf = row.rankLabel === "DNF";
   return (
     <li
-      className={[row.isYou ? "is-you" : null, revealed ? "surface-entrance" : null]
+      className={[row.isYou ? "is-you" : null, isDnf ? "is-dnf" : null, revealed ? "surface-entrance" : null]
         .filter(Boolean)
         .join(" ") || undefined}
     >
       {/* QF-04: DNF salmon, never CTA teal - `rankLabel` (not the
           nullable `rank`) is the correct DNF proxy, since a
-          completed-but-unranked run also carries `rank: null` but
-          reads "—", never "DNF" (invariant: a completion is never
-          demoted to DNF display). */}
-      <span className={row.rankLabel === "DNF" ? "rank rank-dnf" : "rank"}>
-        {row.rankLabel}
+          completed-but-unranked run also carries `rank: null` but is
+          still a completion. The user-facing label spells out the status
+          so it cannot be confused with a merely hidden metric. */}
+      <span className={isDnf ? "rank rank-dnf" : "rank"}>
+        {isDnf ? "Did not finish" : row.rankLabel}
       </span>
-      <span>
+      <span className="board-snippet-player">
         {row.displayName}
         {row.isYou ? <span className="muted"> (you)</span> : null}
       </span>
-      <span>
-        {unlocked ? formatTimeAndClicks(row.elapsedMs, row.clickCount) : <span className="muted">—</span>}
-      </span>
+      {unlocked ? (
+        <span className="board-snippet-metric">
+          {formatTimeAndClicks(row.elapsedMs, row.clickCount)}
+        </span>
+      ) : null}
     </li>
   );
 }
@@ -219,6 +223,11 @@ export default function BoardSnippet({
   return (
     <section aria-label={title} className="board-snippet">
       <h3>{title}</h3>
+      {!unlocked ? (
+        <p className="board-snippet-lock-note muted">
+          Times and clicks unlock after you finish or give up.
+        </p>
+      ) : null}
       <ol>
         {segments.map((segment, segmentIndex) => {
           if (segment.type === "rows") {

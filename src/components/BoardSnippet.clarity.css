@@ -1,0 +1,34 @@
+.board-snippet-lock-note {
+  margin: 2px 0 10px;
+  font-size: 0.82rem;
+}
+
+/* A DNF is a status, not a low rank. Giving its full phrase a short first
+   line keeps it distinct from a completed row whose metrics are merely
+   hidden, while the unchanged elapsed/click source remains on the right
+   whenever the caller's existing spoiler gate is open. */
+.board-snippet li.is-dnf {
+  row-gap: 2px;
+}
+
+.board-snippet li.is-dnf > .rank-dnf,
+.board-snippet li.is-dnf > .board-snippet-player {
+  grid-column: 1 / 3;
+}
+
+.board-snippet li.is-dnf > .board-snippet-player {
+  grid-row: 2;
+  padding-left: 2.4em;
+}
+
+.board-snippet li.is-dnf > .board-snippet-metric {
+  grid-column: 3 / 5;
+  grid-row: 1 / 3;
+  align-self: center;
+}
+
+@media (max-width: 420px) {
+  .board-snippet li.is-dnf > .board-snippet-player {
+    padding-left: 0;
+  }
+}

@@ -43,7 +43,7 @@ describe("BoardSnippet: DNF rank color (QF-04)", () => {
     expect(within(placementRow).getByText("#1")).not.toHaveClass("rank-dnf");
 
     const dnfRow = screen.getByText("Loser").closest("li")!;
-    expect(within(dnfRow).getByText("DNF")).toHaveClass("rank", "rank-dnf");
+    expect(within(dnfRow).getByText("Did not finish")).toHaveClass("rank", "rank-dnf");
   });
 
   it("never demotes a completed-but-unranked '—' row to DNF-red - rank: null alone is not DNF", () => {
@@ -301,14 +301,9 @@ describe("BoardSnippet: pre-finish spoiler mask (unlocked)", () => {
     expect(screen.getByText("FranTheGreat")).toBeVisible();
     expect(screen.getByText("Loser")).toBeVisible();
     expect(screen.queryByText("0:42 · 6 clk")).toBeNull();
-
-    const placementRow = screen.getByText("FranTheGreat").closest("li")!;
-    expect(within(placementRow).getByText("—")).toHaveClass("muted");
-    // The DNF row's own rank glyph reads "DNF" (a literal word, not a
-    // dash - see `BoardSnippetRowItem`), so its masked time column is the
-    // row's only em dash.
-    const dnfRow = screen.getByText("Loser").closest("li")!;
-    expect(within(dnfRow).getByText("—")).toHaveClass("muted");
+    expect(screen.queryByText("—")).toBeNull();
+    expect(screen.getAllByText("Times and clicks unlock after you finish or give up.")).toHaveLength(1);
+    expect(screen.getByText("Did not finish")).toBeVisible();
   });
 
   it("unlocked=true (explicit): shows time/clicks normally", () => {

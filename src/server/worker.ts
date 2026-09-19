@@ -21,6 +21,7 @@ import { createWorkerWikipediaGateway } from "./workerWikipediaGateway";
 import type { RunProtocolRepository } from "./trackingRepository";
 import { legacyCreateOperationKey } from "./runProtocol";
 import { CLASSIFIER_VERSION } from "./dailyCandidateScoring";
+import { consumePasswordReset, issuePasswordReset } from "./passwordRecovery";
 
 interface RateLimiter {
   limit(options: { key: string }): Promise<{ success: boolean }>;
@@ -40,6 +41,7 @@ export interface Env {
   DAILY_ADMIN_ACCOUNT_IDS?: string;
   DAILY_ADMIN_RATE_LIMITER?: RateLimiter;
   IDENTITY_RATE_LIMITER?: RateLimiter;
+  PASSWORD_RESET_RATE_LIMITER?: RateLimiter;
   RUN_START_RATE_LIMITER?: RateLimiter;
   /**
    * Increment 5 burst guard for `POST /api/v2/challenges/random` (spec:
@@ -370,6 +372,13 @@ async function dispatchV2(
     return handleRememberedSession(request, env);
   }
 
+  if (request.method === "POST" && url.pathname === "/api/v2/identity/password-reset") {
+    requireTrustedPasswordResetOrigin(request, url, env);
+    await enforcePasswordResetRateLimit(env, request);
+    const input = passwordResetConsumeInput(await readJson(request));
+    return json(await consumePasswordReset(env.VGAMES_SESSIONS, input), undefined, corsHeaders);
+  }
+
   if (request.method === "GET" && url.pathname === "/api/v2/challenges") {
     return json(await tracking.handlers.listChallenges(), { headers: publicCacheHeaders() }, corsHeaders);
   }
@@ -454,6 +463,14 @@ async function dispatchV2(
   if (request.method === "GET" && url.pathname === "/api/v2/admin/dailies") {
     await authorizeDailyAdministrator(request, tracking, env, "list");
     return json(await tracking.handlers.listDailyAdminState(), undefined, corsHeaders);
+  }
+  if (request.method === "POST" && url.pathname === "/api/v2/admin/password-resets") {
+    const owner = await authorizeDailyAdministrator(request, tracking, env, "password-reset");
+    const input = passwordResetIssueInput(await readJson(request));
+    return json(await issuePasswordReset(env.VGAMES_SESSIONS, {
+      username: input.username,
+      actorAccountId: owner.accountId,
+    }), undefined, corsHeaders);
   }
 
   const nominationMatch = url.pathname.match(
@@ -1099,6 +1116,31 @@ function queueDailyChallengeInput(value: unknown): {
   };
 }
 
+function passwordResetIssueInput(value: unknown): { username: string } {
+  const body = requireObject(value);
+  requireOnlyFields(body, ["username"]);
+  if (typeof body.username !== "string") {
+    throw new ApiError("invalid_username", "Enter a valid VGames username.", 400);
+  }
+  const username = body.username.trim().toLowerCase();
+  if (!/^[a-z0-9_]{3,20}$/.test(username)) {
+    throw new ApiError("invalid_username", "Enter a valid VGames username.", 400);
+  }
+  return { username };
+}
+
+function passwordResetConsumeInput(value: unknown): { token: string; password: string } {
+  const body = requireObject(value);
+  requireOnlyFields(body, ["token", "password"]);
+  if (typeof body.token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(body.token)) {
+    throw new ApiError("invalid_or_expired_reset", "That reset link is invalid or has expired.", 400);
+  }
+  if (typeof body.password !== "string" || body.password.length < 6 || body.password.length > 128) {
+    throw new ApiError("invalid_password", "Use a password between 6 and 128 characters.", 400);
+  }
+  return { token: body.token, password: body.password };
+}
+
 function requireEmptyObject(value: unknown): void {
   const body = requireObject(value);
   requireOnlyFields(body, []);
@@ -1284,6 +1326,33 @@ async function enforceIdentityRateLimit(env: Env, request: Request): Promise<voi
     throw new ApiError(
       "identity_rate_limited",
       "Too many identity requests. Try again shortly.",
+      429,
+      60,
+    );
+  }
+}
+
+function requireTrustedPasswordResetOrigin(request: Request, url: URL, env: Env): void {
+  const origin = request.headers.get("Origin");
+  if (!origin || (origin !== url.origin && !allowedOrigins(env).has(origin))) {
+    throw new ApiError("forbidden", "Forbidden.", 403);
+  }
+}
+
+async function enforcePasswordResetRateLimit(env: Env, request: Request): Promise<void> {
+  if (!env.PASSWORD_RESET_RATE_LIMITER) {
+    throw new ApiError(
+      "rate_limiter_unavailable",
+      "Password recovery is temporarily unavailable.",
+      503,
+    );
+  }
+  const key = request.headers.get("CF-Connecting-IP") ?? "unknown-client";
+  const result = await env.PASSWORD_RESET_RATE_LIMITER.limit({ key });
+  if (!result.success) {
+    throw new ApiError(
+      "password_reset_rate_limited",
+      "Too many password reset attempts. Try again shortly.",
       429,
       60,
     );

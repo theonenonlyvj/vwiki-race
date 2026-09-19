@@ -1,17 +1,63 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import StateChip from "../../components/StateChip";
 import { formatChallengeCardMeta } from "../../domain/challengeCard";
-import { dailyBadgeLabel, type HomeHeroSelection } from "../../domain/challengeSelection";
+import {
+  dailyBadgeLabel,
+  dailyDateForChallenge,
+  type HomeHeroSelection,
+} from "../../domain/challengeSelection";
 import { filterChallengesByQuery, resolveChallengeIdFromSearchInput } from "../../domain/challengeSearch";
 import { dailyFlavorBadgeText } from "../../domain/dailyEditorial";
+import { formatTimeAndClicks } from "../../domain/formatting";
 import { RANDOM_CHALLENGE_LOADING_COPY } from "../../domain/playAnother";
 import type { Challenge, ChallengeOutcomeEntry, ChallengeSummaryEntry } from "../../domain/types";
 import type { VWikiRaceApiClient } from "../../services/vwikiRaceApiClient";
+import "./Browse.css";
 
 export interface CreateChallengeInput {
   startTitle: string;
   targetTitle: string;
   nominateForDaily: boolean;
+}
+
+type BrowseView = "all" | "past-dailies";
+
+type OutcomesLoadState =
+  | { token: string; status: "loading" }
+  | { entries: Map<string, ChallengeOutcomeEntry>; token: string; status: "ready" }
+  | { token: string; status: "unavailable" };
+
+function formatArchiveDate(date: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+    year: "numeric",
+  }).format(new Date(`${date}T00:00:00Z`));
+}
+
+function summaryVisibleToViewer(
+  summary: ChallengeSummaryEntry | undefined,
+  outcome: ChallengeOutcomeEntry | undefined,
+): ChallengeSummaryEntry | undefined {
+  if (!summary || outcome?.outcome === "completed" || outcome?.peeked) return summary;
+  return { ...summary, best: null };
+}
+
+function ArchiveState({ outcome }: { outcome: ChallengeOutcomeEntry | undefined }) {
+  if (outcome?.outcome === "completed") {
+    return (
+      <span className="browse-archive-state browse-archive-state-completed">
+        {outcome.best
+          ? `Completed · ${formatTimeAndClicks(outcome.best.elapsedMs, outcome.best.clickCount)}`
+          : "Completed"}
+      </span>
+    );
+  }
+  if (outcome?.outcome === "dnf") {
+    return <span className="browse-archive-state">Unfinished</span>;
+  }
+  return <span className="browse-archive-state">Not played</span>;
 }
 
 /**
@@ -83,6 +129,9 @@ export default function ChallengeBrowser({
   const [targetTitle, setTargetTitle] = useState("");
   const [nominateForDaily, setNominateForDaily] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [createPanelOpen, setCreatePanelOpen] = useState(false);
+  const [browseView, setBrowseView] = useState<BrowseView>("all");
+  const [pastDailyDate, setPastDailyDate] = useState("all");
   // QF-07: `isCreating` alone (an async state setter) has a real window
   // before re-render where a second tap/Enter fires a second create
   // request - same synchronous-ref guard App.tsx's `login`/
@@ -120,47 +169,44 @@ export default function ChallengeBrowser({
     };
   }, [apiClient]);
 
-  // `null` covers both "anonymous" (no fetch attempted - identityToken is
-  // null) and "still loading" for a real session; both render no chip at all
-  // rather than a premature/possibly-wrong "NEW". Only a resolved Map for an
-  // actual session lets individual cards fall back to the default "NEW".
-  const [outcomesByChallengeId, setOutcomesByChallengeId] = useState<
-    Map<string, ChallengeOutcomeEntry> | null
-  >(null);
+  // The token travels with its outcome state. On an account switch React
+  // renders with the new prop before this effect resets/fetches; without the
+  // token key that render can expose the previous account's chip and unlock
+  // aggregate best metrics. A matching `ready` state is the only state that
+  // may render account outcomes. Loading, anonymous, and unavailable states
+  // all keep chips and gated metrics hidden.
+  const [outcomesLoad, setOutcomesLoad] = useState<OutcomesLoadState | null>(null);
   useEffect(() => {
     let cancelled = false;
     if (!identityToken) {
-      setOutcomesByChallengeId(null);
+      setOutcomesLoad(null);
       return;
     }
-    setOutcomesByChallengeId(null);
+    const token = identityToken;
+    setOutcomesLoad({ status: "loading", token });
     void apiClient.getAccountChallengeOutcomes(identityToken)
       .then((entries) => {
         if (cancelled) return;
-        setOutcomesByChallengeId(new Map(entries.map((entry) => [entry.challengeId, entry])));
+        setOutcomesLoad({
+          entries: new Map(entries.map((entry) => [entry.challengeId, entry])),
+          status: "ready",
+          token,
+        });
       })
       .catch(() => {
-        // Degrade to "NEW" everywhere rather than crashing Browse over a
-        // failed chip fetch - an empty (not null) map so `hasSession` below
-        // still renders chips, just all-default ones.
-        if (!cancelled) setOutcomesByChallengeId(new Map());
+        if (!cancelled) setOutcomesLoad({ status: "unavailable", token });
       });
     return () => {
       cancelled = true;
     };
   }, [apiClient, identityToken]);
 
-  // FB-9 root-cause fix: this used to be `identityToken !== null` alone -
-  // true the instant a session exists, well before `outcomesByChallengeId`
-  // (below) has actually resolved. `StateChip` then rendered immediately
-  // with `outcome={undefined}` (the map is still `null` while loading), and
-  // `deriveChallengeStateChip(undefined)` returns "NEW" - so a signed-in
-  // visitor saw every card flash "NEW" first, including ones they'd already
-  // completed, contradicting this file's own doc comment on
-  // `outcomesByChallengeId` ("both render no chip at all rather than a
-  // premature/possibly-wrong 'NEW'"). Requiring the map to have actually
-  // resolved closes that gap: no chip at all until the real outcome is in.
-  const hasSession = identityToken !== null && outcomesByChallengeId !== null;
+  const currentOutcomes = outcomesLoad?.token === identityToken ? outcomesLoad : null;
+  const outcomesByChallengeId = currentOutcomes?.status === "ready"
+    ? currentOutcomes.entries
+    : null;
+  const hasSession = outcomesByChallengeId !== null;
+  const historyUnavailable = currentOutcomes?.status === "unavailable";
   // PKG-01: the pin only shows for a real daily (today's or yesterday's,
   // still-playable) - the "default" kind means no daily exists anywhere in
   // the catalog, and pinning its arbitrary fallback challenge would repeat
@@ -170,15 +216,38 @@ export default function ChallengeBrowser({
   const pinnedDaily = heroSelection && heroSelection.kind !== "default"
     ? heroSelection.challenge
     : null;
+  const pastDailies = useMemo(
+    () => challenges
+      .filter((challenge) => {
+        const dailyDate = dailyDateForChallenge(challenge);
+        return Boolean(dailyDate && dailyDate < todayCentral);
+      })
+      .sort((left, right) => {
+        const dateOrder = (dailyDateForChallenge(right) ?? "").localeCompare(
+          dailyDateForChallenge(left) ?? "",
+        );
+        return dateOrder || left.id.localeCompare(right.id);
+      }),
+    [challenges, todayCentral],
+  );
+  const pastDailyDates = useMemo(
+    () => [...new Set(pastDailies.map((challenge) => dailyDateForChallenge(challenge) as string))],
+    [pastDailies],
+  );
   // QF-03: exclude the pinned daily from the catalog below it - it's
   // already pinned as standing chrome above, so leaving it in
   // `visibleChallenges` too duplicated it onto the screen twice.
   const visibleChallenges = useMemo(
-    () =>
-      filterChallengesByQuery(challenges, searchQuery).filter(
+    () => {
+      const candidates = browseView === "past-dailies"
+        ? pastDailies.filter((challenge) =>
+            pastDailyDate === "all" || dailyDateForChallenge(challenge) === pastDailyDate)
+        : challenges;
+      return filterChallengesByQuery(candidates, searchQuery).filter(
         (challenge) => challenge.id !== pinnedDaily?.id,
-      ),
-    [challenges, searchQuery, pinnedDaily],
+      );
+    },
+    [browseView, challenges, pastDailies, pastDailyDate, searchQuery, pinnedDaily],
   );
 
   function handleSearchChange(value: string) {
@@ -215,7 +284,99 @@ export default function ChallengeBrowser({
 
   return (
     <section className="challenge-browser">
-      <h2>Challenges</h2>
+      <header className="browse-toolbar">
+        <h2>Challenges</h2>
+        <button
+          aria-controls="browse-create-panel"
+          aria-expanded={createPanelOpen}
+          className="browse-secondary-action"
+          disabled={selectionLocked}
+          onClick={() => setCreatePanelOpen((open) => !open)}
+          type="button"
+        >
+          {createPanelOpen ? "Close creator" : "Create a challenge"}
+        </button>
+      </header>
+
+      {createPanelOpen ? (
+        <div className="browse-create-panel" id="browse-create-panel">
+          <form className="create-challenge-form" onSubmit={submitChallenge}>
+            <label className="name-control">
+              <span>Start article</span>
+              <input
+                aria-label="Start article"
+                disabled={selectionLocked}
+                maxLength={512}
+                onChange={(event) => setStartTitle(event.target.value)}
+                placeholder="Wikipedia title or URL"
+                value={startTitle}
+              />
+            </label>
+            <label className="name-control">
+              <span>Target article</span>
+              <input
+                aria-label="Target article"
+                disabled={selectionLocked}
+                maxLength={512}
+                onChange={(event) => setTargetTitle(event.target.value)}
+                placeholder="Wikipedia title or URL"
+                value={targetTitle}
+              />
+            </label>
+            {canNominateForDaily ? (
+              <label className="daily-nomination-control">
+                <input
+                  checked={nominateForDaily}
+                  disabled={selectionLocked}
+                  onChange={(event) => setNominateForDaily(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Nominate for a future Daily</span>
+              </label>
+            ) : null}
+            <button type="submit" disabled={selectionLocked || !canCreate || isCreating}>
+              Create challenge
+            </button>
+          </form>
+
+          <div className="browse-random-challenge">
+            <span className="muted">Or let Wikipedia choose both articles.</span>
+            <button
+              disabled={selectionLocked || randomChallengeBusy}
+              type="button"
+              onClick={onCreateRandomChallenge}
+            >
+              {randomChallengeBusy ? RANDOM_CHALLENGE_LOADING_COPY : "Create a random new one"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {randomChallengeError ? (
+        <p className="error-banner" role="alert">{randomChallengeError}</p>
+      ) : null}
+
+      <nav className="browse-filter-control" aria-label="Challenge filters">
+        <button
+          aria-pressed={browseView === "all"}
+          onClick={() => setBrowseView("all")}
+          type="button"
+        >
+          All challenges
+        </button>
+        <button
+          aria-pressed={browseView === "past-dailies"}
+          onClick={() => setBrowseView("past-dailies")}
+          type="button"
+        >
+          Past dailies
+        </button>
+      </nav>
+
+      {historyUnavailable ? (
+        <p className="browse-history-status muted" role="status">
+          Your challenge history is unavailable right now. Challenge details are still available.
+        </p>
+      ) : null}
 
       {/*
        * dvh/svh input rule (Increment 5, council amendment): this container
@@ -282,12 +443,75 @@ export default function ChallengeBrowser({
         </ol>
       ) : null}
 
-      {visibleChallenges.length ? (
+      {browseView === "past-dailies" ? (
+        <section className="browse-archive" aria-label="Past daily archive">
+          <div className="browse-archive-controls">
+            <div>
+              <h3>Past dailies</h3>
+              <p className="muted">Pick a date, then open the ordinary challenge page to race or revisit it.</p>
+            </div>
+            <label className="name-control browse-date-control">
+              <span>Past daily date</span>
+              <select
+                aria-label="Past daily date"
+                onChange={(event) => setPastDailyDate(event.target.value)}
+                value={pastDailyDate}
+              >
+                <option value="all">All dates</option>
+                {pastDailyDates.map((date) => (
+                  <option key={date} value={date}>{formatArchiveDate(date)}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {visibleChallenges.length ? (
+            <ol className="challenge-list browse-archive-list">
+              {visibleChallenges.map((challenge) => {
+                const outcome = outcomesByChallengeId?.get(challenge.id);
+                const summary = summaryVisibleToViewer(
+                  summaryByChallengeId?.get(challenge.id),
+                  outcome,
+                );
+                const meta = formatChallengeCardMeta(summary);
+                const dailyDate = dailyDateForChallenge(challenge) as string;
+                return (
+                  <li key={challenge.id}>
+                    <button
+                      aria-pressed={selectedChallengeId === challenge.id}
+                      className="browse-card"
+                      disabled={selectionLocked}
+                      onClick={() => onOpenChallenge(challenge.id)}
+                      type="button"
+                    >
+                      <span className="challenge-meta">
+                        <time dateTime={dailyDate}>{formatArchiveDate(dailyDate)}</time>
+                      </span>
+                      <span className="browse-card-title-row">
+                        <strong>{challenge.start.title} {"→"} {challenge.target.title}</strong>
+                        {hasSession ? <ArchiveState outcome={outcome} /> : null}
+                      </span>
+                      {meta ? <span className="browse-card-meta muted">{meta}</span> : null}
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : (
+            <p className="muted">
+              {pastDailies.length ? "No past dailies match your search." : "No past dailies available yet."}
+            </p>
+          )}
+        </section>
+      ) : visibleChallenges.length ? (
         <>
           <p className="browse-catalog-heading muted">All challenges</p>
           <ol className="challenge-list">
             {visibleChallenges.map((challenge) => {
-              const meta = formatChallengeCardMeta(summaryByChallengeId?.get(challenge.id));
+              const outcome = outcomesByChallengeId?.get(challenge.id);
+              const meta = formatChallengeCardMeta(summaryVisibleToViewer(
+                summaryByChallengeId?.get(challenge.id),
+                outcome,
+              ));
               return (
                 <li key={challenge.id}>
                   <button
@@ -310,7 +534,7 @@ export default function ChallengeBrowser({
                         {challenge.start.title} {"→"} {challenge.target.title}
                       </strong>
                       {hasSession ? (
-                        <StateChip outcome={outcomesByChallengeId?.get(challenge.id)} />
+                        <StateChip outcome={outcome} />
                       ) : null}
                     </span>
                     {meta ? <span className="browse-card-meta muted">{meta}</span> : null}
@@ -329,57 +553,6 @@ export default function ChallengeBrowser({
         </p>
       )}
 
-      <form className="create-challenge-form" onSubmit={submitChallenge}>
-        <label className="name-control">
-          <span>Start article</span>
-          <input
-            aria-label="Start article"
-            disabled={selectionLocked}
-            maxLength={512}
-            onChange={(event) => setStartTitle(event.target.value)}
-            placeholder="Wikipedia title or URL"
-            value={startTitle}
-          />
-        </label>
-        <label className="name-control">
-          <span>Target article</span>
-          <input
-            aria-label="Target article"
-            disabled={selectionLocked}
-            maxLength={512}
-            onChange={(event) => setTargetTitle(event.target.value)}
-            placeholder="Wikipedia title or URL"
-            value={targetTitle}
-          />
-        </label>
-        {canNominateForDaily ? (
-          <label className="daily-nomination-control">
-            <input
-              checked={nominateForDaily}
-              disabled={selectionLocked}
-              onChange={(event) => setNominateForDaily(event.target.checked)}
-              type="checkbox"
-            />
-            <span>Nominate for a future Daily</span>
-          </label>
-        ) : null}
-        <button type="submit" disabled={selectionLocked || !canCreate || isCreating}>
-          Create challenge
-        </button>
-      </form>
-
-      <div className="browse-random-challenge">
-        <button
-          disabled={selectionLocked || randomChallengeBusy}
-          type="button"
-          onClick={onCreateRandomChallenge}
-        >
-          {randomChallengeBusy ? RANDOM_CHALLENGE_LOADING_COPY : "Create a random new one"}
-        </button>
-        {randomChallengeError ? (
-          <p className="error-banner" role="alert">{randomChallengeError}</p>
-        ) : null}
-      </div>
     </section>
   );
 }

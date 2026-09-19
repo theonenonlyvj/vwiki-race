@@ -24,6 +24,7 @@ export type ChallengesView = "browse" | "detail";
 // is dead weight in the bundle for every non-admin visit (the ~5 real
 // players), never on the hot path for anyone else.
 const AdminDailies = lazy(() => import("../components/AdminDailies"));
+const AdminPasswordReset = lazy(() => import("../components/AdminPasswordReset"));
 
 // PKG-14 (direct owner feedback, 2026-07-19: "Boards - rename to stats"):
 // user-visible label only - the mode key stays "boards" (internal
@@ -247,6 +248,7 @@ export default function AppShell({
           ← Back to VWiki Race
         </button>
         <Suspense fallback={null}>
+          <AdminPasswordReset token={identitySession.token} apiOrigin={window.location.origin} />
           <AdminDailies
             apiClient={apiClient}
             challenges={challenges}

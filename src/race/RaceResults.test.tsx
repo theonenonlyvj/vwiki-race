@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import RaceResults, { type RaceResultOutcome } from "./RaceResults";
@@ -22,6 +22,28 @@ function dnfOutcome(overrides: Partial<Extract<RaceResultOutcome, { status: "dnf
     challenge,
     clicks: 12,
     elapsedMs: 30_000,
+    runId: "run-1",
+    ...overrides,
+  };
+}
+
+function completedOutcome(
+  overrides: Partial<Extract<RaceResultOutcome, { status: "completed" }>> = {},
+): RaceResultOutcome {
+  const session: GameSession = {
+    challenge,
+    status: "completed",
+    startedAt: 0,
+    completedAt: 4_000,
+    clicks: 3,
+    currentPage: { pageId: 38579, canonicalTitle: "Gravity" },
+    path: [],
+  };
+  return {
+    status: "completed",
+    session,
+    elapsedMs: 4_000,
+    leaderboardContext: null,
     runId: "run-1",
     ...overrides,
   };
@@ -67,6 +89,99 @@ function renderResults(overrides: Partial<Parameters<typeof RaceResults>[0]> = {
   render(<RaceResults {...props} />);
   return { onOpenChallenge };
 }
+
+describe("RaceResults: saved result, guest continuity, and sharing hierarchy", () => {
+  it("shows a persisted-account receipt and makes the existing result share the friend challenge action", () => {
+    renderResults({ outcome: completedOutcome() });
+
+    expect(screen.getByText("Result saved to your VGames account.")).toBeVisible();
+    const invitation = screen.getByRole("region", { name: "Challenge a friend" });
+    expect(within(invitation).getByText(/share your result and the challenge link/i)).toBeVisible();
+    expect(within(invitation).getByRole("button", { name: "Share result" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: /keep your name and stats/i })).toBeNull();
+  });
+
+  it("does not claim persistence when the result has no persisted run id", () => {
+    renderResults({ outcome: completedOutcome({ runId: null }) });
+
+    expect(screen.queryByText(/result saved/i)).toBeNull();
+  });
+
+  it("offers one guest continuity nudge with account creation and existing-account login kept distinct", async () => {
+    const onClaimIdentity = vi.fn();
+    const user = userEvent.setup();
+    renderResults({
+      outcome: completedOutcome(),
+      identityStatus: "ghost",
+      identityDisplayName: "Guest-42",
+      onClaimIdentity,
+    });
+
+    expect(screen.getByText("Result saved to this guest profile on this device.")).toBeVisible();
+    const claimCta = screen.getByRole("region", { name: /keep your name and stats/i });
+    expect(within(claimCta).getByRole("heading", { name: "Keep your name and stats" })).toBeVisible();
+    expect(within(claimCta).getByText(/create a VGames account to keep Guest-42 and this result/i)).toBeVisible();
+    expect(within(claimCta).getByText(/already have a VGames account/i)).toBeVisible();
+    expect(screen.getAllByRole("region", { name: /keep your name and stats/i })).toHaveLength(1);
+
+    await user.click(within(claimCta).getByRole("button", { name: "Create account" }));
+    await user.click(within(claimCta).getByRole("button", { name: "Log in" }));
+    expect(onClaimIdentity.mock.calls).toEqual([["create"], ["login"]]);
+  });
+
+  it("keeps board metrics behind the existing finish-or-give-up gate on a DNF result", async () => {
+    renderResults({
+      outcome: dnfOutcome(),
+      apiClient: mockApiClient({
+        getChallengeBoard: vi.fn(async () => ({
+          challengeId: challenge.id,
+          placements: [{
+            accountId: "acc-rival",
+            displayName: "Rival",
+            placement: 1,
+            elapsedMs: 18_000,
+            clickCount: 4,
+          }],
+          dnfs: [],
+        })),
+      }),
+    });
+
+    const board = await screen.findByRole("region", { name: "Leaderboard" });
+    expect(within(board).getByText("Times and clicks unlock after you finish or give up.")).toBeVisible();
+    expect(within(board).queryByText("0:18 · 4 clk")).toBeNull();
+  });
+
+  it("shows board metrics when the existing outcome source says the player already gave up", async () => {
+    renderResults({
+      outcome: dnfOutcome(),
+      apiClient: mockApiClient({
+        getChallengeBoard: vi.fn(async () => ({
+          challengeId: challenge.id,
+          placements: [{
+            accountId: "acc-rival",
+            displayName: "Rival",
+            placement: 1,
+            elapsedMs: 18_000,
+            clickCount: 4,
+          }],
+          dnfs: [],
+        })),
+        getAccountChallengeOutcomes: vi.fn(async () => [{
+          challengeId: challenge.id,
+          outcome: "dnf" as const,
+          best: null,
+          giveUpEligible: true,
+          peeked: true,
+        }]),
+      }),
+    });
+
+    const board = await screen.findByRole("region", { name: "Leaderboard" });
+    expect(await within(board).findByText("0:18 · 4 clk")).toBeVisible();
+    expect(within(board).queryByText(/times and clicks unlock/i)).toBeNull();
+  });
+});
 
 describe("RaceResults: \"I gave up\" affordance (owner spec, 2026-08-02)", () => {
   it("never fetches outcomes or shows the affordance for a completed outcome", async () => {

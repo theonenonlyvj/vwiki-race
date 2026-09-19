@@ -3036,6 +3036,11 @@ function IdentityPrompt({
             <button disabled={authBusy} type="submit">
               {authBusy ? identityRetryStageLabel(authRetryAttempt, "Logging in...") : "Log in"}
             </button>
+            <details className="password-recovery-help">
+              <summary>Forgot password?</summary>
+              <p>Ask Vijay for a one-use reset link. Include your VGames username, but never send your password.</p>
+              <a href="https://theonenonlyvj.github.io/personal-site/contact" target="_blank" rel="noopener noreferrer">Contact Vijay</a>
+            </details>
           </form>
         ) : null}
         </div>

@@ -37,6 +37,15 @@ describe("production deployment configuration", () => {
     expect(config).toContain('MAINTENANCE_MODE = "false"');
   });
 
+  it("binds password recovery to the private identity entrypoint with a dedicated limiter", () => {
+    expect(config).toMatch(
+      /\[\[services\]\]\s*binding = "VGAMES_SESSIONS"\s*service = "vgames-identity"\s*entrypoint = "RememberedSessions"/,
+    );
+    expect(config).toMatch(
+      /\[\[ratelimits\]\]\s*name = "PASSWORD_RESET_RATE_LIMITER"\s*namespace_id = "51010"\s*simple = \{ limit = 5, period = 60 \}/,
+    );
+  });
+
   it("keeps migration 0005 compatible with Wrangler's local SQL splitter", () => {
     const statements = unstable_splitSqlQuery(editorialMigration);
 

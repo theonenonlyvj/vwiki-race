@@ -74,3 +74,8 @@ simple = { limit = 1, period = 60 }
 name = "RANDOM_CHALLENGE_IP_RATE_LIMITER"
 namespace_id = "51009"
 simple = { limit = 2, period = 60 }
+
+[[ratelimits]]
+name = "PASSWORD_RESET_RATE_LIMITER"
+namespace_id = "51010"
+simple = { limit = 5, period = 60 }
