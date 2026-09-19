@@ -29,7 +29,7 @@ Output directories must be beneath `.private/`; existing report files are never 
 
 ## Interpretation
 
-The report includes full definitions and limitations. Daily completion is one canonical player per challenge, by the challenge's assigned Central daily date. Archive replays can update an old daily's result. It reports both mature-start completion (including quick exits) and engaged finish rate (eligible finishes plus failures with at least two clicks). An unexpired run is pending, not a DNF; lazy-expired active runs are shown separately in JSON. A completion always wins over other attempts by that player. Current account aliases prevent confirmed merged accounts from inflating denominators.
+The report includes full definitions and limitations. Daily completion is one canonical player per challenge, by the challenge's assigned Central daily date. Archive replays can update an old daily's result. It reports both mature-start completion (including quick exits) and engaged finish rate (eligible finishes plus failures with at least two clicks). An unexpired run is pending, not a DNF; lazy-expired active runs are shown separately in both Markdown and JSON. A completion always wins over other attempts by that player. Current account aliases prevent confirmed merged accounts from inflating denominators.
 
 Returning players are current-window counted players with earlier observed counted play. Seven-day repeat is a different measure: first-observed players with a complete seven-day follow-up, returning on days +1 through +7. Neither means website visitor retention. First observed play is not registration time; profile updated_at is not used as a creation date.
 
