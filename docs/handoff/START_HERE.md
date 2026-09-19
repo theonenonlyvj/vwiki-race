@@ -7,8 +7,7 @@ before changing the product. It describes the whole system and points to authori
 re-narrating it. Its architecture and invariants still hold as of `736eab5`;
 the state and open work have moved on - see the dated handoffs below.
 
-**Read `docs/handoff/2026-08-18-agent-handoff.md` FIRST** - it carries the
-current state, the open work, and one live landmine that will silently waste a
+**Read `docs/handoff/2026-09-19-weekday-dailies-release.md` FIRST** for the current release, verification, and follow-ups. Then read `docs/handoff/2026-08-18-agent-handoff.md` for prior context and one live landmine that will silently waste a
 session (the GitHub -> Pages auto-deploy is broken: pushing does not deploy, and
 production ran stale code for two days because of it).
 
@@ -35,24 +34,13 @@ hand-holding.
 - Canonical API (fallback/rollback path): <https://vwikirace-api.theonenonlyvj.workers.dev>
 - VGames identity (separate repo, read-only from here): <https://vgames-identity.theonenonlyvj.workers.dev>, source at `/Users/vijayram/Cursor/vgames-platform/services/identity`
 - Protected Daily moderation route: <https://vwikirace.pages.dev/admin/dailies>
-- `main` is clean and matches `origin/main` at `8d767d8` (2026-08-18).
-- Live Worker version: `4e4a3cac` (`wrangler deployments list --config
-  wrangler.api.toml`, deployed 2026-07-26T16:26 UTC). Still current: nothing
-  since has touched `src/server/`.
-- Live Pages bundle: `index-KtJcCDZ4.js` (the 2026-08-16 path-graph work,
-  deployed 2026-08-18). **Pushing `main` will NOT deploy this** - the GitHub
-  integration is broken; see the 2026-08-18 handoff. **Always reconfirm both of
-  these yourself** (`wrangler deployments list`, and curl/view-source the live
-  page for its `index-*.js` filename) rather than trusting this document's
-  numbers as still current — they drift with every ship.
-- Tests, verified at doc time: **1163 client tests / 236 Worker tests, all
-  passing** (`npm test`, `npm run test:worker`), `tsc --noEmit` clean, `npm
-  audit --omit=dev` reports 0 vulnerabilities.
-- D1 migrations `0001` through `0006` are applied; there have been no new
-  migrations since `0006_board_exclusions.sql` (Increment 0 of the redesign).
-  Everything since — streaks, rolling trends, windowed boards, the zz-sweep,
-  daily-difficulty floors — is read-side/derived logic or cron behavior with
-  no schema change. Never replay an applied migration.
+- Runtime release commit: `1daecd7`, pushed to `origin/main` on 2026-09-19. Later documentation-only commits do not change the deployed artifact.
+- Live Worker version: `ff4c8704-7810-4181-b990-570a25ab6897`.
+- Live Pages deployment: `170c4491`; bundle `index-KNJ3gN88.js`. Deploy Pages explicitly; pushing main alone is insufficient. Reconfirm live identifiers before the next release.
+- Verified release gates: **1371 client tests / 290 Worker tests passing**, production build and bundle check, Worker dry run, independent review, live API and browser gameplay smoke.
+- Dependency audit has four pre-existing advisories (two high, two moderate); upgrades remain follow-up. See the release receipt for packages and evidence.
+- Production migration ledger contains `0001` through `0007`, matching local inventory. No migration was needed for this release. Never replay an applied migration.
+- Automatic dailies: Recognizable Monday–Friday, Hard weekends. Historical Weird metadata remains readable; new queue entries must use Recognizable or Hard. Sanitizer-verified path gating remains follow-up.
 - `MAINTENANCE_MODE=false` (normal production mode).
 - **The UX redesign (modes, not tabs) shipped 2026-07-18 and has since been
   through two full UX council review cycles (2026-07-19), a routing/Back-ladder

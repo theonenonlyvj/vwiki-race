@@ -13,7 +13,7 @@ Goal: recognizable selection Monday–Friday; hard on weekends. Preserve histori
 - [x] Remove the Thursday/Friday weird branch in `src/domain/dailyEditorial.ts`; update current schedule documentation.
 - [x] Verify targeted tests, full client/Worker suites, build, dependency audit, dry-run deployment and independent review.
 - [x] Restore Cloudflare login; read the migration ledger, queued flavors and recognizable pool capacity before release.
-- [ ] Commit, deploy and smoke Worker, push main, deploy/smoke Pages if its artifact changes; record exact deployment evidence and rollback.
+- [x] Commit, deploy and smoke Worker, push main, deploy/smoke Pages if its artifact changes; record exact deployment evidence and rollback.
 
 Implementation: retain `if (weekday === 0 || weekday === 6) return "hard";`, then `return "recognizable";`. Test the actual `scheduled` handler for both Thursday and Friday, asserting evaluator flavor and persisted daily feature. Do not invoke production cron to test.
 
