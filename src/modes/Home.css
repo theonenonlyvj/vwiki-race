@@ -1,0 +1,283 @@
+.home-layout {
+  --home-route-line: rgba(24, 227, 207, 0.42);
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.home-layout > *,
+.home-layout .daily-hero-copy,
+.home-layout .daily-hero .player-gate {
+  min-width: 0;
+}
+
+.home-layout > .daily-hero {
+  position: relative;
+  overflow: hidden;
+  gap: clamp(16px, 3vw, 28px);
+  padding: clamp(18px, 4vw, 28px);
+  background:
+    radial-gradient(circle at 88% 12%, rgba(24, 227, 207, 0.1), transparent 32%),
+    linear-gradient(145deg, rgba(74, 138, 145, 0.08), transparent 38%),
+    var(--ink-raised);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+}
+
+.home-layout > .daily-hero::after {
+  position: absolute;
+  inset: auto -64px -84px auto;
+  width: 190px;
+  height: 190px;
+  border: 1px solid rgba(24, 227, 207, 0.12);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 24px rgba(24, 227, 207, 0.025),
+    0 0 0 48px rgba(24, 227, 207, 0.018);
+  content: "";
+  pointer-events: none;
+}
+
+.home-layout .daily-hero-copy,
+.home-layout .daily-hero .player-gate {
+  position: relative;
+  z-index: 1;
+}
+
+.home-layout .daily-hero-copy {
+  gap: 10px;
+}
+
+.home-layout .daily-hero .challenge-meta {
+  margin-bottom: 2px;
+}
+
+.home-layout .daily-hero .daily-badge {
+  border-color: var(--line-strong);
+  background: rgba(74, 138, 145, 0.1);
+  color: var(--text-dim);
+  padding: 5px 7px;
+}
+
+.home-layout .daily-route {
+  position: relative;
+  grid-template-columns: minmax(0, 1fr) 42px minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 0;
+}
+
+.home-layout .daily-route::before {
+  position: absolute;
+  top: 50%;
+  right: 25%;
+  left: 25%;
+  height: 1px;
+  background: linear-gradient(90deg, var(--home-route-line), rgba(24, 227, 207, 0.78));
+  content: "";
+  pointer-events: none;
+}
+
+.home-layout .daily-route .daily-route-endpoint {
+  position: relative;
+  z-index: 1;
+  min-height: 84px;
+  align-content: center;
+  gap: 6px;
+  border: 1px solid var(--line-strong);
+  background: rgba(6, 16, 20, 0.88);
+  padding: 13px 14px;
+}
+
+.home-layout .daily-route .daily-route-endpoint:first-child {
+  border-left: 3px solid var(--line-strong);
+}
+
+.home-layout .daily-route .daily-route-endpoint:last-child {
+  border-left: 3px solid var(--cyan);
+}
+
+.home-layout .daily-route .daily-route-label {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+
+.home-layout .daily-route strong {
+  color: var(--text-bright);
+  font-size: clamp(1rem, 2.5vw, 1.42rem);
+  line-height: 1.25;
+}
+
+.home-layout .daily-route .route-arrow {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  justify-self: center;
+  border: 1px solid rgba(24, 227, 207, 0.55);
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 18px rgba(24, 227, 207, 0.16);
+  transform: none;
+}
+
+.home-layout .daily-route .route-arrow::before {
+  color: var(--cyan);
+  content: "→";
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.home-layout .daily-hero-invitation {
+  margin: 2px 0 0;
+  color: var(--text);
+}
+
+.home-layout .daily-race-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.home-layout .daily-race-steps li {
+  position: relative;
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  padding: 8px 4px 0 25px;
+}
+
+.home-layout .daily-race-steps li::before {
+  position: absolute;
+  top: 7px;
+  left: 0;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--cyan);
+  border-radius: 50%;
+  background: rgba(24, 227, 207, 0.14);
+  content: "";
+}
+
+.home-layout .daily-hero .ritual-line {
+  width: max-content;
+  max-width: 100%;
+  border-left: 2px solid var(--line-strong);
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  padding-left: 8px;
+}
+
+.home-layout .daily-hero .player-gate {
+  align-self: stretch;
+}
+
+.home-layout .daily-hero .player-gate .race-preview-button {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  margin-top: 0;
+  padding-inline: 20px;
+  box-shadow: 0 10px 24px rgba(24, 227, 207, 0.12);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+@media (min-width: 880px) {
+  .home-layout .daily-hero .player-gate {
+    display: flex;
+    min-width: 250px;
+    align-items: center;
+  }
+}
+
+@media (max-width: 540px) {
+  .home-layout > .daily-hero {
+    gap: 11px;
+    padding: 14px;
+  }
+
+  .home-layout .daily-route {
+    grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .home-layout .daily-route .daily-route-endpoint {
+    min-height: 62px;
+    padding: 9px 10px;
+  }
+
+  .home-layout .daily-route .route-arrow {
+    width: 32px;
+    height: 32px;
+  }
+
+  .home-layout .daily-race-steps {
+    gap: 4px;
+  }
+
+  .home-layout .daily-race-steps li {
+    padding: 6px 2px 0 14px;
+    font-size: 0.72rem;
+    line-height: 1.3;
+  }
+
+  .home-layout .daily-race-steps li::before {
+    top: 8px;
+  }
+
+  .home-layout .daily-hero-invitation {
+    display: none;
+  }
+
+  .home-layout .daily-hero .ritual-line {
+    font-size: 0.72rem;
+  }
+}
+
+@media (max-width: 350px) {
+  .home-layout .daily-route {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+
+  .home-layout .daily-route::before {
+    top: 25%;
+    right: auto;
+    bottom: 25%;
+    left: 17px;
+    width: 1px;
+    height: auto;
+    background: linear-gradient(180deg, var(--home-route-line), rgba(24, 227, 207, 0.78));
+  }
+
+  .home-layout .daily-route .daily-route-endpoint {
+    min-height: 58px;
+    padding: 8px 10px 8px 32px;
+  }
+
+  .home-layout .daily-route .route-arrow {
+    width: 28px;
+    height: 28px;
+    margin-block: -3px;
+    margin-left: 3px;
+    justify-self: start;
+    transform: none;
+  }
+
+  .home-layout .daily-route .route-arrow::before {
+    transform: rotate(90deg);
+  }
+
+  .home-layout .daily-hero .player-gate .race-preview-button {
+    padding-inline: 10px;
+  }
+}

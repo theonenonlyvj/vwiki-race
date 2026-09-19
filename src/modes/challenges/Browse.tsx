@@ -55,9 +55,30 @@ function ArchiveState({ outcome }: { outcome: ChallengeOutcomeEntry | undefined 
     );
   }
   if (outcome?.outcome === "dnf") {
-    return <span className="browse-archive-state">Unfinished</span>;
+    return <span className="browse-archive-state browse-archive-state-unfinished">Unfinished</span>;
   }
-  return <span className="browse-archive-state">Not played</span>;
+  return <span className="browse-archive-state browse-archive-state-new">Not played</span>;
+}
+
+function BrowseCardRoute({ challenge }: { challenge: Challenge }) {
+  return (
+    <>
+      <span className="visually-hidden">
+        Start article: {challenge.start.title} {"→"} {challenge.target.title}, the target article.
+      </span>
+      <span className="browse-card-route" aria-hidden="true">
+        <span className="browse-card-endpoint">
+          <span className="browse-card-route-label">Start</span>
+          <strong>{challenge.start.title}</strong>
+        </span>
+        <span className="browse-card-route-arrow" />
+        <span className="browse-card-endpoint browse-card-endpoint-target">
+          <span className="browse-card-route-label">Target</span>
+          <strong>{challenge.target.title}</strong>
+        </span>
+      </span>
+    </>
+  );
 }
 
 /**
@@ -431,9 +452,7 @@ export default function ChallengeBrowser({
                 </span>
               </span>
               <span className="browse-card-title-row">
-                <strong>
-                  {pinnedDaily.start.title} {"→"} {pinnedDaily.target.title}
-                </strong>
+                <BrowseCardRoute challenge={pinnedDaily} />
                 {hasSession ? (
                   <StateChip outcome={outcomesByChallengeId?.get(pinnedDaily.id)} />
                 ) : null}
@@ -448,7 +467,7 @@ export default function ChallengeBrowser({
           <div className="browse-archive-controls">
             <div>
               <h3>Past dailies</h3>
-              <p className="muted">Pick a date, then open the ordinary challenge page to race or revisit it.</p>
+              <p className="muted">Pick a date to race or revisit.</p>
             </div>
             <label className="name-control browse-date-control">
               <span>Past daily date</span>
@@ -487,7 +506,7 @@ export default function ChallengeBrowser({
                         <time dateTime={dailyDate}>{formatArchiveDate(dailyDate)}</time>
                       </span>
                       <span className="browse-card-title-row">
-                        <strong>{challenge.start.title} {"→"} {challenge.target.title}</strong>
+                        <BrowseCardRoute challenge={challenge} />
                         {hasSession ? <ArchiveState outcome={outcome} /> : null}
                       </span>
                       {meta ? <span className="browse-card-meta muted">{meta}</span> : null}
@@ -530,9 +549,7 @@ export default function ChallengeBrowser({
                       ) : null}
                     </span>
                     <span className="browse-card-title-row">
-                      <strong>
-                        {challenge.start.title} {"→"} {challenge.target.title}
-                      </strong>
+                      <BrowseCardRoute challenge={challenge} />
                       {hasSession ? (
                         <StateChip outcome={outcome} />
                       ) : null}

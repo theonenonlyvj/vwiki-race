@@ -21,6 +21,7 @@ import { ShareResultButton } from "../race/shared";
 import { apiErrorCode, type ErrorReporter } from "../services/errorReporting";
 import type { VGamesIdentitySession } from "../services/vgamesIdentity";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
+import "./Home.css";
 
 // RC-05 part B (now unblocked by RC-03's shared read-cache, 96f1f6e): a
 // fourth "resolving" state, distinct from "not-attempted" - see
@@ -405,7 +406,7 @@ export default function Home({
               <span className="daily-route-label">Start</span>
               <strong>{heroChallenge.start.title}</strong>
             </span>
-            <span aria-hidden="true" className="route-arrow">{"→"}</span>
+            <span aria-hidden="true" className="route-arrow" />
             <span className="daily-route-endpoint">
               <span className="daily-route-label">Target</span>
               <strong>{heroChallenge.target.title}</strong>
@@ -413,7 +414,14 @@ export default function Home({
           </div>
 
           {dailyState !== "finished" && dailyState !== "resolving" ? (
-            <p className="daily-hero-invitation">Find your path, one Wikipedia link at a time.</p>
+            <>
+              <p className="daily-hero-invitation">Find your path, one Wikipedia link at a time.</p>
+              <ol className="daily-race-steps" aria-label="How to race">
+                <li>Follow Wikipedia links</li>
+                <li>Reach the target article</li>
+                <li>The clock stops when you arrive</li>
+              </ol>
+            </>
           ) : null}
 
           {dailyState === "resolving" ? (

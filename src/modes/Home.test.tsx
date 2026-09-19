@@ -73,6 +73,7 @@ function mockApiClient(overrides: Partial<VWikiRaceApiClient> = {}): VWikiRaceAp
 function renderHome(overrides: Partial<Parameters<typeof Home>[0]> = {}) {
   const onGoToBoards = vi.fn();
   const onGoToBoardsToday = vi.fn();
+  const onRaceChallenge = vi.fn();
   const props = {
     accountStats: null,
     apiClient: mockApiClient(),
@@ -87,7 +88,7 @@ function renderHome(overrides: Partial<Parameters<typeof Home>[0]> = {}) {
     onGoToBoardsToday,
     onOpenChallenge: vi.fn(),
     onCreateRandomChallenge: vi.fn(),
-    onRaceChallenge: vi.fn(),
+    onRaceChallenge,
     onRetryCatalog: vi.fn(),
     onShowChallenges: vi.fn(),
     playAnotherSuggestion: { status: "loading" as const },
@@ -99,7 +100,7 @@ function renderHome(overrides: Partial<Parameters<typeof Home>[0]> = {}) {
     ...overrides,
   };
   render(<Home {...props} />);
-  return { onGoToBoards, onGoToBoardsToday };
+  return { onGoToBoards, onGoToBoardsToday, onRaceChallenge };
 }
 
 describe("Home: inviting daily overview", () => {
@@ -186,8 +187,9 @@ describe("Home: inviting daily overview", () => {
     expect(screen.getByText("Ready when you are. No account needed to start.")).toBeVisible();
   });
 
-  it("labels the route endpoints and gives the daily action a clear invitation", () => {
-    renderHome();
+  it("labels the route, explains the race in three compact steps, and preserves the daily action", async () => {
+    const user = userEvent.setup();
+    const { onRaceChallenge } = renderHome();
 
     const daily = screen.getByLabelText("Today's daily");
     expect(within(daily).getByText("Start")).toBeVisible();
@@ -195,7 +197,16 @@ describe("Home: inviting daily overview", () => {
     expect(within(daily).getByText("Target")).toBeVisible();
     expect(within(daily).getByText("Fruit")).toBeVisible();
     expect(within(daily).getByText("Find your path, one Wikipedia link at a time.")).toBeVisible();
-    expect(within(daily).getByRole("button", { name: /race today.s challenge/i })).toBeVisible();
+    const howToRace = within(daily).getByRole("list", { name: /how to race/i });
+    expect(within(howToRace).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "Follow Wikipedia links",
+      "Reach the target article",
+      "The clock stops when you arrive",
+    ]);
+
+    const raceButton = within(daily).getByRole("button", { name: /race today.s challenge/i });
+    await user.click(raceButton);
+    expect(onRaceChallenge).toHaveBeenCalledWith(todaysDaily.id);
   });
 
   it("summarizes yesterday's finish and DNF counts without exposing spoiler metrics", async () => {

@@ -9,7 +9,8 @@
     "test": "vitest run",
     "test:worker": "vitest run --config vitest.worker.config.ts",
     "test:watch": "vitest",
-    "verify:bundle": "node scripts/verify-bundle.mjs"
+    "verify:bundle": "node scripts/verify-bundle.mjs",
+    "report:health": "node scripts/product-health.mjs"
   },
   "dependencies": {
     "@fontsource/luckiest-guy": "^5.2.8",

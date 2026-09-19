@@ -106,6 +106,17 @@ function renderBrowse(overrides: Partial<Parameters<typeof ChallengeBrowser>[0]>
 }
 
 describe("Browse: full card spec (Increment 5)", () => {
+  it("labels each route endpoint so challenge cards scan as start to target", async () => {
+    renderBrowse();
+
+    const card = await screen.findByRole("button", { name: /challenge #1/i });
+    expect(within(card).getByText("Start")).toBeVisible();
+    expect(within(card).getByText("Apple")).toBeVisible();
+    expect(within(card).getByText("Target")).toBeVisible();
+    expect(within(card).getByText("Fruit")).toBeVisible();
+    expect(card).toHaveAccessibleName(/start article: apple → fruit, the target article/i);
+  });
+
   it("hides best metrics until the viewer has finished or given up", async () => {
     const apiClient = mockApiClient({
       getChallengesSummary: vi.fn(async () => [
@@ -467,6 +478,7 @@ describe("Browse: past daily archive", () => {
     await user.click(screen.getByRole("button", { name: /^past dailies$/i }));
 
     const archive = screen.getByRole("region", { name: /past daily archive/i });
+    expect(within(archive).getByText("Pick a date to race or revisit.")).toBeVisible();
     const cards = within(archive).getAllByRole("button", { name: /→/ });
     expect(cards.map((card) => card.textContent)).toEqual([
       expect.stringContaining("Moon"),
