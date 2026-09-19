@@ -5,7 +5,7 @@ supersedes: measurement recommendation following player continuity release
 ---
 # Measurement and visual UX release
 
-Status: candidate; release verification in progress. Do not infer deployed state from this document until the release identifiers below are populated.
+Status: shipped and verified on canonical production.
 
 ## Scope
 
@@ -22,8 +22,16 @@ The owner explicitly deferred replacement-today admin UI and queued backup races
 - Worker tests: 290 passed. Worker dry run passed. Remote migration ledger: no migrations to apply. Server code is unchanged, so this release does not redeploy the Worker.
 - Dependency audit: four pre-existing advisories, unchanged (two high, two moderate).
 - Read-only CLI ran against production successfully; its weekday aggregates matched the separately captured private source baseline. The final baseline lives in ignored `.private/measure-ux-2026-09-19/final-baseline/`; use its snapshot for future comparisons. The report is documented in `docs/product-health-report.md`.
-- Production build and bundle verification passed; candidate bundle `index-BXGAJ9M9.js`. Full client suite passed: 96 files, 1470 tests. The final report formatting change also passed all 14 report/CLI tests independently. Independent analytics and visual review passed with no remaining blocker. Live deployment verification is pending.
+- Production build and bundle verification passed; candidate bundle `index-BXGAJ9M9.js`. Full client suite passed: 96 files, 1470 tests. The final report formatting change also passed all 14 report/CLI tests independently. Independent analytics and visual review passed with no remaining blocker. Canonical production executed the expected bundle; Home route cards and instructions rendered, Browse loaded live challenge data, and selecting a long-title challenge reached its detail page with spoiler gates intact. No race was started for this visual smoke check.
 
 ## Release identifiers
 
-Pending. Previous runtime and identity recovery receipts remain authoritative until this release is verified.
+- Runtime commit: `e7b001c`, pushed to `origin/main`.
+- Pages deployment: `8e22f1b0` (`https://8e22f1b0.vwikirace.pages.dev`).
+- Executed canonical production bundle: `index-BXGAJ9M9.js`.
+- API Worker unchanged: `7262fcf4-3424-4631-a4f8-5ce719e6d22d`.
+- Identity and recovery behavior remain as documented in the preceding player-continuity receipt.
+
+Rollback: redeploy the previous Pages artifact/commit `438901b` (previous deployment `4d37610f`, bundle `index-CuLFgSQb.js`). No schema or server rollback is needed for this UI/report release. Build with `VITE_VWIKI_RACE_API_URL` unset. Do not replay any migration.
+
+Follow-up: run the report after meaningful new play has accumulated and compare against the private final baseline. Do not infer a release effect from today's baseline or treat matching names as permission to merge. Dependency upgrades remain a separate follow-up.
