@@ -599,7 +599,7 @@ export default function Boards({
     // rename only - the mode key, file, and every internal identifier
     // (BoardsSegment, getBoardsTrends, .boards-mode, etc.) stay "boards".
     <section className="boards-mode leaderboard-panel" aria-label="Stats">
-      <h2>Stats</h2>
+      <h2>Community stats</h2>
 
       <div
         aria-label="Board period"

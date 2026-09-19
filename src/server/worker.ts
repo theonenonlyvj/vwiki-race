@@ -6,6 +6,7 @@ import { dailyFlavorForCentralDate, type DailyFlavor } from "../domain/dailyEdit
 import { createApiHandlers, type ApiHandlers } from "./apiHandlers";
 import { createD1TrackingRepository } from "./d1TrackingRepository";
 import { ApiError } from "./http";
+import { handleRememberedSession } from "./rememberedSession";
 import {
   createVGamesIdentityClient,
   type VGamesIdentityClient,
@@ -28,6 +29,7 @@ interface RateLimiter {
 export interface Env {
   VWIKI_RACE_DB: D1Database;
   VGAMES_IDENTITY?: Pick<Fetcher, "fetch">;
+  VGAMES_SESSIONS?: Pick<Fetcher, "fetch">;
   VGAMES_URL: string;
   ALLOWED_ORIGINS?: string;
   MAINTENANCE_MODE?: string;
@@ -361,6 +363,11 @@ async function dispatchV2(
 
   if (!url.pathname.startsWith("/api/v2/")) {
     return null;
+  }
+
+  if (url.pathname === "/api/v2/identity/session" || url.pathname.startsWith("/api/v2/identity/session/")) {
+    await enforceIdentityRateLimit(env, request);
+    return handleRememberedSession(request, env);
   }
 
   if (request.method === "GET" && url.pathname === "/api/v2/challenges") {

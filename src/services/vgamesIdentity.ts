@@ -11,6 +11,8 @@ export interface VGamesIdentitySession {
   displayName: string;
   token: string;
   status: VGamesIdentityStatus;
+  /** Local enrollment marker; never an authentication credential. */
+  remembered?: boolean;
 }
 
 export interface VGamesIdentityRepository {
@@ -223,6 +225,9 @@ export function createVGamesIdentityRepository(
   // are safe to pass around/destructure (test fakes and App callbacks both
   // do), so nothing here may depend on call-site receiver binding.
   function getSession(): VGamesIdentitySession | null {
+    // A late response in another tab must not resurrect a deliberately ended
+    // device session. Explicit login clears this marker before saving.
+    if (safeStorage.getItem("vwiki-race:remembered-logged-out") === "true") return null;
     if (memorySession !== undefined) {
       return memorySession;
     }
@@ -280,6 +285,7 @@ export function createVGamesIdentityRepository(
           displayName: session.displayName,
           token: session.token,
           status: session.status,
+          ...(session.remembered ? { remembered: true } : {}),
         }),
       );
       safeStorage.setItem(LAST_DISPLAY_NAME_STORAGE_KEY, session.displayName);
@@ -460,6 +466,7 @@ function readSession(
       displayName: parsed.displayName.trim(),
       token: parsed.token,
       status: parsed.status,
+      ...(parsed.remembered === true ? { remembered: true } : {}),
     };
   } catch {
     storage.removeItem(storageKey);

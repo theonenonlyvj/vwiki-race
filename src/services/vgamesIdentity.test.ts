@@ -562,3 +562,12 @@ describe("VGames identity error copy", () => {
     ).toBe("fallback");
   });
 });
+
+it("ignores a late cached session when the device has deliberately logged out", () => {
+  const storage = memoryStorage();
+  const repo = createVGamesIdentityRepository(storage);
+  repo.saveSession({accountId:"a",displayName:"Alice",status:"claimed",token:"late-token",remembered:true});
+  storage.setItem("vwiki-race:remembered-logged-out", "true");
+  expect(repo.getSession()).toBeNull();
+  expect(createVGamesIdentityRepository(storage).getSession()).toBeNull();
+});

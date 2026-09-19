@@ -1173,6 +1173,11 @@ h1 {
   border-bottom-color: var(--text-bright);
 }
 
+.site-footer .feedback-invitation {
+  white-space: normal;
+  line-height: 1.5;
+}
+
 /* Home v2 (Increment 2 Task 2 - the stateful daily hub): a single vertical
    stack of cards (hero, yesterday's-results/today's-board, share, play-
    another, ritual line), each getting the app's standard bordered-panel
@@ -1183,6 +1188,29 @@ h1 {
 .home-layout {
   display: grid;
   gap: 14px;
+}
+
+.home-player-status {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  background: var(--ink-soft);
+  color: var(--text-dim);
+  padding: 6px 9px;
+  font-size: 0.82rem;
+}
+
+.home-player-status::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 10px rgba(13, 235, 215, 0.42);
+  content: "";
+  flex: 0 0 auto;
 }
 
 .home-layout > .daily-hero,
@@ -1223,6 +1251,53 @@ h1 {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.daily-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-top: 3px;
+}
+
+.daily-route .daily-route-endpoint {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  text-transform: none;
+}
+
+.daily-route .daily-route-label {
+  color: var(--muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.daily-route strong {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.daily-route .route-arrow {
+  color: var(--cyan);
+  font-size: 1rem;
+}
+
+.daily-hero-invitation {
+  margin-top: 4px;
+  color: var(--text-dim);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.home-yesterday-summary {
+  margin-top: 12px;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /*
@@ -4272,6 +4347,18 @@ h1 {
   .mode-nav button {
     padding-inline: 2px;
     font-size: 0.62rem;
+  }
+
+  .daily-route {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .daily-route .route-arrow {
+    justify-self: start;
+    margin-left: 8px;
+    line-height: 1;
+    transform: rotate(90deg);
   }
 }
 

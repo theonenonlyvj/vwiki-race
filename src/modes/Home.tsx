@@ -19,6 +19,7 @@ import type { ChallengeBoardResponse } from "../server/contracts";
 import { useDailyCountdown } from "../hooks/useDailyCountdown";
 import { ShareResultButton } from "../race/shared";
 import { apiErrorCode, type ErrorReporter } from "../services/errorReporting";
+import type { VGamesIdentitySession } from "../services/vgamesIdentity";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
 
 // RC-05 part B (now unblocked by RC-03's shared read-cache, 96f1f6e): a
@@ -71,6 +72,7 @@ export default function Home({
   errorReporter,
   hero,
   identityAccountId,
+  identitySession,
   identityToken,
   onGoToBoards,
   onGoToBoardsToday,
@@ -106,6 +108,7 @@ export default function Home({
   errorReporter: Pick<ErrorReporter, "reportVisibleError">;
   hero: HomeHeroSelection | null;
   identityAccountId: string | null;
+  identitySession: VGamesIdentitySession | null;
   // GR-1 ("View graph"): the bearer token `ChallengePathGraphButton` needs.
   identityToken: string | null;
   onGoToBoards: () => void;
@@ -137,6 +140,9 @@ export default function Home({
   sessionDnfChallengeIds: ReadonlySet<string>;
   todayCentral: string;
 }) {
+  const playingAsLabel = identitySession
+    ? `Playing as ${identitySession.displayName}${identitySession.status === "ghost" ? " · Guest" : ""}`
+    : "Ready when you are. No account needed to start.";
   const dailyUpdateNotice = todayCentral >= "2026-09-19" && todayCentral < "2026-09-26" ? (
     <aside className="daily-update-notice" role="note" aria-label="Daily picks update">
       <p>Sorry about the tough Thursday and Friday races—we’ve fixed the daily picks.</p>
@@ -265,6 +271,7 @@ export default function Home({
     return (
       <section className="home-layout">
         {dailyUpdateNotice}
+        <p className="home-player-status" role="status">{playingAsLabel}</p>
         <section className="empty-state">
           <span>Challenge</span>
           {catalogStatus === "failed" ? (
@@ -378,6 +385,7 @@ export default function Home({
   return (
     <section className="home-layout">
       {dailyUpdateNotice}
+      <p className="home-player-status" role="status">{playingAsLabel}</p>
       <div
         className="daily-hero challenge-route route-header"
         aria-label={heroIsYesterday ? "Yesterday's daily" : "Today's daily"}
@@ -392,9 +400,21 @@ export default function Home({
           <div className="challenge-meta">
             {flavorBadge ? <span className="daily-badge">{flavorBadge}</span> : null}
           </div>
-          <strong>
-            {heroChallenge.start.title} <span className="route-arrow">{"→"}</span> {heroChallenge.target.title}
-          </strong>
+          <div className="daily-route" aria-label={`${heroChallenge.start.title} to ${heroChallenge.target.title}`}>
+            <span className="daily-route-endpoint">
+              <span className="daily-route-label">Start</span>
+              <strong>{heroChallenge.start.title}</strong>
+            </span>
+            <span aria-hidden="true" className="route-arrow">{"→"}</span>
+            <span className="daily-route-endpoint">
+              <span className="daily-route-label">Target</span>
+              <strong>{heroChallenge.target.title}</strong>
+            </span>
+          </div>
+
+          {dailyState !== "finished" && dailyState !== "resolving" ? (
+            <p className="daily-hero-invitation">Find your path, one Wikipedia link at a time.</p>
+          ) : null}
 
           {dailyState === "resolving" ? (
             // RC-05 part B: the neutral skeleton-hold. Follows RC-06's own
@@ -451,7 +471,13 @@ export default function Home({
               onClick={() => onRaceChallenge(heroChallenge.id)}
               type="button"
             >
-              {dailyState === "dnf" ? "Try again" : `${"▶"} Race`}
+              {dailyState === "dnf"
+                ? "Try again"
+                : hero.kind === "today-daily"
+                  ? `${"▶"} Race today's challenge`
+                  : hero.kind === "yesterday-daily"
+                    ? `${"▶"} Race this daily`
+                    : `${"▶"} Race this challenge`}
             </button>
           </div>
         ) : null}
@@ -489,6 +515,11 @@ export default function Home({
           // rather than a second derivation that could drift from it.
           unlocked={yesterdayPathsUnlocked}
         >
+          {yesterdayBoardStatus === "ready" && yesterdayBoard ? (
+            <p className="home-yesterday-summary muted">
+              {yesterdayBoard.placements.length} finished · {yesterdayBoard.dnfs.length} did not finish
+            </p>
+          ) : null}
           <button
             className="link-button"
             onClick={() => onGoToBoards()}

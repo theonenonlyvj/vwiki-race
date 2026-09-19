@@ -19,6 +19,11 @@ migrations_dir = "d1/migrations"
 binding = "VGAMES_IDENTITY"
 service = "vgames-identity"
 
+[[services]]
+binding = "VGAMES_SESSIONS"
+service = "vgames-identity"
+entrypoint = "RememberedSessions"
+
 [vars]
 VGAMES_URL = "https://vgames-identity.theonenonlyvj.workers.dev"
 ALLOWED_ORIGINS = "https://vwikirace.pages.dev"

@@ -248,7 +248,9 @@ describe("VWiki Race app", () => {
 
     render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={storage} />);
 
-    const feedback = await screen.findByRole("link", { name: "Tell us" });
+    const feedback = await screen.findByRole("link", {
+      name: "I’d love your feedback. Help me make this game better! (Vijay)",
+    });
     expect(feedback).toHaveAttribute(
       "href",
       "https://theonenonlyvj.github.io/personal-site/contact",
@@ -266,7 +268,9 @@ describe("VWiki Race app", () => {
     const tabbar = screen.getByRole("navigation", { name: /vwiki race views/i });
     for (const tab of ["Stats", "Challenges", "You"]) {
       await userEvent.click(within(tabbar).getByRole("button", { name: tab }));
-      expect(screen.getByRole("link", { name: "Tell us" })).toBeVisible();
+      expect(screen.getByRole("link", {
+        name: "I’d love your feedback. Help me make this game better! (Vijay)",
+      })).toBeVisible();
       expect(screen.getByRole("link", { name: "More VGames" })).toBeVisible();
     }
 
@@ -276,7 +280,9 @@ describe("VWiki Race app", () => {
     );
     await userEvent.click(await screen.findByRole("button", { name: /start race/i }));
     expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
-    expect(screen.queryByRole("link", { name: "Tell us" })).toBeNull();
+    expect(screen.queryByRole("link", {
+      name: "I’d love your feedback. Help me make this game better! (Vijay)",
+    })).toBeNull();
     expect(screen.queryByRole("link", { name: "More VGames" })).toBeNull();
   });
 
@@ -2189,7 +2195,7 @@ describe("VWiki Race app", () => {
     await user.click(viewLeaderboard);
     expect(await screen.findByRole("region", { name: "Challenge detail" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Leaderboard" })).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Stats" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Community stats" })).toBeNull();
     // RC-03: Home's own hero board read on initial mount, Results' own
     // deduped-board self-fetch for its snippet (PKG-03), and Challenge
     // Detail's own board-fetch effect on landing here (PKG-05) used to be
@@ -2226,7 +2232,7 @@ describe("VWiki Race app", () => {
     expect(await screen.findByText(/#1 today · 0:01 · 1 clk/)).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: /view leaderboard/i }));
-    expect(screen.getByRole("heading", { name: "Stats" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Community stats" })).toBeVisible();
     expect(screen.getByRole("navigation", { name: /vwiki race views/i })).toBeVisible();
     expect(screen.queryByRole("region", { name: /challenge detail/i })).toBeNull();
   });
@@ -2259,7 +2265,7 @@ describe("VWiki Race app", () => {
     await user.click(screen.getByRole("button", { name: /view leaderboard/i }));
     expect(await screen.findByRole("region", { name: "Challenge detail" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Leaderboard" })).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Stats" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Community stats" })).toBeNull();
   });
 
   it("exits the results takeover to Challenges when Browse all challenges is clicked", async () => {
@@ -3498,18 +3504,13 @@ describe("VWiki Race app", () => {
     const catalogStorage = memoryStorage();
     const catalogView = render(<App apiOrigin={apiOrigin} fetchImpl={staleFetch} storage={catalogStorage} />);
     catalogView.rerender(<App apiOrigin={apiOrigin} fetchImpl={currentFetch} storage={catalogStorage} />);
-    // A function matcher, not a plain regex: Home's hero wraps the arrow in
-    // its own <span> (for the spec's "teal arrow" styling), so the route's
-    // text is split across element boundaries - RTL's default text matcher
-    // only concatenates a node's direct text-node children, not text
-    // contributed by child elements (see fullTextMatch's doc comment).
-    expect((await screen.findAllByText(fullTextMatch(/mars → water/i))).length).toBeGreaterThan(0);
+    expect(await screen.findByLabelText(/mars to water/i)).toBeVisible();
     await act(async () => {
       staleCatalog.resolve();
       await staleCatalog.promise;
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    await waitFor(() => expect(screen.queryByText(/apple → fruit/i)).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText(/apple to fruit/i)).toBeNull());
     catalogView.unmount();
 
     const staleLeaderboard = createDeferredResponse({ leaderboard: [leaderboardRow({ displayName: "Apple Runner", runId: "run-apple" })] });
@@ -4020,7 +4021,7 @@ describe("VWiki Race app", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
     await waitFor(() => expect(leaderboardCalls(fetchImpl, existingChallenge.id)).toBe(1));
-    await user.click(screen.getByRole("button", { name: /^challenges$/i }));
+    await user.click(await screen.findByRole("button", { name: /^challenges$/i }));
     await user.type(screen.getByLabelText(/start article/i), "Mars");
     await user.type(screen.getByLabelText(/target article/i), "Water");
     await user.click(screen.getByRole("checkbox", { name: /nominate for a future daily/i }));
@@ -4549,7 +4550,7 @@ describe("VWiki Race app", () => {
 
       await user.click(within(nav).getByRole("button", { name: "Stats" }));
       expect(within(nav).getByRole("button", { name: "Stats" })).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByRole("heading", { name: "Stats" })).toBeVisible();
+      expect(screen.getByRole("heading", { name: "Community stats" })).toBeVisible();
 
       await user.click(within(nav).getByRole("button", { name: "Challenges" }));
       expect(within(nav).getByRole("button", { name: "Challenges" })).toHaveAttribute("aria-pressed", "true");
@@ -4907,6 +4908,194 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       const nav = screen.getByRole("navigation", { name: /vwiki race views/i });
       expect(within(nav).getByRole("button", { name: "Log In" })).toBeVisible();
       expect(screen.queryByText("5")).toBeNull();
+    });
+  });
+
+  describe("Remembered sessions", () => {
+    it("renews an expired cached session and transparently retries a protected request with the new token", async () => {
+      const storage = claimedStorage();
+      const baseFetch = createFetchMock({ accountAttempts: 5 });
+      const refresh = deferredValue<Response>();
+      let staleStatsCalls = 0;
+      let renewedStatsCalls = 0;
+      const fetchImpl = createSameOriginSessionFetch(baseFetch, (path, init) => {
+        if (path === "/api/v2/identity/session/refresh") return refresh.promise;
+        if (path === "/api/v2/accounts/me/stats") {
+          const authorization = new Headers(init?.headers).get("Authorization");
+          if (authorization === "Bearer jwt-claimed") {
+            staleStatsCalls += 1;
+            return jsonError("unauthorized", "Session expired.", 401);
+          }
+          if (authorization === "Bearer jwt-renewed") renewedStatsCalls += 1;
+        }
+        return undefined;
+      });
+
+      render(
+        <App
+          apiOrigin={window.location.origin}
+          fetchImpl={fetchImpl}
+          storage={storage}
+        />,
+      );
+
+      await waitFor(() => expect(staleStatsCalls).toBe(1));
+      refresh.resolve(jsonResponse({
+        accountId: "acc-1",
+        displayName: "Vijay",
+        token: "jwt-renewed",
+        status: "claimed",
+      }));
+
+      await waitFor(() => expect(renewedStatsCalls).toBeGreaterThan(0));
+      expect(JSON.parse(storage.getItem("vwiki-race:vgames-session") ?? "null")).toMatchObject({
+        accountId: "acc-1",
+        token: "jwt-renewed",
+      });
+      expect(await screen.findByText("Playing as Vijay")).toBeVisible();
+    });
+
+    it("keeps the cached identity when cookie refresh is temporarily unavailable", async () => {
+      const storage = claimedStorage();
+      const baseFetch = createFetchMock();
+      let refreshCalls = 0;
+      let rejectedStatsCalls = 0;
+      const fetchImpl = createSameOriginSessionFetch(baseFetch, (path, init) => {
+        if (path === "/api/v2/identity/session/refresh") {
+          refreshCalls += 1;
+          return jsonError("session_unavailable", "Try again shortly.", 503);
+        }
+        if (
+          path === "/api/v2/accounts/me/stats" &&
+          new Headers(init?.headers).get("Authorization") === "Bearer jwt-claimed"
+        ) {
+          rejectedStatsCalls += 1;
+          return jsonError("unauthorized", "Session expired.", 401);
+        }
+        return undefined;
+      });
+      const user = userEvent.setup();
+
+      render(
+        <App
+          apiOrigin={window.location.origin}
+          fetchImpl={fetchImpl}
+          storage={storage}
+        />,
+      );
+
+      await waitFor(() => expect(rejectedStatsCalls).toBe(1));
+      await waitFor(() => expect(refreshCalls).toBeGreaterThan(0));
+      await user.click(await screen.findByRole("button", { name: "You" }));
+
+      expect(screen.getByRole("status", { name: "Vijay, logged in" })).toBeVisible();
+      expect(JSON.parse(storage.getItem("vwiki-race:vgames-session") ?? "null")).toMatchObject({
+        accountId: "acc-1",
+        token: "jwt-claimed",
+      });
+      expect(screen.queryByRole("button", { name: "Log In" })).toBeNull();
+    });
+
+    it("revokes the remembered session on logout and does not restore it on a fresh mount", async () => {
+      const storage = claimedStorage();
+      const baseFetch = createFetchMock();
+      let serverSession: VGamesIdentitySession | null = {
+        accountId: "acc-1",
+        displayName: "Vijay",
+        token: "jwt-refreshed",
+        status: "claimed",
+      };
+      let refreshCalls = 0;
+      let logoutCalls = 0;
+      const fetchImpl = createSameOriginSessionFetch(baseFetch, (path) => {
+        if (path === "/api/v2/identity/session/refresh") {
+          refreshCalls += 1;
+          return serverSession
+            ? jsonResponse(serverSession)
+            : jsonError("unauthorized", "No remembered session.", 401);
+        }
+        if (path === "/api/v2/identity/session/logout") {
+          logoutCalls += 1;
+          serverSession = null;
+          return jsonResponse({});
+        }
+        return undefined;
+      });
+      const user = userEvent.setup();
+
+      const firstMount = render(
+        <App
+          apiOrigin={window.location.origin}
+          fetchImpl={fetchImpl}
+          storage={storage}
+        />,
+      );
+      await waitFor(() => {
+        expect(JSON.parse(storage.getItem("vwiki-race:vgames-session") ?? "null")).toMatchObject({
+          token: "jwt-refreshed",
+        });
+      });
+      await user.click(await screen.findByRole("button", { name: "You" }));
+      await user.click(screen.getByRole("button", { name: /^log out$/i }));
+
+      expect(await screen.findByText("Logged out - other devices stay logged in.")).toBeVisible();
+      expect(logoutCalls).toBe(1);
+      expect(storage.getItem("vwiki-race:vgames-session")).toBeNull();
+
+      firstMount.unmount();
+      render(
+        <App
+          apiOrigin={window.location.origin}
+          fetchImpl={fetchImpl}
+          storage={storage}
+        />,
+      );
+
+      expect(storage.getItem("vwiki-race:remembered-logged-out")).toBe("true");
+      expect(refreshCalls).toBe(1);
+      expect(await screen.findByText("Ready when you are. No account needed to start.")).toBeVisible();
+      expect(storage.getItem("vwiki-race:vgames-session")).toBeNull();
+    });
+
+    it("enrolls an existing local session when no remembered cookie exists yet", async () => {
+      const storage = claimedStorage();
+      const baseFetch = createFetchMock();
+      let enrollmentAuthorization: string | null = null;
+      let enrollmentCalls = 0;
+      const fetchImpl = createSameOriginSessionFetch(baseFetch, (path, init) => {
+        if (path === "/api/v2/identity/session/refresh") {
+          return jsonError("unauthorized", "No remembered session.", 401);
+        }
+        if (path === "/api/v2/identity/session") {
+          enrollmentCalls += 1;
+          enrollmentAuthorization = new Headers(init?.headers).get("Authorization");
+          return jsonResponse({
+            accountId: "acc-1",
+            displayName: "Vijay",
+            token: "jwt-enrolled",
+            status: "claimed",
+          });
+        }
+        return undefined;
+      });
+
+      render(
+        <App
+          apiOrigin={window.location.origin}
+          fetchImpl={fetchImpl}
+          storage={storage}
+        />,
+      );
+
+      await waitFor(() => expect(enrollmentCalls).toBe(1));
+      expect(enrollmentAuthorization).toBe("Bearer jwt-claimed");
+      await waitFor(() => {
+        expect(JSON.parse(storage.getItem("vwiki-race:vgames-session") ?? "null")).toMatchObject({
+          accountId: "acc-1",
+          token: "jwt-enrolled",
+        });
+      });
+      expect(screen.getByText("Playing as Vijay")).toBeVisible();
     });
   });
 
@@ -6547,9 +6736,9 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
     // catalog now, rather than syncing a shared challenge-selection URL
     // param the old v0 selector needed.
     await user.click(within(yesterdayCard).getByRole("button", { name: /see full board/i }));
-    expect(screen.getByRole("heading", { name: "Stats" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Community stats" })).toBeVisible();
     expect(await screen.findByText(/ari/i)).toBeVisible();
-    expect(screen.getByText(/vijay/i)).toBeVisible();
+    expect(within(screen.getByRole("region", { name: "Stats" })).getByText(/vijay/i)).toBeVisible();
     expect(screen.getByText(/\(you\)/i)).toBeVisible();
   });
 
@@ -6726,11 +6915,11 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
     expect(seeFullBoard).toBeVisible();
 
     await user.click(seeFullBoard);
-    expect(screen.getByRole("heading", { name: "Stats" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Community stats" })).toBeVisible();
     // Today's segment (not Yesterday) is the finished-state link's landing
     // spot - the challenge just raced (challenge-0001) has today's own
     // completed run visible here.
-    expect(await screen.findByText(/vijay/i)).toBeVisible();
+    expect(await within(screen.getByRole("region", { name: "Stats" })).findByText(/vijay/i)).toBeVisible();
     expect(screen.getByRole("tab", { name: "Today", selected: true })).toBeVisible();
   });
 
@@ -7110,7 +7299,7 @@ describe("Home board dedup + pre-drop hero (desktop pass, FIX 3/FIX 4)", () => {
       />,
     );
 
-    expect(await screen.findByText(fullTextMatch(/Mars → Water/), { selector: "strong" })).toBeVisible();
+    expect(await screen.findByLabelText(/mars to water/i)).toBeVisible();
     expect(screen.getByText(/yesterday's daily · weird/i)).toBeVisible();
     // PKG-07 (owner-proxy ruling (d)): the old static "New daily drops 5:00
     // AM Central." sentence is gone, replaced by a live "time left today"
@@ -7137,7 +7326,7 @@ describe("Home board dedup + pre-drop hero (desktop pass, FIX 3/FIX 4)", () => {
     const yesterdayCard = screen.getByRole("region", { name: /yesterday's results/i });
     expect(await within(yesterdayCard).findByText(/no completed runs yet\./i)).toBeVisible();
     // And the silent fallback pair must NOT be the hero.
-    expect(screen.queryByText(fullTextMatch(/Apple → Fruit/), { selector: "strong" })).toBeNull();
+    expect(screen.queryByLabelText(/apple to fruit/i)).toBeNull();
   });
 
   it("PKG-06: pre-drop, a populated hero board renders as the 'Yesterday's results' recap with a single board fetch (reuse, not a duplicate request)", async () => {
@@ -7198,7 +7387,7 @@ describe("Home board dedup + pre-drop hero (desktop pass, FIX 3/FIX 4)", () => {
     expect(seeBoards).toBeVisible();
 
     await user.click(seeBoards);
-    expect(await screen.findByRole("heading", { name: "Stats" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Community stats" })).toBeVisible();
   });
 
   it("post-drop: today's daily heroes with its plain flavor badge, unchanged, but now also carries a live countdown to tomorrow's drop (PKG-07)", async () => {
@@ -7233,7 +7422,7 @@ describe("Home board dedup + pre-drop hero (desktop pass, FIX 3/FIX 4)", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
     expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
-    expect(screen.getByText(fullTextMatch(/Apple → Fruit/), { selector: "strong" })).toBeVisible();
+    expect(screen.getByLabelText(/apple to fruit/i)).toBeVisible();
     expect(screen.queryByText(/yesterday's daily/i)).toBeNull();
     expect(screen.queryByText(/new daily drops/i)).toBeNull();
     expect(screen.queryByText(/left today/i)).toBeNull();
@@ -7869,7 +8058,7 @@ describe("Owner-approved Back ladder (item 8, addendum 2026-07-21): Detail -> Br
       pushSpy.mockRestore();
     }
     expect(window.location.search).toBe("");
-    expect(await screen.findByRole("heading", { name: "Stats" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Community stats" })).toBeVisible();
   });
 
   it("regression (finding 1, 2026-07-21 adversarial review): closing Detail then switching modes leaves no dead ?challenge= entry - a later Back does not reopen it", async () => {
@@ -7906,7 +8095,7 @@ describe("Owner-approved Back ladder (item 8, addendum 2026-07-21): Detail -> Br
       pushSpy.mockRestore();
     }
     expect(window.location.search).toBe("");
-    expect(await screen.findByRole("heading", { name: "Stats" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Community stats" })).toBeVisible();
 
     // Behavioral proof: one physical Back press now lands on the entry
     // closeChallengeDetail replaced (bare, no `?challenge=`, still depth 1)
@@ -9532,6 +9721,25 @@ function createFetchMock(options?: {
         : appleParseResponse;
     return jsonResponse(body);
   });
+}
+
+function createSameOriginSessionFetch(
+  baseFetch: ReturnType<typeof createFetchMock>,
+  intercept: (
+    path: string,
+    init?: RequestInit,
+  ) => Response | Promise<Response> | undefined,
+): ReturnType<typeof createFetchMock> {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const requestUrl = String(input);
+    if (requestUrl.startsWith(window.location.origin)) {
+      const url = new URL(requestUrl);
+      const intercepted = intercept(url.pathname, init);
+      if (intercepted !== undefined) return intercepted;
+      return baseFetch(`${apiOrigin}${url.pathname}${url.search}`, init);
+    }
+    return baseFetch(input, init);
+  }) as ReturnType<typeof createFetchMock>;
 }
 
 /**

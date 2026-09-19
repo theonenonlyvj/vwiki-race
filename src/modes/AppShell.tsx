@@ -381,6 +381,7 @@ export default function AppShell({
             errorReporter={errorReporter}
             hero={homeHero}
             identityAccountId={identitySession?.accountId ?? null}
+            identitySession={identitySession}
             identityToken={identitySession?.token ?? null}
             onCreateRandomChallenge={onCreateRandomChallenge}
             onGoToBoards={onGoToBoardsFor}
@@ -490,10 +491,9 @@ export default function AppShell({
           fixed `.mode-nav` bar - `.app-shell`'s own bottom padding (PKG-09)
           already reserves clearance below it; the council's mobile-07-you.png
           evidence of an overlap was captured on an older build (pre-PKG-09's
-          footer-anchor fix), not the current code. Copy rewritten in product
-          voice ("Bugs or ideas? Tell us...") - was first-person ("Have
-          Feedback?... Want to see my other projects?"), reading like an aside
-          from the developer rather than the app itself. */}
+          footer-anchor fix), not the current code. The feedback invitation is
+          intentionally first-person: this is a small game Vijay is actively
+          improving, and the owner wants players to know their notes reach him. */}
       <footer className="site-footer">
         <p>
           {/* QF-05: permanent - unlike the first-visit TeachingGate strip
@@ -511,13 +511,13 @@ export default function AppShell({
             How to play
           </button>
           {" · "}
-          Bugs or ideas?{" "}
           <a
+            className="feedback-invitation"
             href="https://theonenonlyvj.github.io/personal-site/contact"
             rel="noopener noreferrer"
             target="_blank"
           >
-            Tell us
+            I’d love your feedback. Help me make this game better! (Vijay)
           </a>
           {" · "}
           <a

@@ -41,6 +41,7 @@ import {
   type VWikiRaceApiClient,
 } from "./services/vwikiRaceApiClient";
 import { resolveApiOrigin } from "./services/apiOrigin";
+import { createRememberedSessionManager, handleIdentityStorageChange } from "./services/rememberedSession";
 import { apiErrorCode, createErrorReporter, type ErrorReporter } from "./services/errorReporting";
 // FB-7 (owner ruling, 2026-07-19): shared with the server's DNF eligibility
 // threshold - see MIN_COUNTED_DNF_CLICKS's doc comment in runProtocol.ts.
@@ -569,10 +570,6 @@ export default function App({
   // back to Detail even after they'd already navigated elsewhere in-app.
   const initialUrlRouteApplied = useRef(false);
 
-  const apiClient = useMemo(
-    () => injectedApiClient ?? createVWikiRaceApiClient(fetchImpl, { apiOrigin }),
-    [apiOrigin, fetchImpl, injectedApiClient],
-  );
   const identityClient = useMemo(
     () => injectedIdentityClient ?? createVGamesIdentityClient(fetchImpl, { apiOrigin }),
     [apiOrigin, fetchImpl, injectedIdentityClient],
@@ -594,6 +591,48 @@ export default function App({
     () => injectedIdentityRepository ?? createVGamesIdentityRepository(identityStorage),
     [identityStorage, injectedIdentityRepository],
   );
+  const rememberedSession = useMemo(() => {
+    const origin = apiOrigin ?? DEFAULT_API_ORIGIN;
+    // Durable cookies belong to the game origin. Legacy cross-origin API
+    // configurations retain bearer-only behavior rather than third-party cookies.
+    if (!origin || origin !== globalThis.location?.origin) return null;
+    return createRememberedSessionManager({
+      apiOrigin: origin,
+      fetchImpl,
+      getSession: () => identityRepository.getSession(),
+      onSession: (fresh) => {
+        try {
+          if (identityStorage.getItem("vwiki-race:remembered-logged-out") === "true") return;
+        } catch { /* server cookie still carries session revocation */ }
+        const prior = identityRepository.getSession();
+        identityRepository.saveSession(fresh);
+        // Renewal must not start another recovery over an in-flight click.
+        if (prior && recoveredToken.current === prior.token) recoveredToken.current = fresh.token;
+        setIdentitySession(fresh);
+        setDisplayNameDraft(fresh.displayName);
+      },
+    });
+  }, [apiOrigin, fetchImpl, identityRepository, identityStorage]);
+  const apiClient = useMemo(
+    () => injectedApiClient ?? createVWikiRaceApiClient(rememberedSession?.fetch ?? fetchImpl, { apiOrigin }),
+    [apiOrigin, fetchImpl, injectedApiClient, rememberedSession],
+  );
+  useEffect(() => {
+    const synchronizeTabs = (event: StorageEvent) => handleIdentityStorageChange(event, {
+      getSession: () => identityRepository.getSession(),
+      invalidate: () => rememberedSession?.invalidate(),
+      reload: () => globalThis.location.reload(),
+    });
+    globalThis.addEventListener("storage", synchronizeTabs);
+    return () => globalThis.removeEventListener("storage", synchronizeTabs);
+  }, [identityRepository, rememberedSession]);
+  useEffect(() => {
+    // A temporary outage preserves cached identity; authorized API calls retry
+    // renewal when needed. No password or cookie value enters browser storage.
+    let deliberatelyLoggedOut = false;
+    try { deliberatelyLoggedOut = identityStorage.getItem("vwiki-race:remembered-logged-out") === "true"; } catch { /* cookie-only restore remains available */ }
+    if (!deliberatelyLoggedOut) void rememberedSession?.bootstrap().catch(() => {});
+  }, [rememberedSession, identityStorage]);
   const wikipediaGateway = useMemo(
     () => createWikipediaGateway({ fetchImpl }),
     [fetchImpl],
@@ -1766,7 +1805,7 @@ export default function App({
               },
             },
           );
-          persistIdentitySession(nextIdentitySession);
+          nextIdentitySession = await persistIdentitySession(nextIdentitySession);
           if (forceNameEntry) {
             // Per-tab DNF memory belongs to the account that raced (§2.1) -
             // a fresh guest name must not inherit the old ghost's.
@@ -1907,7 +1946,7 @@ export default function App({
           },
         );
       }
-      persistIdentitySession(claimedSession);
+      claimedSession = await persistIdentitySession(claimedSession);
       closeAuthPrompt();
       await resumeAfterIdentity(prompt, claimedSession);
     } catch (caught) {
@@ -1969,7 +2008,7 @@ export default function App({
     const loginCallStartedAt = now();
     const loginRetryAtMs: number[] = [];
     try {
-      const loggedInSession = await identityClient.login(
+      let loggedInSession = await identityClient.login(
         {
           deviceCredential: identityRepository.getDeviceCredential(),
           username,
@@ -1982,7 +2021,7 @@ export default function App({
           },
         },
       );
-      persistIdentitySession(loggedInSession);
+      loggedInSession = await persistIdentitySession(loggedInSession);
       // Every login replaces the active account - a later session must
       // never inherit the previous one's per-tab DNF memory (§2.1/§2.2).
       setSessionDnfChallengeIds(new Set());
@@ -2057,7 +2096,11 @@ export default function App({
     setGhostGuard(null);
   }
 
-  function persistIdentitySession(nextSession: VGamesIdentitySession) {
+  async function persistIdentitySession(nextSession: VGamesIdentitySession): Promise<VGamesIdentitySession> {
+    // Accept an explicit account switch only after its remembered cookie is
+    // established. Failure leaves the prior account and retryable sheet intact.
+    nextSession = await rememberedSession?.remember(nextSession) ?? nextSession;
+    try { identityStorage.removeItem("vwiki-race:remembered-logged-out"); } catch { /* cookie still persists */ }
     try {
       identityRepository.saveSession(nextSession);
     } catch {
@@ -2070,12 +2113,12 @@ export default function App({
     setIdentitySession(nextSession);
     setDisplayNameDraft(nextSession.displayName);
     setUsernameDraft(suggestUsername(nextSession.displayName));
+    return nextSession;
   }
 
-  // "Honest You" (spec §2.1, amendment 1): the shared core clearStaleIdentity
-  // and `logOut` both need - local session teardown with no network call
-  // (no revocation endpoint exists; bearer JWTs can't be invalidated
-  // server-side, so this is local-only BY DESIGN, not a gap). Device
+  // Shared local teardown after stale identity or confirmed remembered-session
+  // logout. The caller revokes the device session before an explicit logout;
+  // short-lived access JWTs on other devices retain their existing lifetime. Device
   // credential (`vwiki-race:vgames-device-credential`) is deliberately KEPT
   // - it's a device identifier, not a session.
   function resetIdentityState() {
@@ -2120,9 +2163,16 @@ export default function App({
   // reversible, non-destructive action behind a modal is friction this
   // package doesn't need to add. The device-scope caveat that dialog would
   // have carried lives in this notice instead.
-  function logOut() {
-    resetIdentityState();
-    setRunNotice("Logged out - other devices stay logged in.");
+  async function logOut() {
+    try {
+      const completed = await rememberedSession?.logout();
+      if (completed === false) return;
+      try { identityStorage.setItem("vwiki-race:remembered-logged-out", "true"); } catch { /* server session is revoked */ }
+      resetIdentityState();
+      setRunNotice("Logged out - other devices stay logged in.");
+    } catch {
+      setRunNotice("Couldn't log out while offline. Reconnect and try again.");
+    }
   }
 
   // "Honest You" (spec §2.3, State B's ghost exit): if the ghost has real

@@ -6,6 +6,7 @@ import type { HomeHeroSelection } from "../domain/challengeSelection";
 import type { Challenge } from "../domain/types";
 import type { ChallengeBoardResponse } from "../server/contracts";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
+import type { VGamesIdentitySession } from "../services/vgamesIdentity";
 
 const todayCentral = "2026-07-19";
 
@@ -79,6 +80,7 @@ function renderHome(overrides: Partial<Parameters<typeof Home>[0]> = {}) {
     challenges: [yesterdaysDaily, todaysDaily],
     errorReporter: { reportVisibleError: vi.fn() },
     hero: { challenge: todaysDaily, kind: "today-daily" } as HomeHeroSelection,
+    identitySession: null as VGamesIdentitySession | null,
     identityAccountId: null as string | null,
     identityToken: null as string | null,
     onGoToBoards,
@@ -99,6 +101,124 @@ function renderHome(overrides: Partial<Parameters<typeof Home>[0]> = {}) {
   render(<Home {...props} />);
   return { onGoToBoards, onGoToBoardsToday };
 }
+
+describe("Home: inviting daily overview", () => {
+  it("makes the current claimed identity visible beside the daily race", () => {
+    renderHome({
+      identityAccountId: "acc-1",
+      identitySession: {
+        accountId: "acc-1",
+        displayName: "Vijay",
+        token: "jwt-claimed",
+        status: "claimed",
+      },
+    });
+
+    expect(screen.getByText("Playing as Vijay")).toBeVisible();
+  });
+
+  it("labels named guest play and the signed-out starting state honestly", () => {
+    const { rerender } = render(
+      <Home
+        {...{
+          accountStats: null,
+          apiClient: mockApiClient(),
+          catalogStatus: "ready" as const,
+          challenges: [yesterdaysDaily, todaysDaily],
+          errorReporter: { reportVisibleError: vi.fn() },
+          hero: { challenge: todaysDaily, kind: "today-daily" } as HomeHeroSelection,
+          identityAccountId: "guest-1",
+          identitySession: {
+            accountId: "guest-1",
+            displayName: "River",
+            token: "jwt-guest",
+            status: "ghost" as const,
+          },
+          identityToken: "jwt-guest",
+          onGoToBoards: vi.fn(),
+          onGoToBoardsToday: vi.fn(),
+          onOpenChallenge: vi.fn(),
+          onCreateRandomChallenge: vi.fn(),
+          onRaceChallenge: vi.fn(),
+          onRetryCatalog: vi.fn(),
+          onShowChallenges: vi.fn(),
+          playAnotherSuggestion: { status: "loading" as const },
+          raceBusy: false,
+          randomChallengeBusy: false,
+          randomChallengeError: null,
+          sessionDnfChallengeIds: new Set<string>(),
+          todayCentral,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Playing as River · Guest")).toBeVisible();
+
+    rerender(
+      <Home
+        {...{
+          accountStats: null,
+          apiClient: mockApiClient(),
+          catalogStatus: "ready" as const,
+          challenges: [yesterdaysDaily, todaysDaily],
+          errorReporter: { reportVisibleError: vi.fn() },
+          hero: { challenge: todaysDaily, kind: "today-daily" } as HomeHeroSelection,
+          identityAccountId: null,
+          identitySession: null,
+          identityToken: null,
+          onGoToBoards: vi.fn(),
+          onGoToBoardsToday: vi.fn(),
+          onOpenChallenge: vi.fn(),
+          onCreateRandomChallenge: vi.fn(),
+          onRaceChallenge: vi.fn(),
+          onRetryCatalog: vi.fn(),
+          onShowChallenges: vi.fn(),
+          playAnotherSuggestion: { status: "loading" as const },
+          raceBusy: false,
+          randomChallengeBusy: false,
+          randomChallengeError: null,
+          sessionDnfChallengeIds: new Set<string>(),
+          todayCentral,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Ready when you are. No account needed to start.")).toBeVisible();
+  });
+
+  it("labels the route endpoints and gives the daily action a clear invitation", () => {
+    renderHome();
+
+    const daily = screen.getByLabelText("Today's daily");
+    expect(within(daily).getByText("Start")).toBeVisible();
+    expect(within(daily).getByText("Apple")).toBeVisible();
+    expect(within(daily).getByText("Target")).toBeVisible();
+    expect(within(daily).getByText("Fruit")).toBeVisible();
+    expect(within(daily).getByText("Find your path, one Wikipedia link at a time.")).toBeVisible();
+    expect(within(daily).getByRole("button", { name: /race today.s challenge/i })).toBeVisible();
+  });
+
+  it("summarizes yesterday's finish and DNF counts without exposing spoiler metrics", async () => {
+    const apiClient = mockApiClient({
+      getChallengeBoard: vi.fn(async (challengeId: string) => challengeId === yesterdaysDaily.id
+        ? {
+            challengeId,
+            placements: [
+              { accountId: "acc-1", displayName: "Ari", placement: 1, elapsedMs: 20_000, clickCount: 3 },
+              { accountId: "acc-2", displayName: "Bo", placement: 2, elapsedMs: 25_000, clickCount: 4 },
+            ],
+            dnfs: [
+              { accountId: "acc-3", displayName: "Cam", elapsedMs: 30_000, clickCount: 5 },
+            ],
+          }
+        : { challengeId, placements: [], dnfs: [] }),
+    });
+
+    renderHome({ apiClient });
+
+    expect(await screen.findByText("2 finished · 1 did not finish")).toBeVisible();
+  });
+});
 
 describe("Home: RC-06 (one honest loading/error system) - 'Yesterday's results' board tri-state", () => {
   it("renders a distinct error + Retry when yesterday's board fetch fails - never 'No completed runs yet.'", async () => {
