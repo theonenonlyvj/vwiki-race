@@ -288,8 +288,8 @@ describe("daily challenge D1 jobs", () => {
     ).first()).resolves.toEqual({ id: "challenge-0004", daily_date: "2026-07-15" });
   });
 
-  it("derives the weird flavor from a Thursday Central scheduled date", async () => {
-    const timestamp = "2026-07-16T10:00:00.000Z";
+  it.each(["2026-07-16", "2026-07-17"])("uses recognizable selection for the Thursday/Friday date %s", async (dailyDate) => {
+    const timestamp = `${dailyDate}T10:00:00.000Z`;
     const repository = createD1TrackingRepository({
       db: env.VWIKI_RACE_DB,
       now: () => new Date(timestamp),
@@ -319,12 +319,15 @@ describe("daily challenge D1 jobs", () => {
     }), env as unknown as WorkerEnv);
 
     expect(findCandidate).toHaveBeenCalledWith({
-      dailyDate: "2026-07-16",
-      flavor: "weird",
+      dailyDate,
+      flavor: "recognizable",
       excludedTargetTitles: expect.any(Set),
       excludedStartTitles: expect.any(Set),
       computeReferencePath: true,
     });
+    await expect(env.VWIKI_RACE_DB.prepare(
+      "SELECT flavor FROM daily_features WHERE daily_date = ?",
+    ).bind(dailyDate).first()).resolves.toEqual({ flavor: "recognizable" });
   });
 
   it("uses the hourly retry trigger only to claim an existing due job", async () => {
@@ -458,7 +461,7 @@ describe("daily challenge D1 jobs", () => {
 
     const queued = await repository.queueDailyChallenge({
       challengeId: "old-queued-challenge",
-      flavor: "weird",
+      flavor: "recognizable",
       actorAccountId: "admin-account",
       idempotencyKey: "queue-old-challenge",
     });
@@ -477,7 +480,7 @@ describe("daily challenge D1 jobs", () => {
       source: "curated",
       dailyFeature: {
         dailyDate: "2026-07-16",
-        flavor: "weird",
+        flavor: "recognizable",
         selectionSource: "admin",
       },
     });
@@ -514,7 +517,7 @@ describe("daily challenge D1 jobs", () => {
     ).bind(timestamp).run();
     await repository.queueDailyChallenge({
       challengeId: "queue-first-challenge",
-      flavor: "weird",
+      flavor: "recognizable",
       actorAccountId: "admin-account",
       idempotencyKey: "queue-first",
     });
@@ -562,7 +565,7 @@ describe("daily challenge D1 jobs", () => {
     ).bind(timestamp).run();
     const queued = await repository.queueDailyChallenge({
       challengeId: "invalid-queue-challenge",
-      flavor: "weird",
+      flavor: "recognizable",
       actorAccountId: "admin-account",
       idempotencyKey: "invalid-queue",
     });
@@ -595,7 +598,7 @@ describe("daily challenge D1 jobs", () => {
 
     expect(findCandidate).toHaveBeenCalledWith({
       dailyDate: "2026-07-16",
-      flavor: "weird",
+      flavor: "recognizable",
       excludedTargetTitles: expect.any(Set),
       excludedStartTitles: expect.any(Set),
       computeReferencePath: true,

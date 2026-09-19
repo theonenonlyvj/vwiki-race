@@ -6957,7 +6957,7 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
     // actual on-screen output ("Recognizable"/"Weird"/"Hard"), not a
     // synonym.
     expect(
-      within(dialog).getByText(/recognizable picks early week, weird thu.{1,3}fri, hard weekends/i),
+      within(dialog).getByText(/recognizable picks monday.{1,3}friday, hard weekends/i),
     ).toBeVisible();
 
     await user.click(within(dialog).getByRole("button", { name: /close how to play/i }));

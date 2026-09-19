@@ -520,7 +520,7 @@ export function createApiHandlers(
       return protocol.approveDailyNomination({
         actorAccountId: cleanActorAccountId,
         nominationId: cleanNominationId,
-        flavor: selectedFlavor,
+        flavor: dailyFlavor(selectedFlavor),
         idempotencyKey: cleanIdempotencyKey,
       });
     },
@@ -787,8 +787,8 @@ function dailyRequiredString(value: unknown, code: string, message: string): str
 }
 
 function dailyFlavor(value: unknown): DailyFlavor {
-  if (value === "recognizable" || value === "weird" || value === "hard") return value;
-  throw new ApiError("invalid_daily_flavor", "Daily flavor is invalid.", 400);
+  if (value === "recognizable" || value === "hard") return value;
+  throw new ApiError("invalid_daily_flavor", "Choose Recognizable or Hard; Weird is no longer scheduled.", 400);
 }
 
 function readIdentityStatus(value: unknown): "ghost" | "claimed" | "merged" {

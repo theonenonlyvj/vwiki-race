@@ -109,12 +109,12 @@ describe("AdminDailies", () => {
     expect(screen.getByText("Challenge #101")).toBeVisible();
   });
 
-  it("requires an explicit flavor for an unclassified nomination", async () => {
+  it.each([null, "weird"] as const)("requires a scheduled flavor override for a %s nomination", async (suggestedFlavor) => {
     render(
       <AdminDailies
         apiClient={adminClient({
           getDailyAdminState: vi.fn().mockResolvedValue({
-            nominations: [nomination({ suggestedFlavor: null, confidence: "unclassified" })],
+            nominations: [nomination({ suggestedFlavor, confidence: "unclassified" })],
             queueEntries: [],
           }),
         })}
@@ -126,7 +126,9 @@ describe("AdminDailies", () => {
 
     const row = await screen.findByRole("article", { name: "Nomination Challenge #101 Mercury to Solar System" });
     expect(within(row).getByRole("button", { name: "Approve Challenge #101 Mercury to Solar System" })).toBeDisabled();
-    await userEvent.click(within(row).getByRole("button", { name: "Weird" }));
+    expect(within(row).queryByRole("button", { name: "Weird" })).toBeNull();
+    expect(within(screen.getByRole("group", { name: "Direct promotion flavor" })).queryByRole("button", { name: "Weird" })).toBeNull();
+    await userEvent.click(within(row).getByRole("button", { name: "Recognizable" }));
     expect(within(row).getByRole("button", { name: "Approve Challenge #101 Mercury to Solar System" })).toBeEnabled();
   });
 
@@ -179,7 +181,7 @@ describe("AdminDailies", () => {
     const queueDailyChallenge = vi.fn().mockResolvedValue(queueEntry({
       id: "queue-direct",
       challengeId: "challenge-direct",
-      flavor: "weird",
+      flavor: "recognizable",
       source: "admin",
     }));
     render(
@@ -217,11 +219,11 @@ describe("AdminDailies", () => {
 
     await userEvent.selectOptions(screen.getByLabelText("Challenge"), "challenge-direct");
     const directFlavor = screen.getByRole("group", { name: "Direct promotion flavor" });
-    await userEvent.click(within(directFlavor).getByRole("button", { name: "Weird" }));
+    await userEvent.click(within(directFlavor).getByRole("button", { name: "Recognizable" }));
     await userEvent.click(screen.getByRole("button", { name: "Queue challenge" }));
 
     expect(queueDailyChallenge).toHaveBeenCalledWith(
-      { challengeId: "challenge-direct", flavor: "weird" },
+      { challengeId: "challenge-direct", flavor: "recognizable" },
       "admin-token",
     );
     expect(await screen.findByText("Challenge #102")).toBeVisible();

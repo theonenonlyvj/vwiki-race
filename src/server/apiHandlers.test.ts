@@ -66,6 +66,29 @@ function fakeRepository(): TrackingRepository {
 }
 
 describe("api handlers", () => {
+  it("rejects unscheduled weird entries through direct queue, explicit approval and suggested approval", async () => {
+    const repository = fakeRepository();
+    const approveDailyNomination = vi.fn();
+    const queueDailyChallenge = vi.fn();
+    Object.assign(repository, {
+      approveDailyNomination,
+      queueDailyChallenge,
+      listDailyAdminState: vi.fn(async () => ({
+        nominations: [{ id: "nomination-weird", suggestedFlavor: "weird" }],
+        queueEntries: [],
+      })),
+    });
+    const handlers = createApiHandlers(repository);
+    await expect(handlers.queueDailyChallenge("admin", "challenge-1", "weird", "queue-key"))
+      .rejects.toMatchObject({ code: "invalid_daily_flavor", status: 400 });
+    await expect(handlers.approveDailyNomination("admin", "nomination-weird", "weird", "approve-key"))
+      .rejects.toMatchObject({ code: "invalid_daily_flavor", status: 400 });
+    await expect(handlers.approveDailyNomination("admin", "nomination-weird", undefined, "suggested-key"))
+      .rejects.toMatchObject({ code: "invalid_daily_flavor", status: 400 });
+    expect(approveDailyNomination).not.toHaveBeenCalled();
+    expect(queueDailyChallenge).not.toHaveBeenCalled();
+  });
+
   it("uses a stored nomination suggestion unless an administrator overrides its flavor", async () => {
     const repository = fakeRepository();
     const approveDailyNomination = vi.fn(async (input) => ({
@@ -92,7 +115,7 @@ describe("api handlers", () => {
           recognizableScore: 10,
           weirdScore: 20,
           hardScore: 30,
-          suggestedFlavor: "weird" as const,
+          suggestedFlavor: "recognizable" as const,
           confidence: "high" as const,
           classifierVersion: "editorial-v1",
           reviewedByAccountId: null,
@@ -115,14 +138,14 @@ describe("api handlers", () => {
 
     await expect(handlers.approveDailyNomination(
       "admin-account", "nomination-1", undefined, "approve-suggested",
-    )).resolves.toMatchObject({ flavor: "weird" });
+    )).resolves.toMatchObject({ flavor: "recognizable" });
     await expect(handlers.approveDailyNomination(
       "admin-account", "nomination-1", "hard", "approve-override",
     )).resolves.toMatchObject({ flavor: "hard" });
     expect(approveDailyNomination).toHaveBeenNthCalledWith(1, {
       actorAccountId: "admin-account",
       nominationId: "nomination-1",
-      flavor: "weird",
+      flavor: "recognizable",
       idempotencyKey: "approve-suggested",
     });
     expect(approveDailyNomination).toHaveBeenNthCalledWith(2, {

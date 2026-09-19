@@ -22,8 +22,8 @@ release unless marked as an operational gate. Resume from
 
 ## Current Daily System
 
-- Central weekday flavoring is implemented: `recognizable` Monday-Wednesday,
-  `weird` Thursday-Friday, and `hard` Saturday-Sunday.
+- Central weekday flavoring is implemented: `recognizable` Monday-Friday
+  and `hard` Saturday-Sunday (updated September 19, 2026).
 - Editorial target pools are cached for 24 hours, with stale data allowed for
   up to seven days. Automatic evaluation is deterministic and bounded to at
   most 10 targets, 3 random starts, 40 Wikimedia subrequests, and 25 seconds.

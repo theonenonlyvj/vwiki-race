@@ -38,9 +38,12 @@ paths, account stats, and challenge leaderboards. Realtime rooms are not used.
    create a new date. The alternate DST trigger exits before D1; the hourly
    retry performs one bounded D1 check and contacts Wikipedia only after
    claiming an existing due job.
-6. Daily selection derives `recognizable`, `weird`, or `hard` from the Central
-   weekday, consumes the oldest valid approved queue entry for that flavor
-   first, and falls back to bounded cached editorial-pool evaluation.
+6. Daily selection uses `recognizable` Monday-Friday and `hard` Saturday-Sunday
+   (updated September 19, 2026), consumes the oldest valid approved queue entry
+   for that flavor first, and falls back to bounded editorial-pool evaluation.
+   New admin queue entries accept only these scheduled flavors; a nomination
+   suggested as `weird` needs an explicit override. Historical weird metadata
+   remains readable.
 7. `/admin/dailies` is a protected application route. The Worker authorizes
    claimed VGames accounts by immutable account ID from
    `DAILY_ADMIN_ACCOUNT_IDS`; display names are not credentials.

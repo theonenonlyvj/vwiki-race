@@ -29,8 +29,8 @@ current source, configuration, and operational handoffs above.
   If `#15` exists, the next accepted challenge is `#16`, regardless of date or
   creator.
 - A DST-safe 5:00 AM `America/Chicago` job creates at most one Daily per Central
-  date. Monday-Wednesday use the `recognizable` flavor, Thursday-Friday use
-  `weird`, and Saturday-Sunday use `hard`. The date is provenance, never the
+  date. Monday-Friday use the `recognizable` flavor, and Saturday-Sunday use
+  `hard`. The date is provenance, never the
   challenge number.
 - The unique VGames name/handle is the canonical public identity.
 - Guests can play through a VGames ghost account and claim their stats later.
@@ -78,7 +78,7 @@ current source, configuration, and operational handoffs above.
   number; reverse directions remain distinct. A challenge can be featured as a
   Daily only once ever.
 - Claimed accounts can nominate only while creating a challenge. Admin approval
-  places the challenge in a per-flavor FIFO queue; the scheduler consumes the
+  places the challenge in a FIFO queue for Recognizable or Hard; the scheduler consumes the
   oldest valid queued entry before attempting automatic editorial selection.
   Admins can override flavor, decline/remove entries, or directly promote an
   existing never-featured challenge.

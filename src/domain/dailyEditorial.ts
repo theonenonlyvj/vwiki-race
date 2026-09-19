@@ -135,6 +135,5 @@ export function dailyFlavorForCentralDate(date: string): DailyFlavor {
 
   const weekday = parsed.getUTCDay();
   if (weekday === 0 || weekday === 6) return "hard";
-  if (weekday === 4 || weekday === 5) return "weird";
   return "recognizable";
 }

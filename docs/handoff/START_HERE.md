@@ -1,6 +1,6 @@
 # VWiki Race: Start Here
 
-Last updated: 2026-08-18
+Last updated: 2026-09-19
 
 This is the canonical cold-start orientation for VWiki Race. Read this file
 before changing the product. It describes the whole system and points to authoritative detail rather than
@@ -336,9 +336,12 @@ deactivation policy remain backlog decisions.
 
 ### Editorial Flavors
 
-- Monday-Wednesday: `recognizable` (Vital Levels 1-2 only, plus a ≥1000/mo
+- Monday-Friday: `recognizable` (Vital Levels 1-2 only, plus a ≥1000/mo
   pageviews floor).
-- Thursday-Friday: `weird` (cached Unusual Articles).
+- `weird` remains supported for historical/editorial metadata but is no longer
+  automatically scheduled (owner-approved September 19 reliability change).
+  New admin queue entries must use Recognizable or Hard; weird suggestions
+  require an explicit override.
 - Saturday-Sunday: `hard` (union of both pools, with shortcut rejection).
 - **Per-flavor inbound-link floors**, calibrated 2026-07-26 against all 12
   dailies run to date: `recognizable` 150, `weird` 30, `hard` 150 — `hard`
@@ -358,7 +361,7 @@ deactivation policy remain backlog decisions.
 
 ### Queue And Moderation
 
-Unchanged: approved nominations enter a FIFO queue per flavor; the scheduler
+Approved nominations enter a FIFO queue for Recognizable or Hard; the scheduler
 consumes the oldest valid queued challenge before automatic selection; a
 queued/featured challenge cannot be silently repurposed across sources
 (migration `0005`'s constraints/triggers). **Capability gap, still open:**

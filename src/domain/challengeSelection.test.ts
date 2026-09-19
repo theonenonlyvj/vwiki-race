@@ -17,8 +17,8 @@ describe("editorial Daily flavors", () => {
     expect(dailyFlavorForCentralDate("2026-07-20")).toBe("recognizable");
     expect(dailyFlavorForCentralDate("2026-07-21")).toBe("recognizable");
     expect(dailyFlavorForCentralDate("2026-07-22")).toBe("recognizable");
-    expect(dailyFlavorForCentralDate("2026-07-23")).toBe("weird");
-    expect(dailyFlavorForCentralDate("2026-07-24")).toBe("weird");
+    expect(dailyFlavorForCentralDate("2026-07-23")).toBe("recognizable");
+    expect(dailyFlavorForCentralDate("2026-07-24")).toBe("recognizable");
     expect(dailyFlavorForCentralDate("2026-07-25")).toBe("hard");
   });
 });

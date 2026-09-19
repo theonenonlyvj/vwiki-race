@@ -23,6 +23,7 @@ interface DailyAdminState {
 }
 
 const DAILY_FLAVORS: DailyFlavor[] = ["recognizable", "weird", "hard"];
+const SCHEDULED_FLAVORS: DailyFlavor[] = ["recognizable", "hard"];
 
 export default function AdminDailies({ apiClient, challenges, previewGateway, token }: AdminDailiesProps) {
   const [state, setState] = useState<DailyAdminState | null>(null);
@@ -59,8 +60,8 @@ export default function AdminDailies({ apiClient, challenges, previewGateway, to
 
   async function approveNomination(nomination: DailyNomination) {
     const flavor = flavorOverrides[nomination.id] ?? nomination.suggestedFlavor;
-    if (!flavor) {
-      setError("Choose a Daily flavor before approving this nomination.");
+    if (!flavor || flavor === "weird") {
+      setError("Choose Recognizable or Hard before approving this nomination.");
       return;
     }
     const action = `approve:${nomination.id}`;
@@ -197,7 +198,7 @@ export default function AdminDailies({ apiClient, challenges, previewGateway, to
               <ol className="daily-admin-list">
                 {pendingNominations.map((nomination) => {
                   const selectedFlavor = flavorOverrides[nomination.id] ??
-                    nomination.suggestedFlavor ?? null;
+                    (nomination.suggestedFlavor === "weird" ? null : nomination.suggestedFlavor);
                   const challenge = challengeById.get(nomination.challengeId);
                   const accessibleChallenge = challengeAccessibleName(challenge, nomination.challengeId);
                   return (
@@ -232,6 +233,9 @@ export default function AdminDailies({ apiClient, challenges, previewGateway, to
                           Suggested: {nomination.suggestedFlavor ?? "unclassified"}
                         </p>
                         <p className="daily-classifier-note">Confidence: {nomination.confidence}</p>
+                        {nomination.suggestedFlavor === "weird" ? (
+                          <p>Weird is no longer scheduled. Choose Recognizable or Hard to queue this pick.</p>
+                        ) : null}
                         <FlavorSegmentedControl
                           label={`Flavor for ${accessibleChallenge}`}
                           onChange={(flavor) => setFlavorOverrides((current) => ({
@@ -369,7 +373,7 @@ function FlavorSegmentedControl({
 }) {
   return (
     <div aria-label={label} className="daily-flavor-control" role="group">
-      {DAILY_FLAVORS.map((flavor) => (
+      {SCHEDULED_FLAVORS.map((flavor) => (
         <button
           aria-pressed={value === flavor}
           className={value === flavor ? "active" : undefined}

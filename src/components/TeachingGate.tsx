@@ -114,7 +114,7 @@ export function TeachingGatePopup({
           Results kicker) with zero explanation of what it means until now -
           wording matches `dailyFlavorLabel`'s actual output
           (domain/dailyEditorial.ts), not a synonym. */}
-      <p>Recognizable picks early week, Weird Thu–Fri, Hard weekends — the badge tells you which.</p>
+      <p>Recognizable picks Monday–Friday, Hard weekends — the badge tells you which.</p>
     </ModalDialog>
   );
 }
