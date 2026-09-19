@@ -5,7 +5,7 @@ supersedes: unimplemented UX recommendations in the August handoff where live UI
 ---
 # Next UX pass: returning players and discovery
 
-Owner requested further UX/UI improvements after the remembered-login release. This is a proposal, not shipped functionality. Reviewed live Home and Challenges and current Home, Browse, BoardSnippet and You source. Player identity audit stays in ignored local-only files; no individual account data belongs in this proposal.
+Owner requested further UX/UI improvements after the remembered-login release. This proposal was subsequently approved and shipped; see `../handoff/2026-09-19-player-continuity-release.md`. The observations below describe the pre-change audit. Reviewed live Home and Challenges and current Home, Browse, BoardSnippet and You source. Player identity audit stays in ignored local-only files; no individual account data belongs in this proposal.
 
 Recommended focused pass:
 
@@ -17,4 +17,4 @@ Recommended focused pass:
 
 Alternatives: cosmetic-only styling is smaller but leaves identity and navigation friction; a full redesign is unnecessary and risks disrupting the daily ritual. Recommend the focused pass above, with identity continuity and archive navigation first.
 
-No code or production data changed. Implementation requires agreement on the proposed behavior; the user has not yet selected this next pass. Account consolidation requires confirmed ownership, truthful agent audit attribution, preserved run history and merge reconciliation across shared identity and game data.
+The owner approved this pass and confirmed the account groups; implementation and consolidation are now complete. Account consolidation requires confirmed ownership, truthful agent audit attribution, preserved run history and merge reconciliation across shared identity and game data.

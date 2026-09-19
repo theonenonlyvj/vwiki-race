@@ -7,7 +7,7 @@ before changing the product. It describes the whole system and points to authori
 re-narrating it. Its architecture and invariants still hold as of `736eab5`;
 the state and open work have moved on - see the dated handoffs below.
 
-**Read `docs/handoff/2026-09-19-login-and-ux-release.md` FIRST** for the current release, verification, and follow-ups. Then read `docs/handoff/2026-08-18-agent-handoff.md` for prior context and one live landmine that will silently waste a
+**Read `docs/handoff/2026-09-19-player-continuity-release.md` FIRST** for the current release, verification, and follow-ups. Then read `docs/handoff/2026-08-18-agent-handoff.md` for prior context and one live landmine that will silently waste a
 session (the GitHub -> Pages auto-deploy is broken: pushing does not deploy, and
 production ran stale code for two days because of it).
 
@@ -36,12 +36,12 @@ A temporary landing apology shipped after that release; see `docs/superpowers/pl
 - Canonical API (fallback/rollback path): <https://vwikirace-api.theonenonlyvj.workers.dev>
 - VGames identity (separate repo): <https://vgames-identity.theonenonlyvj.workers.dev>, source at `/Users/vijayram/Cursor/games/vgames-platform/services/identity`
 - Protected Daily moderation route: <https://vwikirace.pages.dev/admin/dailies>
-- Runtime release commit: `e20f8c5` (login/UX implementation `2976b6d`), pushed to `origin/main` on 2026-09-19. Later documentation-only commits do not change the deployed artifact.
-- Live Worker version: `fe7f19b5-1ea8-4998-aeb1-14f4fc7b3657`.
-- Live Pages deployment: `55243024`; bundle `index-85wJm5XH.js`. Deploy Pages explicitly; pushing main alone is insufficient. Reconfirm live identifiers before the next release.
-- Verified release gates: **1411 client tests / 290 Worker tests / 130 identity tests passing**, production build and bundle check, Worker dry run, independent review, live API and browser gameplay smoke.
+- Runtime release commit: `438901b` (discovery and recovery; prior login/UX `2976b6d`), pushed to `origin/main` on 2026-09-19. Later documentation-only commits do not change the deployed artifact.
+- Live Worker version: `7262fcf4-3424-4631-a4f8-5ce719e6d22d`.
+- Live Pages deployment: `4d37610f`; bundle `index-CuLFgSQb.js`. Deploy Pages explicitly; pushing main alone is insufficient. Reconfirm live identifiers before the next release.
+- Verified release gates: **1455 client tests / 290 Worker tests / 142 identity tests passing**, production build and bundle check, Worker dry run, independent review, live API and browser gameplay smoke.
 - Dependency audit has four pre-existing advisories (two high, two moderate); upgrades remain follow-up. See the release receipt for packages and evidence.
-- Production migration ledger contains `0001` through `0007`, matching local inventory. No migration was needed for this release. Never replay an applied migration.
+- Production migration ledger contains `0001` through `0007`, matching local inventory. No game migration was needed; identity additive reset migration 0002 applied before identity code. Never replay an applied migration.
 - Automatic dailies: Recognizable Monday–Friday, Hard weekends. Historical Weird metadata remains readable; new queue entries must use Recognizable or Hard. Sanitizer-verified path gating remains follow-up.
 - Remembered login: same-origin HttpOnly cookie, 30-day idle / 90-day absolute expiry; existing 24-hour access tokens renew automatically. See latest receipt for migration and rollback details.
 - `MAINTENANCE_MODE=false` (normal production mode).
