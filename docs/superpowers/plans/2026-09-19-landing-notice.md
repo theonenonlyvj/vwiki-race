@@ -11,6 +11,8 @@ Design: a compact, nonblocking notice above Home's daily card, including its loa
 
 - [x] Test visibility and absence at date boundaries, including missing hero.
 - [x] Add notice with restrained existing palette and responsive wrapping.
-- [ ] Verify Home tests, client suite, build and review; publish frontend and verify live copy.
+- [x] Verify Home tests, client suite, build and review; publish frontend and verify live copy.
 
 Review: ready to release. Expiry uses the existing app date lifecycle: new visits/rerenders hide the notice on September 26; a tab left untouched overnight can retain it until the scheduled 5 AM Central refresh. This limited stale-tab edge is accepted for the temporary notice. Existing onboarding tests now explicitly select the unnamed teaching note because the page also contains the named update note.
+
+Shipped: runtime commit `ec209f2`; Pages `b48e0f6d`, bundle `index-BbYoRW7-.js`. All 1377 client tests pass; production build/bundle verification passes. Canonical live bundle and browser copy/layout verified. Worker and D1 unchanged from the preceding schedule release; no backend deployment or schema change needed.

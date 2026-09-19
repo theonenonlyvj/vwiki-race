@@ -27,6 +27,8 @@ screenshots personally, texts real friends for feedback, and expects the
 council → implement → adversarial-review → ship loop to run without
 hand-holding.
 
+A temporary landing apology shipped after that release; see `docs/superpowers/plans/2026-09-19-landing-notice.md`. It displays September 19–25 Central and expires through the existing app date lifecycle.
+
 ## Current Status
 
 - Production: <https://vwikirace.pages.dev>
@@ -34,10 +36,10 @@ hand-holding.
 - Canonical API (fallback/rollback path): <https://vwikirace-api.theonenonlyvj.workers.dev>
 - VGames identity (separate repo, read-only from here): <https://vgames-identity.theonenonlyvj.workers.dev>, source at `/Users/vijayram/Cursor/vgames-platform/services/identity`
 - Protected Daily moderation route: <https://vwikirace.pages.dev/admin/dailies>
-- Runtime release commit: `1daecd7`, pushed to `origin/main` on 2026-09-19. Later documentation-only commits do not change the deployed artifact.
+- Runtime release commit: `ec209f2`, pushed to `origin/main` on 2026-09-19. Later documentation-only commits do not change the deployed artifact.
 - Live Worker version: `ff4c8704-7810-4181-b990-570a25ab6897`.
-- Live Pages deployment: `170c4491`; bundle `index-KNJ3gN88.js`. Deploy Pages explicitly; pushing main alone is insufficient. Reconfirm live identifiers before the next release.
-- Verified release gates: **1371 client tests / 290 Worker tests passing**, production build and bundle check, Worker dry run, independent review, live API and browser gameplay smoke.
+- Live Pages deployment: `b48e0f6d`; bundle `index-BbYoRW7-.js`. Deploy Pages explicitly; pushing main alone is insufficient. Reconfirm live identifiers before the next release.
+- Verified release gates: **1377 client tests passing / 290 Worker tests passed for the preceding unchanged Worker release**, production build and bundle check, Worker dry run, independent review, live API and browser gameplay smoke.
 - Dependency audit has four pre-existing advisories (two high, two moderate); upgrades remain follow-up. See the release receipt for packages and evidence.
 - Production migration ledger contains `0001` through `0007`, matching local inventory. No migration was needed for this release. Never replay an applied migration.
 - Automatic dailies: Recognizable Monday–Friday, Hard weekends. Historical Weird metadata remains readable; new queue entries must use Recognizable or Hard. Sanitizer-verified path gating remains follow-up.
