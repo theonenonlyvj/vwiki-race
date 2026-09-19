@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { useState } from 'react';
+import { act, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import AppEntry from './AppEntry';
 
@@ -22,4 +23,32 @@ it('keeps ordinary navigation in the game', () => {
   render(<AppEntry recoveryScreen={<p>Choose a password</p>}><p>Game</p></AppEntry>);
   expect(screen.getByText('Game')).toBeVisible();
   expect(screen.queryByText('Choose a password')).toBeNull();
+});
+
+
+it('switches an already-open game to recovery on an incoming reset fragment', () => {
+  render(<AppEntry recoveryScreen={<p>Choose a password</p>}><p>Game</p></AppEntry>);
+  act(() => {
+    window.history.replaceState(null, '', '/#reset-password=incoming');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  expect(screen.queryByText('Game')).toBeNull();
+  expect(screen.getByText('Choose a password')).toBeVisible();
+});
+
+
+it('remounts recovery for a replacement link in the same tab', () => {
+  window.history.replaceState(null, '', '/#reset-password=first');
+  function Recovery() {
+    const [fragment] = useState(() => window.location.hash);
+    return <p>{fragment}</p>;
+  }
+  render(<AppEntry recoveryScreen={<Recovery />}><p>Game</p></AppEntry>);
+  expect(screen.getByText('#reset-password=first')).toBeVisible();
+  act(() => {
+    window.history.replaceState(null, '', '/#reset-password=replacement');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  expect(screen.getByText('#reset-password=replacement')).toBeVisible();
+  expect(screen.queryByText('#reset-password=first')).toBeNull();
 });
