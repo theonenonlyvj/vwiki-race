@@ -1,5 +1,9 @@
 # VWiki Race: Start Here
 
+**Read `maintenance-release.md` first for the current maintenance release.**
+The dated runtime identifiers below describe the preceding release and are
+superseded by that receipt. Product invariants and historical decisions remain.
+
 Last updated: 2026-09-19
 
 This is the canonical cold-start orientation for VWiki Race. Read this file
