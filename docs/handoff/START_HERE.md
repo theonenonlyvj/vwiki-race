@@ -4,7 +4,14 @@
 The dated runtime identifiers below describe the preceding release and are
 superseded by that receipt. Product invariants and historical decisions remain.
 
-Last updated: 2026-09-19
+**Latest implementation:**
+[`2026-10-03-daily-path-validation.md`](2026-10-03-daily-path-validation.md)
+documents the automatic Daily rendered-route gate;
+[`dependency-toolchain-maintenance.md`](dependency-toolchain-maintenance.md)
+documents the compatible security updates. The runtime identifiers below are
+historical; obtain current deployment identifiers from the providers.
+
+Last updated: 2026-10-03
 
 This is the canonical cold-start orientation for VWiki Race. Read this file
 before changing the product. It describes the whole system and points to authoritative detail rather than
@@ -44,10 +51,10 @@ A temporary landing apology shipped after that release; see `docs/superpowers/pl
 - Live Worker version: `7262fcf4-3424-4631-a4f8-5ce719e6d22d`.
 - Live Pages deployment: `8e22f1b0`; bundle `index-BXGAJ9M9.js`. Deploy Pages explicitly; pushing main alone is insufficient. Reconfirm live identifiers before the next release.
 - Verified release gates: **1470 client tests / 290 Worker tests passing**, production build and bundle check, Worker dry run, independent review, live data and browser navigation smoke. Identity remains unchanged from its preceding 142-test release.
-- Dependency audit has four pre-existing advisories (two high, two moderate); upgrades remain follow-up. See the release receipt for packages and evidence.
+- Dependency maintenance is documented in `dependency-toolchain-maintenance.md`; the reviewed compatible toolchain passes the full audit.
 - Production migration ledger contains `0001` through `0007`, matching local inventory. No game migration was needed; identity additive reset migration 0002 applied before identity code. Never replay an applied migration.
 - Product measurement: `npm run report:health` creates an ignored private report from existing D1 data; see `docs/product-health-report.md`. No scheduled monitoring is installed. Owner deferred replacement-today admin UI/queued backups and allows hot swaps only on explicit request; they are not a standing duty.
-- Automatic dailies: Recognizable Monday–Friday, Hard weekends. Historical Weird metadata remains readable; new queue entries must use Recognizable or Hard. Sanitizer-verified path gating remains follow-up.
+- Automatic dailies: Recognizable Monday–Friday, Hard weekends. Historical Weird metadata remains readable; new queue entries must use Recognizable or Hard. Automatic selection requires a sanitizer-verified path; see the latest implementation handoff above.
 - Remembered login: same-origin HttpOnly cookie, 30-day idle / 90-day absolute expiry; existing 24-hour access tokens renew automatically. See latest receipt for migration and rollback details.
 - `MAINTENANCE_MODE=false` (normal production mode).
 - **The UX redesign (modes, not tabs) shipped 2026-07-18 and has since been
@@ -344,11 +351,19 @@ deactivation policy remain backlog decisions.
   needs the *highest* floor (it means connected-but-obscure, not a needle
   hunt). See the companion doc §5 for the full rationale and the explicit
   warning against retuning these without materially more data.
-- Automatic evaluation stays deterministic and versioned (`editorial-v1`):
-  at most 10 targets, 3 independent random starts, 40 Wikimedia subrequests,
-  25 seconds. A canonical English mainspace target, no redirect/
+- Automatic selection keeps `editorial-v1` scoring but records
+  automatic verified acceptance as `editorial-v1+verified-path-v1`: its target
+  sample is reproducible per date/flavor/job attempt and capped at 6, while
+  non-strict callers remain capped at 10. The 3 Wikimedia random-start queries
+  remain nondeterministic. Both modes retain 40 Wikimedia subrequests and 25
+  seconds. A canonical English mainspace target, no redirect/
   disambiguation/list-like target, ≥1,500 target bytes, an 80-character lead,
   and a start with 8-200 playable links are all still required.
+- Automatic selection rejects rendered witnesses of ≤1 click for every flavor
+  and ≤2 clicks for Hard, rotates a bounded inbound-title window across durable
+  job attempts, keeps queued human-approved metadata at `editorial-v1`, and
+  does not retune scores or difficulty floors. Hard also retains its existing
+  shortcut exclusion; a longer witness does not disprove a shorter route.
 - `hard` remains a bounded difficulty proxy, not a full Wikipedia graph or
   exact shortest-path claim.
 - A zero-finisher board now reads honestly ("No one has cracked this one

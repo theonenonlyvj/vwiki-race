@@ -23,6 +23,8 @@ import { legacyCreateOperationKey } from "./runProtocol";
 import { CLASSIFIER_VERSION } from "./dailyCandidateScoring";
 import { consumePasswordReset, issuePasswordReset } from "./passwordRecovery";
 
+const AUTOMATIC_VERIFIED_CLASSIFIER_VERSION = `${CLASSIFIER_VERSION}+verified-path-v1`;
+
 interface RateLimiter {
   limit(options: { key: string }): Promise<{ success: boolean }>;
 }
@@ -88,7 +90,7 @@ export function createWorker(options: WorkerOptions = {}) {
       // Wrapped, never bare: a receiver calling `options.fetchImpl(...)`
       // method-style on the bare global throws "Illegal invocation" in workerd.
       fetchImpl: (input, init) => fetch(input, init),
-      gateway: createWorkerWikipediaGateway(fetch),
+      gatewayFactory: createWorkerWikipediaGateway,
       onDiagnostic: logDailyCandidateDiagnostic,
     }));
   let dailyCandidateSource: ReturnType<typeof buildDailyCandidateSource> | null = null;
@@ -217,17 +219,18 @@ export function createWorker(options: WorkerOptions = {}) {
             dailyDate: job.dailyDate,
             flavor,
             ...exclusions,
-            // "I gave up" reference path (owner spec, 2026-08-02, dailies
-            // only): the on-demand random-challenge path
-            // (`findRandomCandidate` below) deliberately never sets this -
-            // see `DailyCandidateRequest.computeReferencePath`'s own doc
-            // comment.
+            // Automatic Dailies only: ask for the bounded reference path and
+            // require it to survive the rendered/sanitized gateway check.
+            // The on-demand random-challenge path (`findRandomCandidate`
+            // below) deliberately sets neither flag.
             computeReferencePath: true,
+            requireVerifiedReferencePath: true,
+            automaticRetryCursor: job.attemptCount,
           });
           const challenge = await repository.acceptDailyFeature(job, {
             kind: "automatic",
             candidate,
-            classifierVersion: CLASSIFIER_VERSION,
+            classifierVersion: AUTOMATIC_VERIFIED_CLASSIFIER_VERSION,
             selectedScore,
           });
           logDailyJob("accepted", {
@@ -885,6 +888,9 @@ function createTracking(env: Env): WorkerTracking {
   // signature every existing test relies on.
   const randomChallengeSource = createDailyChallengeCandidateSource({
     fetchImpl: (input, init) => fetch(input, init),
+    // Request-scoped already (createTracking runs per API request). Keep the
+    // on-demand random path's existing gateway/budget behavior unchanged;
+    // only the automatic scheduler opts into verified rendered routes.
     gateway: createWorkerWikipediaGateway(fetch),
     onDiagnostic: logDailyCandidateDiagnostic,
   });

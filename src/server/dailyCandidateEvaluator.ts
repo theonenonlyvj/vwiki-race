@@ -1,5 +1,6 @@
 import { isAllowedArticleHref, normalizeTitle, parseWikipediaArticleInput } from "../domain/rules";
 import type { DailyFlavor } from "../domain/dailyEditorial";
+import type { Article } from "../domain/types";
 import type { WikipediaGateway } from "../services/wikipediaGateway";
 import { WIKIMEDIA_API_USER_AGENT } from "../services/wikipediaGateway";
 import {
@@ -21,6 +22,7 @@ const DEFAULT_PAGEVIEWS_ENDPOINT = "https://wikimedia.org/api/rest_v1";
 const MAX_REQUESTS = 40;
 const PHASE_TIMEOUT_MS = 25_000;
 const MAX_TARGETS = 10;
+const MAX_VERIFIED_TARGETS = 6;
 const MAX_STARTS = 3;
 const PROXY_BATCH_SIZE = 50;
 
@@ -136,8 +138,9 @@ export interface DailyChallengeCandidate {
    * that field's own doc comment) - `undefined` otherwise, so every existing
    * caller/fixture that doesn't ask for this is unaffected. `null` means the
    * bounded search (`findReferencePath`) genuinely found nothing within
-   * budget; a real search failure degrades to `null` the same way, never a
-   * thrown error - this NEVER blocks candidate selection either way.
+   * budget; a real search failure degrades to `null` the same way. That stays
+   * non-blocking for best-effort callers, while automatic verified selection
+   * skips nullable/unverified paths and can fail closed when none qualify.
    */
   referencePath?: string[] | null;
 }
@@ -180,6 +183,25 @@ export interface DailyCandidateRequest {
    * `DailyChallengeInput.referencePath`).
    */
   computeReferencePath?: boolean;
+  /**
+   * Automatic Daily reliability gate. When true, a graph-discovered
+   * reference path is only accepted after every edge is present in the
+   * rendered article links returned by the game gateway/sanitizer. A miss
+   * tries the next ranked pair inside the same request/time budget; no
+   * verified pair fails closed into the existing Daily-job retry path.
+   *
+   * Kept separate from `computeReferencePath` so existing best-effort
+   * callers retain their nullable reference-path contract. The on-demand
+   * random challenge path sets neither field.
+   */
+  requireVerifiedReferencePath?: boolean;
+  /**
+   * Automatic scheduler retry cursor, copied from the durable job's
+   * `attemptCount`. It varies only bounded, reproducible evidence selection:
+   * the target sample seed and the depth-three inbound-title window. The
+   * on-demand random endpoint omits it and retains its existing behavior.
+   */
+  automaticRetryCursor?: number;
 }
 
 export class DailyChallengeCandidateError extends Error {
@@ -212,7 +234,14 @@ export interface DailyCandidateEvaluator {
 
 export function createDailyCandidateEvaluator(options: {
   fetchImpl: typeof fetch;
-  gateway: WikipediaGateway;
+  gateway?: WikipediaGateway;
+  /**
+   * Production Worker path: constructs a fresh gateway for each selection
+   * attempt using the evaluator's counted fetch. This makes gateway retries
+   * physical budget consumers and bounds its internal article cache to one
+   * attempt. `gateway` remains available for focused fakes and compatibility.
+   */
+  gatewayFactory?: (fetchImpl: typeof fetch) => WikipediaGateway;
   endpoint?: string;
   pageviewsEndpoint?: string;
   now?: () => number;
@@ -223,6 +252,9 @@ export function createDailyCandidateEvaluator(options: {
     fields: Record<string, string | number | boolean>,
   ) => void;
 }): DailyCandidateEvaluator {
+  if (!options.gateway && !options.gatewayFactory) {
+    throw new TypeError("Daily candidate evaluation requires a Wikipedia gateway.");
+  }
   const endpoint = options.endpoint ?? DEFAULT_ENDPOINT;
   const pageviewsEndpoint = options.pageviewsEndpoint ?? DEFAULT_PAGEVIEWS_ENDPOINT;
   const now = options.now ?? Date.now;
@@ -264,6 +296,21 @@ export function createDailyCandidateEvaluator(options: {
         },
       });
       budgetsBySignal.set(phase.signal, budget);
+      const gatewayUsesCountedFetch = options.gatewayFactory !== undefined;
+      const gateway = options.gatewayFactory?.((input, init) => budget.fetch(input, init)) ?? options.gateway!;
+      const renderedArticles = new Map<string, Promise<Article>>();
+      const loadRenderedArticle = (title: string): Promise<Article> => {
+        const key = normalizeTitle(title);
+        const cached = renderedArticles.get(key);
+        if (cached) return cached;
+        if (!gatewayUsesCountedFetch) budget.takeGatewayRequest();
+        const pending = gateway.getArticle(title, { signal: budget.signal });
+        renderedArticles.set(key, pending);
+        pending.catch(() => {
+          if (renderedArticles.get(key) === pending) renderedArticles.delete(key);
+        });
+        return pending;
+      };
 
       try {
         budget.assertActive();
@@ -306,8 +353,8 @@ export function createDailyCandidateEvaluator(options: {
         );
         const sampledTargets = stableSample(
           eligibleTargets,
-          MAX_TARGETS,
-          `${request.dailyDate}:${request.flavor}:editorial-v1`,
+          request.requireVerifiedReferencePath ? MAX_VERIFIED_TARGETS : MAX_TARGETS,
+          targetSampleSeed(request),
         );
         if (sampledTargets.length === 0) throw unavailable();
 
@@ -362,38 +409,44 @@ export function createDailyCandidateEvaluator(options: {
         const starts = [] as EvaluatedStart[];
         for (const random of eligibleRandomStarts) {
           if (!random) continue;
-          const start = await loadStart(random, budget, options.gateway, diagnostic);
+          const start = await loadStart(random, loadRenderedArticle, diagnostic);
           if (start) starts.push(start);
         }
         if (starts.length === 0) throw unavailable();
 
         const ranked = rankPairs(starts, recognizableQualifiedTargets, request);
         if (ranked.length === 0) throw unavailable();
-        if (request.flavor !== "hard") {
-          emitSelectionDiagnostic(diagnostic, request, budget, ranked, ranked[0]!);
-          return toCandidate(
-            ranked[0]!,
-            request.flavor,
-            await maybeFindReferencePath(ranked[0]!, request, budget, endpoint),
-          );
-        }
-
         for (const pair of ranked) {
-          if (!(await hasTwoClickShortcut(pair.start, pair.target, budget, endpoint))) {
+          budget.assertActive();
+          if (request.flavor === "hard" &&
+              await hasTwoClickShortcut(pair.start, pair.target, budget, endpoint)) continue;
+
+          const referencePath = await maybeFindReferencePath(pair, request, budget, endpoint);
+          if (!request.requireVerifiedReferencePath) {
             emitSelectionDiagnostic(diagnostic, request, budget, ranked, pair);
-            return toCandidate(
-              pair,
-              request.flavor,
-              await maybeFindReferencePath(pair, request, budget, endpoint),
-            );
+            return toCandidate(pair, request.flavor, referencePath);
           }
+          if (!referencePath) continue;
+
+          const verifiedPath = await verifyRenderedReferencePath(
+            pair,
+            referencePath,
+            loadRenderedArticle,
+          );
+          if (!verifiedPath) continue;
+          const verifiedClicks = verifiedPath.length - 1;
+          if (verifiedClicks <= 1 || (request.flavor === "hard" && verifiedClicks <= 2)) continue;
+
+          budget.assertActive();
+          emitSelectionDiagnostic(diagnostic, request, budget, ranked, pair);
+          return toCandidate(pair, request.flavor, verifiedPath);
         }
         throw unavailable();
       } catch (caught) {
-        if (caught instanceof DailyChallengeCandidateError) throw caught;
         if (timedOut || phase.signal.aborted || request.signal?.aborted) {
           throw new DailyChallengeCandidateError("daily_candidate_timeout");
         }
+        if (caught instanceof DailyChallengeCandidateError) throw caught;
         if (caught instanceof BudgetExhausted) throw unavailable();
         throw unavailable();
       } finally {
@@ -444,7 +497,8 @@ interface CanonicalTarget {
    * instead of re-fetching `linkshere` a second time. Absent/empty when the
    * floor check itself degraded-passed without a clean answer (see that
    * function's own doc comment) - `findReferencePath` treats that the same
-   * as "no reference path found", never a hard failure.
+   * as "no reference path found". Automatic verified callers treat that miss
+   * as ineligible; legacy best-effort callers still accept a nullable path.
    */
   linkshereTitles?: string[];
 }
@@ -454,6 +508,7 @@ interface EvaluatedStart {
   pageId: number;
   allowedLinks: string[];
   firstHopTitles: string[];
+  renderedArticle: Article;
 }
 
 interface CandidatePair {
@@ -485,6 +540,7 @@ function createWikimediaBudget(options: {
   timeout: () => void;
 }): WikimediaBudget {
   let requestCount = 0;
+  let exhausted = false;
   // Detach before calling: invoking the global fetch as a method of the
   // options object makes workerd bind `this` to that object and throw
   // "TypeError: Illegal invocation" on EVERY request — this killed the
@@ -494,7 +550,7 @@ function createWikimediaBudget(options: {
   return {
     signal: options.signal,
     assertActive() {
-      if (options.signal.aborted) throw new BudgetExhausted();
+      if (exhausted || options.signal.aborted) throw new BudgetExhausted();
       if (options.now() >= options.deadline) {
         options.timeout();
         throw new BudgetExhausted();
@@ -506,7 +562,11 @@ function createWikimediaBudget(options: {
         return await fetchImpl(input, {
           ...init,
           headers: { "Api-User-Agent": USER_AGENT, "User-Agent": USER_AGENT, ...init?.headers },
-          signal: options.signal,
+          // A gateway attempt signal contains both its short retry leash and
+          // the evaluator cancellation propagated through getArticle(). Do
+          // not replace it with the phase signal or a timed-out physical
+          // attempt can never reach the gateway's one allowed retry.
+          signal: init?.signal ?? options.signal,
         });
       } catch (caught) {
         if (options.signal.aborted) throw new BudgetExhausted();
@@ -527,7 +587,10 @@ function createWikimediaBudget(options: {
       options.timeout();
       throw new BudgetExhausted();
     }
-    if (requestCount >= options.maxRequests) throw new BudgetExhausted();
+    if (requestCount >= options.maxRequests) {
+      exhausted = true;
+      throw new BudgetExhausted();
+    }
     requestCount += 1;
   }
 }
@@ -660,9 +723,11 @@ async function meetsInboundLinkFloor(
       return { qualifies: true, titles: [] };
     }
     const titles = linkshere
-      .filter(isRecord)
-      .map((entry) => entry.title)
-      .filter((entryTitle): entryTitle is string => typeof entryTitle === "string");
+      .filter((entry): entry is Record<string, unknown> =>
+        isRecord(entry) && entry.ns === 0 &&
+        Number.isSafeInteger(entry.pageid) && Number(entry.pageid) > 0 &&
+        typeof entry.title === "string" && parseWikipediaArticleInput(entry.title) !== null)
+      .map((entry) => String(entry.title));
     return { qualifies: linkshere.length >= floor, titles };
   } catch (caught) {
     if (caught instanceof BudgetExhausted) throw caught;
@@ -813,13 +878,11 @@ async function randomStart(
 
 async function loadStart(
   random: RandomStart,
-  budget: WikimediaBudget,
-  gateway: WikipediaGateway,
+  loadRenderedArticle: (title: string) => Promise<Article>,
   diagnostic: (event: DailyChallengeDiagnosticEvent, fields: Record<string, string | number | boolean>) => void,
 ): Promise<EvaluatedStart | null> {
   try {
-    budget.takeGatewayRequest();
-    const article = await gateway.getArticle(random.title, { signal: budget.signal });
+    const article = await loadRenderedArticle(random.title);
     const canonicalTitle = parseWikipediaArticleInput(article.canonicalTitle)?.title;
     const pageIdMatches = article.pageId === random.pageId;
     const canonicalTitleMatches = canonicalTitle !== undefined;
@@ -838,6 +901,7 @@ async function loadStart(
       pageId: article.pageId,
       allowedLinks: firstHopTitles,
       firstHopTitles,
+      renderedArticle: article,
     };
   } catch (caught) {
     if (caught instanceof BudgetExhausted) throw caught;
@@ -883,19 +947,18 @@ async function hasTwoClickShortcut(
 }
 
 // "I gave up" reference path (owner spec, 2026-08-02): a bounded, forward-
-// only depth-3 search issued AFTER the extra requests spent on `hasTwoClickShortcut`
-// (hard flavor only) - a modest, fixed ceiling well inside the evaluator's
-// own 40-request/25s phase budget, and independent of the winning pair's
-// flavor.
+// only depth-3 search. Hard callers retain the existing shortcut exclusion;
+// automatic verified callers additionally check the rendered witness length.
+// The ceiling is
+// independent of flavor and remains inside the shared 40-request/25s budget.
 const REFERENCE_PATH_MAX_REQUESTS = 8;
 
 /**
- * Entry point wired into `findCandidate`'s two return points - NEVER lets a
- * reference-path failure (a thrown error, a budget/timeout exhaustion, a
- * malformed Wikimedia response) escape and turn a successful candidate
- * selection into a failed daily job. Only attempted at all when the caller
- * opted in (`DailyCandidateRequest.computeReferencePath` - the daily
- * scheduler only, never the on-demand random-challenge path).
+ * Converts graph lookup failures into a nullable result. Best-effort callers
+ * can still select a candidate with `null`; callers that set
+ * `requireVerifiedReferencePath` interpret that same miss as a reason to try
+ * the next ranked pair and eventually fail closed. The on-demand random path
+ * opts into neither mode.
  */
 async function maybeFindReferencePath(
   pair: CandidatePair,
@@ -903,9 +966,15 @@ async function maybeFindReferencePath(
   budget: WikimediaBudget,
   endpoint: string,
 ): Promise<string[] | null | undefined> {
-  if (!request.computeReferencePath) return undefined;
+  if (!request.computeReferencePath && !request.requireVerifiedReferencePath) return undefined;
   try {
-    return await findReferencePath(pair.start, pair.target, budget, endpoint);
+    return await findReferencePath(
+      pair.start,
+      pair.target,
+      budget,
+      endpoint,
+      normalizeAutomaticRetryCursor(request.automaticRetryCursor),
+    );
   } catch {
     return null;
   }
@@ -944,6 +1013,7 @@ async function findReferencePath(
   target: CanonicalTarget,
   budget: WikimediaBudget,
   endpoint: string,
+  automaticRetryCursor: number,
 ): Promise<string[] | null> {
   const targetNorm = normalizeTitle(target.title);
   if (start.firstHopTitles.some((title) => normalizeTitle(title) === targetNorm)) {
@@ -956,7 +1026,7 @@ async function findReferencePath(
   const directHop = start.firstHopTitles.find((title) => linkshereNorm.has(normalizeTitle(title)));
   if (directHop) return [start.title, directHop, target.title];
 
-  const pltitles = linkshere.slice(0, PROXY_BATCH_SIZE).join("|");
+  const pltitles = rotatedInboundWindow(linkshere, automaticRetryCursor).join("|");
   let requestsUsed = 0;
   for (const titles of chunks(start.firstHopTitles, PROXY_BATCH_SIZE)) {
     if (requestsUsed >= REFERENCE_PATH_MAX_REQUESTS) break;
@@ -983,16 +1053,79 @@ async function findReferencePath(
     } catch {
       continue;
     }
+    const requestedTitles = new Set(titles.map(normalizeTitle));
     for (const page of pages) {
-      if (typeof page.title !== "string" || !Array.isArray(page.links)) continue;
-      const match = page.links.find(
-        (link): link is Record<string, unknown> & { title: string } =>
-          isRecord(link) && typeof link.title === "string",
-      );
-      if (match) return [start.title, page.title, match.title, target.title];
+      const pageTitle = typeof page.title === "string" ? page.title : null;
+      if (!pageTitle || !validProxyPage(page) || !requestedTitles.has(normalizeTitle(pageTitle))) continue;
+      if (page.links === undefined) continue;
+      if (!Array.isArray(page.links)) return null;
+      let match: (Record<string, unknown> & { title: string }) | undefined;
+      for (const link of page.links) {
+        if (!isRecord(link) || link.ns !== 0 || typeof link.title !== "string" ||
+            parseWikipediaArticleInput(link.title) === null) return null;
+        if (linkshereNorm.has(normalizeTitle(link.title))) {
+          match = link as Record<string, unknown> & { title: string };
+          break;
+        }
+      }
+      if (match) return [start.title, pageTitle, match.title, target.title];
     }
   }
   return null;
+}
+
+/**
+ * Verifies a proposed route against the exact rendered/sanitized link lists
+ * the game gateway exposes. Redirects are accepted by following the clicked
+ * title through the gateway and retaining the clicked title, while stable
+ * page IDs prove the first/final article identities. This establishes one
+ * currently playable path only; it makes no shortest, unique, or immutable-
+ * revision claim.
+ */
+async function verifyRenderedReferencePath(
+  pair: CandidatePair,
+  proposedPath: readonly string[],
+  loadRenderedArticle: (title: string) => Promise<Article>,
+): Promise<string[] | null> {
+  if (proposedPath.length < 2 || proposedPath.length > 4 ||
+      normalizeTitle(proposedPath[0] ?? "") !== normalizeTitle(pair.start.title)) return null;
+
+  let current = pair.start.renderedArticle;
+  const currentCanonical = parseWikipediaArticleInput(current.canonicalTitle)?.title;
+  if (!currentCanonical || current.pageId !== pair.start.pageId ||
+      normalizeTitle(currentCanonical) !== normalizeTitle(pair.start.title)) return null;
+
+  const verified = [currentCanonical];
+  const visitedPageIds = new Set([current.pageId]);
+  try {
+    for (let index = 1; index < proposedPath.length; index += 1) {
+      const requestedTitle = parseWikipediaArticleInput(proposedPath[index] ?? "")?.title;
+      if (!requestedTitle || !current.links.some(
+        (link) => normalizeTitle(link.title) === normalizeTitle(requestedTitle),
+      )) return null;
+
+      const next = await loadRenderedArticle(requestedTitle);
+      const nextCanonical = parseWikipediaArticleInput(next.canonicalTitle)?.title;
+      if (!nextCanonical || !Number.isSafeInteger(next.pageId) || next.pageId < 1 ||
+          visitedPageIds.has(next.pageId)) return null;
+
+      const isTarget = index === proposedPath.length - 1;
+      if (isTarget) {
+        if (next.pageId !== pair.target.pageId ||
+            normalizeTitle(nextCanonical) !== normalizeTitle(pair.target.title)) return null;
+      } else if (next.pageId === pair.target.pageId) {
+        return null;
+      }
+
+      visitedPageIds.add(next.pageId);
+      // Preserve the actual clicked title; canonical identity is validated above.
+      verified.push(requestedTitle);
+      current = next;
+    }
+    return verified;
+  } catch {
+    return null;
+  }
 }
 
 function rankPairs(
@@ -1017,6 +1150,26 @@ function rankPairs(
     if (scored !== 0) return scored;
     return left.start.pageId - right.start.pageId || left.target.pageId - right.target.pageId;
   });
+}
+
+function targetSampleSeed(request: DailyCandidateRequest): string {
+  const base = `${request.dailyDate}:${request.flavor}:editorial-v1`;
+  return request.automaticRetryCursor === undefined
+    ? base
+    : `${base}:attempt:${normalizeAutomaticRetryCursor(request.automaticRetryCursor)}`;
+}
+
+function normalizeAutomaticRetryCursor(value: number | undefined): number {
+  return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : 1;
+}
+
+function rotatedInboundWindow(titles: readonly string[], automaticRetryCursor: number): string[] {
+  if (titles.length <= PROXY_BATCH_SIZE) return [...titles];
+  const offset = ((automaticRetryCursor - 1) * PROXY_BATCH_SIZE) % titles.length;
+  return Array.from(
+    { length: PROXY_BATCH_SIZE },
+    (_unused, index) => titles[(offset + index) % titles.length]!,
+  );
 }
 
 function toCandidate(

@@ -4099,7 +4099,7 @@ describe("VWiki Race app", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
     await waitFor(() => expect(leaderboardReads).toBe(1));
-    await user.click(screen.getByRole("button", { name: /^challenges$/i }));
+    await user.click(await screen.findByRole("button", { name: /^challenges$/i }));
     await user.click(screen.getByRole("button", { name: "Create a challenge" }));
     await user.type(screen.getByLabelText(/start article/i), "Mars");
     await user.type(screen.getByLabelText(/target article/i), "Water");

@@ -69,10 +69,14 @@ current source, configuration, and operational handoffs above.
   articles, no redirects/disambiguation or list-like titles, a target with at
   least 1,500 article bytes and an 80-character lead, and a rendered start with
   8-200 playable links. `hard` is a bounded proxy, not an exact graph distance.
-- Automatic evaluation is deterministic and versioned. It samples at most 10
-  targets and 3 independent random starts, stays within 40 Wikimedia
-  subrequests and 25 seconds, and ranks eligible candidates with explainable
-  integer scores. There is no full Wikipedia graph yet.
+- Automatic verified evaluation is versioned. Its target sample is reproducible
+  for each date/flavor/job-attempt tuple and is capped at 6 targets to retain
+  route-verification headroom; non-strict evaluator callers remain capped at
+  10. The 3 independent Wikimedia random-start queries are intentionally
+  nondeterministic, so starts and the final selected pair are not reproducible.
+  Both modes stay within 40 Wikimedia subrequests and 25 seconds and rank
+  eligible candidates with explainable integer scores. There is no full
+  Wikipedia graph yet.
 - Challenge identity is the ordered `(start_page_id, target_page_id, ruleset)`
   tuple. Duplicate creation reuses the existing challenge without consuming a
   number; reverse directions remain distinct. A challenge can be featured as a

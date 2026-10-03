@@ -16,7 +16,8 @@ export {
 
 export function createDailyChallengeCandidateSource(options: {
   fetchImpl: typeof fetch;
-  gateway: WikipediaGateway;
+  gateway?: WikipediaGateway;
+  gatewayFactory?: (fetchImpl: typeof fetch) => WikipediaGateway;
   evaluator?: DailyCandidateEvaluator;
   endpoint?: string;
   pageviewsEndpoint?: string;
@@ -31,6 +32,7 @@ export function createDailyChallengeCandidateSource(options: {
   const evaluator = options.evaluator ?? createDailyCandidateEvaluator({
     fetchImpl: options.fetchImpl,
     gateway: options.gateway,
+    gatewayFactory: options.gatewayFactory,
     endpoint: options.endpoint,
     pageviewsEndpoint: options.pageviewsEndpoint,
     now: options.now,

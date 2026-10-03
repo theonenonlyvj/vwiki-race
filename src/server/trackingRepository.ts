@@ -110,10 +110,11 @@ export interface DailyChallengeInput {
    * a bounded, best-effort forward search (`dailyCandidateEvaluator.ts`'s
    * `findReferencePath`) computed right after automatic candidate
    * selection, reusing the evaluator's already-in-memory start outlinks and
-   * target inbound-linkers. `undefined`/`null` when the search found nothing
-   * (or wasn't attempted at all - it never runs for the on-demand random-
-   * challenge path) - stores nothing and never blocks the drop either way.
-   * A plain title chain, start..target inclusive.
+   * target inbound-linkers. Automatic verified selection reaches this input
+   * only with a nonempty rendered path; legacy/best-effort callers may still
+   * provide `undefined`/`null`, which stores nothing. The on-demand random
+   * challenge path never supplies it. A plain title chain, start..target
+   * inclusive.
    */
   referencePath?: string[] | null;
 }

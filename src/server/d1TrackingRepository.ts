@@ -797,10 +797,10 @@ export function createD1TrackingRepository(options: {
             at,
             normalizedJob.dailyDate,
             // "I gave up" reference path (owner spec, 2026-08-02, dailies
-            // only): best-effort, computed by the evaluator right after
-            // automatic candidate selection - see `DailyChallengeInput`'s
-            // doc comment (trackingRepository.ts). `null` when the search
-            // found nothing; never blocks this INSERT either way.
+            // only): automatic verified selection reaches persistence with a
+            // nonempty rendered path. The nullable storage contract remains
+            // for legacy/best-effort inputs and queued challenges; see
+            // `DailyChallengeInput` in trackingRepository.ts.
             candidate.referencePath ? JSON.stringify(candidate.referencePath) : null,
             normalizedJob.dailyDate,
             normalizedJob.leaseToken,

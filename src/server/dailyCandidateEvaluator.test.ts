@@ -6,6 +6,7 @@ import {
   createDailyCandidateEvaluator,
   DailyChallengeCandidateError,
 } from "./dailyCandidateEvaluator";
+import { createWorkerWikipediaGateway } from "./workerWikipediaGateway";
 
 const NOW = Date.UTC(2026, 6, 17, 12, 0, 0);
 const lead = "A".repeat(100);
@@ -22,7 +23,7 @@ describe("daily candidate evaluator", () => {
     }
   });
 
-  it("samples no more than ten editorial targets, uses three independent starts, and returns canonical IDs", async () => {
+  it("keeps non-strict callers at no more than ten editorial targets, three independent starts, and canonical IDs", async () => {
     const targets = Array.from({ length: 11 }, (_, index) => target(`Target ${index + 1}`, index + 1));
     const fetchImpl = wikipediaFetch({ targets, starts: ["Start one", "Start two", "Start three"] });
     const getArticle = vi.fn(async (title: string) => article({
@@ -48,6 +49,63 @@ describe("daily candidate evaluator", () => {
     expect(result.startPageId).toBeGreaterThanOrEqual(101);
     expect(result.targetTitle).toMatch(/^Target \d+ canonical$/);
     expect(result.targetPageId).toBeGreaterThan(0);
+  });
+
+  it("reserves verified-route headroom by sampling no more than six editorial targets", async () => {
+    const targets = Array.from({ length: 11 }, (_, index) => target(`Target ${index + 1}`, index + 1));
+    const fetchImpl = wikipediaFetch({
+      targets,
+      starts: ["Start one", "Start two", "Start three"],
+      linkshereResponse: () => linkshereResponseWithTitles(["Move 3", ...inboundTitles(199)]),
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      gateway: gatewayForVerifiedMove3Targets(11),
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate({
+      ...requiredRenderedRouteRequest(),
+      automaticRetryCursor: 1,
+    })).resolves.toMatchObject({
+      referencePath: [expect.stringMatching(/^Start /), "Move 3", expect.stringMatching(/^Target \d+ canonical$/)],
+    });
+
+    const metadata = findActionCalls(fetchImpl, "info|pageprops|extracts|pageimages|categories");
+    expect(metadata).toHaveLength(1);
+    expect(new URL(String(metadata[0]![0])).searchParams.get("titles")?.split("|")).toHaveLength(6);
+  });
+
+  it("makes each automatic target sample reproducible per retry cursor and varies it across attempts", async () => {
+    const sampledTitles = async (automaticRetryCursor: number) => {
+      const targets = Array.from({ length: 20 }, (_, index) => target(`Target ${index + 1}`, index + 1));
+      const fetchImpl = wikipediaFetch({
+        targets,
+        starts: ["Start one", "Start two", "Start three"],
+        linkshereResponse: () => linkshereResponseWithTitles(["Move 3", ...inboundTitles(199)]),
+      });
+      const evaluator = createDailyCandidateEvaluator({
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        gateway: gatewayForVerifiedMove3Targets(20),
+        now: () => NOW,
+      });
+
+      await evaluator.findCandidate({
+        ...requiredRenderedRouteRequest(),
+        automaticRetryCursor,
+      });
+      const [metadata] = findActionCalls(fetchImpl, "info|pageprops|extracts|pageimages|categories");
+      return new URL(String(metadata![0])).searchParams.get("titles")?.split("|") ?? [];
+    };
+
+    const attemptOne = await sampledTitles(1);
+    const repeatedAttemptOne = await sampledTitles(1);
+    const attemptTwo = await sampledTitles(2);
+
+    expect(attemptOne).toHaveLength(6);
+    expect(repeatedAttemptOne).toEqual(attemptOne);
+    expect(attemptTwo).toHaveLength(6);
+    expect(attemptTwo).not.toEqual(attemptOne);
   });
 
   it("keeps an editorial target eligible when the latest 30-day pageview request fails", async () => {
@@ -896,6 +954,527 @@ describe("daily candidate evaluator: \"I gave up\" reference path (owner spec, 2
       computeReferencePath: true,
     })).resolves.toMatchObject({ referencePath: null, targetTitle: "Target canonical" });
   });
+
+  it("does not let an unfiltered prop=links payload manufacture a best-effort edge", async () => {
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: wikipediaFetch({
+        targets: [target("Target", 1)],
+        starts: ["Start one", "Start two", "Start three"],
+        linkshereResponse: () => linkshereResponseWithTitles(inboundTitles(200)),
+        proxyResponse: pathProxyResponse("Move 5", "Fabricated destination"),
+      }) as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+      computeReferencePath: true,
+    })).resolves.toMatchObject({ referencePath: null });
+  });
+
+  it("does not let malformed linkshere entries manufacture a free depth-2 edge", async () => {
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: wikipediaFetch({
+        targets: [target("Target", 1)],
+        starts: ["Start one", "Start two", "Start three"],
+        linkshereResponse: () => jsonResponse({
+          query: {
+            pages: [{
+              pageid: 1,
+              ns: 0,
+              title: "Target canonical",
+              linkshere: [
+                { title: "Move 3" },
+                ...inboundTitles(199).map((title) => ({ title })),
+              ],
+            }],
+          },
+        }),
+      }) as unknown as typeof fetch,
+      gateway: gatewayForStarts(),
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate({
+      dailyDate: "2026-07-17",
+      flavor: "recognizable",
+      computeReferencePath: true,
+    })).resolves.toMatchObject({ referencePath: null });
+  });
+});
+
+describe("daily candidate evaluator: scheduler-required rendered routes", () => {
+  it("keeps the Hard shortcut exclusion even when a longer rendered witness exists", async () => {
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: wikipediaFetch({
+        targets: [target("Target", 1)],
+        starts: ["Start one", "Start two", "Start three"],
+        linkshereResponse: () => linkshereResponseWithTitles(inboundTitles(200)),
+        proxyResponse: (url) => url.searchParams.get("pltitles") === "Target canonical"
+          ? pathProxyResponse("Move 2", "Target canonical")(url)
+          : pathProxyResponse("Move 5", "Inbound 7")(url),
+      }) as unknown as typeof fetch,
+      gateway: routeGateway((title) => {
+        if (title.startsWith("Start ")) {
+          return article({ pageId: startPageId(title), canonicalTitle: title, links: allowedLinks(8) });
+        }
+        if (title === "Move 5") {
+          return article({ pageId: 405, canonicalTitle: title, links: [
+            { href: "/wiki/Inbound_7", title: "Inbound 7", anchorText: "Inbound 7" },
+          ] });
+        }
+        if (title === "Inbound 7") {
+          return article({ pageId: 407, canonicalTitle: title, links: [
+            { href: "/wiki/Target_canonical", title: "Target canonical", anchorText: "Target" },
+          ] });
+        }
+        if (title === "Target canonical") return article({ pageId: 1, canonicalTitle: title, links: [] });
+        throw new Error(`Unexpected rendered title: ${title}`);
+      }),
+      now: () => NOW,
+    });
+    await expect(evaluator.findCandidate({
+      ...requiredRenderedRouteRequest(), flavor: "hard", automaticRetryCursor: 1,
+    })).rejects.toMatchObject({ code: "daily_candidate_unavailable" });
+  });
+
+  it("rotates the bounded inbound window across automatic retry cursors", async () => {
+    const inboundWindows: string[][] = [];
+    const runAttempt = async (automaticRetryCursor: number) => {
+      const evaluator = createDailyCandidateEvaluator({
+        fetchImpl: wikipediaFetch({
+          targets: [target("Target", 1)],
+          starts: ["Start one", "Start two", "Start three"],
+          linkshereResponse: () => linkshereResponseWithTitles(inboundTitles(200)),
+          proxyResponse: (url) => {
+            const inbound = (url.searchParams.get("pltitles") ?? "").split("|").filter(Boolean);
+            inboundWindows.push(inbound);
+            return inbound.includes("Inbound 51")
+              ? pathProxyResponse("Move 5", "Inbound 51")(url)
+              : linksResponse(null);
+          },
+        }) as unknown as typeof fetch,
+        gateway: routeGateway((title) => {
+          if (title.startsWith("Start ")) {
+            return article({ pageId: startPageId(title), canonicalTitle: title, links: allowedLinks(8) });
+          }
+          if (title === "Move 5") {
+            return article({
+              pageId: 405,
+              canonicalTitle: title,
+              links: [{ href: "/wiki/Inbound_51", title: "Inbound 51", anchorText: "Inbound 51" }],
+            });
+          }
+          if (title === "Inbound 51") {
+            return article({
+              pageId: 451,
+              canonicalTitle: title,
+              links: [{ href: "/wiki/Target_canonical", title: "Target canonical", anchorText: "Target" }],
+            });
+          }
+          if (title === "Target canonical") return article({ pageId: 1, canonicalTitle: title, links: [] });
+          throw new Error(`Unexpected rendered title: ${title}`);
+        }),
+        now: () => NOW,
+      });
+      return evaluator.findCandidate({
+        ...requiredRenderedRouteRequest(),
+        automaticRetryCursor,
+      });
+    };
+
+    await expect(runAttempt(1)).rejects.toMatchObject({ code: "daily_candidate_unavailable" });
+    const secondAttemptWindowStart = inboundWindows.length;
+    await expect(runAttempt(2)).resolves.toMatchObject({
+      referencePath: [expect.stringMatching(/^Start /), "Move 5", "Inbound 51", "Target canonical"],
+    });
+
+    expect(inboundWindows[0]).toHaveLength(50);
+    expect(inboundWindows[0]![0]).toBe("Inbound 1");
+    expect(inboundWindows[secondAttemptWindowStart]).toHaveLength(50);
+    expect(inboundWindows[secondAttemptWindowStart]![0]).toBe("Inbound 51");
+  });
+
+  it("rejects a rendered two-click witness for hard automatic selection", async () => {
+    const gateway = routeGateway((title) => {
+      if (title.startsWith("Start ")) {
+        return article({
+          pageId: startPageId(title),
+          canonicalTitle: title,
+          links: [
+            { href: "/wiki/Bridge", title: "Bridge", anchorText: "Bridge" },
+            ...allowedLinks(7),
+          ],
+        });
+      }
+      if (title === "Bridge") {
+        return article({
+          pageId: 401,
+          canonicalTitle: title,
+          links: [{ href: "/wiki/Target_canonical", title: "Target canonical", anchorText: "Target" }],
+        });
+      }
+      if (title === "Target canonical") return article({ pageId: 1, canonicalTitle: title, links: [] });
+      throw new Error(`Unexpected rendered title: ${title}`);
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: wikipediaFetch({
+        targets: [target("Target", 1)],
+        starts: ["Start one", "Start two", "Start three"],
+        linkshereResponse: () => linkshereResponseWithTitles(["Bridge", ...inboundTitles(199)]),
+      }) as unknown as typeof fetch,
+      gateway,
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate({
+      ...requiredRenderedRouteRequest(),
+      flavor: "hard",
+      automaticRetryCursor: 1,
+    })).rejects.toMatchObject({ code: "daily_candidate_unavailable" });
+  });
+
+  it("uses the Worker sanitizer, so a target link removed with References cannot verify an edge", async () => {
+    const rawFetch = wikipediaFetch({
+      targets: [target("Target", 1)],
+      starts: ["Start one", "Start two", "Start three"],
+      linkshereResponse: () => linkshereResponseWithTitles(["Move 3", ...inboundTitles(199)]),
+    });
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.searchParams.get("action") === "parse") {
+        const title = url.searchParams.get("page") ?? "";
+        const rawHtml = title.startsWith("Start ")
+          ? `<p>${allowedLinks(8).map((link) => `<a href="${link.href}">${link.anchorText}</a>`).join(" ")}</p>`
+          : title === "Move 3"
+            ? `<p>Playable prose.</p><h2>References</h2><p><a href="/wiki/Target_canonical">Target</a></p>`
+            : "<p>Target prose.</p>";
+        return jsonResponse({
+          parse: {
+            pageid: title.startsWith("Start ") ? startPageId(title) : title === "Move 3" ? 303 : 1,
+            revid: 10,
+            title,
+            text: rawHtml,
+          },
+        });
+      }
+      return (rawFetch as unknown as typeof fetch)(input, init);
+    }) as unknown as typeof fetch;
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl,
+      gatewayFactory: createWorkerWikipediaGateway,
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate(requiredRenderedRouteRequest())).rejects.toMatchObject({
+      code: "daily_candidate_unavailable",
+    });
+  });
+
+  it("rejects an API-discovered route when the rendered bridge no longer exposes the target link", async () => {
+    const gateway = routeGateway((title) => {
+      if (title.startsWith("Start ")) {
+        return article({
+          pageId: startPageId(title),
+          canonicalTitle: title,
+          links: allowedLinks(8),
+        });
+      }
+      if (title === "Move 3") {
+        return article({ pageId: 303, canonicalTitle: title, links: [] });
+      }
+      if (title === "Target canonical") {
+        return article({ pageId: 1, canonicalTitle: title, links: [] });
+      }
+      throw new Error(`Unexpected rendered title: ${title}`);
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: wikipediaFetch({
+        targets: [target("Target", 1)],
+        starts: ["Start one", "Start two", "Start three"],
+        linkshereResponse: () => linkshereResponseWithTitles(["Move 3", ...inboundTitles(199)]),
+      }) as unknown as typeof fetch,
+      gateway,
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate(requiredRenderedRouteRequest())).rejects.toMatchObject({
+      code: "daily_candidate_unavailable",
+    });
+    expect(gateway.getArticle).toHaveBeenCalledWith("Move 3", expect.anything());
+  });
+
+  it("tries lower-ranked pairs, caches renders only within an attempt, and returns the first verified route", async () => {
+    const gateway = routeGateway((title) => {
+      if (title.startsWith("Start ")) {
+        return article({
+          pageId: startPageId(title),
+          canonicalTitle: title,
+          links: [
+            { href: "/wiki/Bad_bridge", title: "Bad bridge", anchorText: "Bad" },
+            { href: "/wiki/Good_bridge", title: "Good bridge", anchorText: "Good" },
+            ...allowedLinks(6),
+          ],
+        });
+      }
+      if (title === "Bad bridge") {
+        return article({ pageId: 301, canonicalTitle: title, links: [] });
+      }
+      if (title === "Good bridge") {
+        return article({
+          pageId: 302,
+          canonicalTitle: title,
+          links: [{ href: "/wiki/Target_B_canonical", title: "Target B canonical", anchorText: "Target B" }],
+        });
+      }
+      if (title === "Target B canonical") {
+        return article({ pageId: 2, canonicalTitle: title, links: [] });
+      }
+      if (title === "Target A canonical") {
+        return article({ pageId: 1, canonicalTitle: title, links: [] });
+      }
+      throw new Error(`Unexpected rendered title: ${title}`);
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: wikipediaFetch({
+        targets: [target("Target A", 1), target("Target B", 2)],
+        starts: [
+          { pageid: 101, title: "Start one" },
+          { pageid: 102, title: "Start two" },
+          { pageid: 103, title: "Start three" },
+          { pageid: 101, title: "Start one" },
+          { pageid: 102, title: "Start two" },
+          { pageid: 103, title: "Start three" },
+        ],
+        pageviewsResponseForTitle: (title) => monthlyPageviewsResponse(
+          title === "Target A canonical" ? 100_000 : 1_000,
+        ),
+        linkshereResponse: (url) => linkshereResponseWithTitles([
+          url.searchParams.get("titles") === "Target A canonical" ? "Bad bridge" : "Good bridge",
+          ...inboundTitles(199),
+        ]),
+      }) as unknown as typeof fetch,
+      gateway,
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate(requiredRenderedRouteRequest())).resolves.toMatchObject({
+      targetTitle: "Target B canonical",
+      referencePath: [expect.stringMatching(/^Start /), "Good bridge", "Target B canonical"],
+    });
+    await expect(evaluator.findCandidate(requiredRenderedRouteRequest())).resolves.toMatchObject({
+      targetTitle: "Target B canonical",
+    });
+
+    expect(gateway.getArticle.mock.calls.filter(([title]) => title === "Bad bridge")).toHaveLength(2);
+  });
+
+  it("preserves clicked redirect titles while checking canonical page identities", async () => {
+    const gateway = routeGateway((title) => {
+      if (title.startsWith("Start ")) {
+        return article({
+          pageId: startPageId(title),
+          canonicalTitle: title,
+          links: [
+            { href: "/wiki/Bridge_alias", title: "Bridge alias", anchorText: "Bridge" },
+            ...allowedLinks(7),
+          ],
+        });
+      }
+      if (title === "Bridge alias") {
+        return article({
+          pageId: 401,
+          canonicalTitle: "Bridge canonical",
+          links: [{ href: "/wiki/Target_canonical", title: "Target canonical", anchorText: "Target" }],
+        });
+      }
+      if (title === "Target canonical") {
+        return article({ pageId: 1, canonicalTitle: title, links: [] });
+      }
+      throw new Error(`Unexpected rendered title: ${title}`);
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: wikipediaFetch({
+        targets: [target("Target", 1)],
+        starts: ["Start one", "Start two", "Start three"],
+        linkshereResponse: () => linkshereResponseWithTitles(["Bridge alias", ...inboundTitles(199)]),
+      }) as unknown as typeof fetch,
+      gateway,
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate(requiredRenderedRouteRequest())).resolves.toMatchObject({
+      referencePath: [expect.stringMatching(/^Start /), "Bridge alias", "Target canonical"],
+    });
+  });
+
+  it("rejects a rendered route whose final redirect resolves to the wrong page identity", async () => {
+    const gateway = routeGateway((title) => {
+      if (title.startsWith("Start ")) {
+        return article({
+          pageId: startPageId(title),
+          canonicalTitle: title,
+          links: [
+            { href: "/wiki/Bridge", title: "Bridge", anchorText: "Bridge" },
+            ...allowedLinks(7),
+          ],
+        });
+      }
+      if (title === "Bridge") {
+        return article({
+          pageId: 401,
+          canonicalTitle: title,
+          links: [{ href: "/wiki/Target_canonical", title: "Target canonical", anchorText: "Target" }],
+        });
+      }
+      if (title === "Target canonical") {
+        return article({ pageId: 999, canonicalTitle: "Wrong target", links: [] });
+      }
+      throw new Error(`Unexpected rendered title: ${title}`);
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: wikipediaFetch({
+        targets: [target("Target", 1)],
+        starts: ["Start one", "Start two", "Start three"],
+        linkshereResponse: () => linkshereResponseWithTitles(["Bridge", ...inboundTitles(199)]),
+      }) as unknown as typeof fetch,
+      gateway,
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate(requiredRenderedRouteRequest())).rejects.toMatchObject({
+      code: "daily_candidate_unavailable",
+    });
+  });
+
+  it("does not turn an abort during rendered-route verification into a selected candidate", async () => {
+    const controller = new AbortController();
+    const gateway = routeGateway((title) => {
+      if (title.startsWith("Start ")) {
+        return article({
+          pageId: startPageId(title),
+          canonicalTitle: title,
+          links: [
+            { href: "/wiki/Bridge", title: "Bridge", anchorText: "Bridge" },
+            ...allowedLinks(7),
+          ],
+        });
+      }
+      controller.abort();
+      throw new DOMException("Aborted", "AbortError");
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: wikipediaFetch({
+        targets: [target("Target", 1)],
+        starts: ["Start one", "Start two", "Start three"],
+        linkshereResponse: () => linkshereResponseWithTitles(["Bridge", ...inboundTitles(199)]),
+      }) as unknown as typeof fetch,
+      gateway,
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate({
+      ...requiredRenderedRouteRequest(),
+      signal: controller.signal,
+    })).rejects.toMatchObject({ code: "daily_candidate_timeout" });
+  });
+
+  it("checks cancellation again before accepting an otherwise cached verified route", async () => {
+    const controller = new AbortController();
+    const gateway = routeGateway((title) => {
+      if (title.startsWith("Start ")) {
+        return article({
+          pageId: startPageId(title),
+          canonicalTitle: title,
+          links: [
+            { href: "/wiki/Bridge", title: "Bridge", anchorText: "Bridge" },
+            ...allowedLinks(7),
+          ],
+        });
+      }
+      if (title === "Bridge") {
+        controller.abort();
+        return article({
+          pageId: 401,
+          canonicalTitle: title,
+          links: [{ href: "/wiki/Target_canonical", title: "Target canonical", anchorText: "Target" }],
+        });
+      }
+      if (title === "Target canonical") {
+        return article({ pageId: 1, canonicalTitle: title, links: [] });
+      }
+      throw new Error(`Unexpected rendered title: ${title}`);
+    });
+    const evaluator = createDailyCandidateEvaluator({
+      fetchImpl: wikipediaFetch({
+        targets: [target("Target", 1)],
+        starts: ["Start one", "Start two", "Start three"],
+        linkshereResponse: () => linkshereResponseWithTitles(["Bridge", ...inboundTitles(199)]),
+      }) as unknown as typeof fetch,
+      gateway,
+      now: () => NOW,
+    });
+
+    await expect(evaluator.findCandidate({
+      ...requiredRenderedRouteRequest(),
+      signal: controller.signal,
+    })).rejects.toMatchObject({ code: "daily_candidate_timeout" });
+  });
+
+  it("counts the Worker gateway's physical retry against the same request ceiling", async () => {
+    vi.useFakeTimers();
+    const rawFetch = wikipediaFetch({
+      targets: [target("Target", 1)],
+      starts: ["Start one", "Start two", "Start three"],
+    });
+    let parseCalls = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.searchParams.get("action") === "parse") {
+        parseCalls += 1;
+        if (parseCalls === 1) {
+          return await new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            }, { once: true });
+          });
+        }
+        const title = url.searchParams.get("page") ?? "";
+        return jsonResponse({
+          parse: {
+            pageid: startPageId(title),
+            revid: 10,
+            title,
+            text: `<p>${allowedLinks(8).map((link) => `<a href="${link.href}">${link.anchorText}</a>`).join(" ")}</p>`,
+          },
+        });
+      }
+      return (rawFetch as unknown as typeof fetch)(input, init);
+    }) as unknown as typeof fetch;
+    try {
+      const evaluator = createDailyCandidateEvaluator({
+        fetchImpl,
+        gatewayFactory: createWorkerWikipediaGateway,
+        now: () => NOW,
+        // Ten raw requests precede rendering. The first physical render
+        // attempt consumes request 11; its timed retry must be refused by
+        // this unchanged ceiling before reaching the underlying fetch.
+        maxRequests: 11,
+      });
+
+      const assertion = expect(evaluator.findCandidate({
+        dailyDate: "2026-07-17",
+        flavor: "recognizable",
+      })).rejects.toMatchObject({ code: "daily_candidate_unavailable" });
+      await vi.advanceTimersByTimeAsync(5_250);
+      await assertion;
+      expect(parseCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 function target(
@@ -917,6 +1496,48 @@ function gatewayForStarts(links = allowedLinks(8)) {
     })),
     clear: () => undefined,
   };
+}
+
+function gatewayForVerifiedMove3Targets(targetCount: number) {
+  return routeGateway((title) => {
+    if (title.startsWith("Start ")) {
+      return article({ pageId: startPageId(title), canonicalTitle: title, links: allowedLinks(8) });
+    }
+    if (title === "Move 3") {
+      return article({
+        pageId: 303,
+        canonicalTitle: title,
+        links: Array.from({ length: targetCount }, (_unused, index) => ({
+          href: `/wiki/Target_${index + 1}_canonical`,
+          title: `Target ${index + 1} canonical`,
+          anchorText: `Target ${index + 1}`,
+        })),
+      });
+    }
+    const matchedTarget = /^Target (\d+) canonical$/.exec(title);
+    if (matchedTarget) return article({ pageId: Number(matchedTarget[1]), canonicalTitle: title, links: [] });
+    throw new Error(`Unexpected rendered title: ${title}`);
+  });
+}
+
+function routeGateway(resolve: (title: string) => Article) {
+  return {
+    getArticle: vi.fn(async (title: string) => resolve(title)),
+    clear: () => undefined,
+  };
+}
+
+function startPageId(title: string): number {
+  return title === "Start one" ? 101 : title === "Start two" ? 102 : 103;
+}
+
+function requiredRenderedRouteRequest() {
+  return {
+    dailyDate: "2026-07-17",
+    flavor: "recognizable" as const,
+    computeReferencePath: true,
+    requireVerifiedReferencePath: true,
+  } as Parameters<ReturnType<typeof createDailyCandidateEvaluator>["findCandidate"]>[0];
 }
 
 function allowedLinks(count: number) {

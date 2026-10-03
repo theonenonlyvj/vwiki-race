@@ -282,6 +282,8 @@ describe("daily challenge D1 jobs", () => {
       excludedTargetTitles: expect.any(Set),
       excludedStartTitles: expect.any(Set),
       computeReferencePath: true,
+      requireVerifiedReferencePath: true,
+      automaticRetryCursor: 1,
     });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT id, daily_date FROM challenges WHERE daily_date = '2026-07-15'",
@@ -324,6 +326,8 @@ describe("daily challenge D1 jobs", () => {
       excludedTargetTitles: expect.any(Set),
       excludedStartTitles: expect.any(Set),
       computeReferencePath: true,
+      requireVerifiedReferencePath: true,
+      automaticRetryCursor: 1,
     });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT flavor FROM daily_features WHERE daily_date = ?",
@@ -371,6 +375,8 @@ describe("daily challenge D1 jobs", () => {
       excludedTargetTitles: expect.any(Set),
       excludedStartTitles: expect.any(Set),
       computeReferencePath: true,
+      requireVerifiedReferencePath: true,
+      automaticRetryCursor: 2,
     });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT daily_date FROM challenges WHERE start_title = 'Retry start'",
@@ -542,10 +548,11 @@ describe("daily challenge D1 jobs", () => {
     expect(createDailyCandidateSource).not.toHaveBeenCalled();
     expect(findCandidate).not.toHaveBeenCalled();
     await expect(env.VWIKI_RACE_DB.prepare(
-      "SELECT challenge_id, selection_source FROM daily_features WHERE daily_date = '2026-07-16'",
+      "SELECT challenge_id, selection_source, classifier_version FROM daily_features WHERE daily_date = '2026-07-16'",
     ).first()).resolves.toEqual({
       challenge_id: "queue-first-challenge",
       selection_source: "admin",
+      classifier_version: "editorial-v1",
     });
   });
 
@@ -602,6 +609,8 @@ describe("daily challenge D1 jobs", () => {
       excludedTargetTitles: expect.any(Set),
       excludedStartTitles: expect.any(Set),
       computeReferencePath: true,
+      requireVerifiedReferencePath: true,
+      automaticRetryCursor: 1,
     });
     await expect(env.VWIKI_RACE_DB.prepare(
       "SELECT status FROM daily_queue_entries WHERE id = ?",
@@ -662,7 +671,7 @@ describe("daily challenge D1 jobs", () => {
         targetTitle: "Automatic target",
         targetPageId: 7302,
       },
-      classifierVersion: "editorial-v1",
+      classifierVersion: "editorial-v1+verified-path-v1",
       selectedScore: 79,
     });
     expect(acceptDailyChallenge).not.toHaveBeenCalled();
@@ -960,6 +969,8 @@ describe("no-repeat exclusions (owner incident, 2026-07-29 - a target is used on
       dailyDate: "2026-07-15",
       flavor: "recognizable",
       computeReferencePath: true,
+      requireVerifiedReferencePath: true,
+      automaticRetryCursor: 1,
     });
     expect(acceptDailyFeature).toHaveBeenCalledTimes(1);
     expect(consoleInfo.mock.calls.some(([, payload]) =>
@@ -1011,6 +1022,8 @@ describe("no-repeat exclusions (owner incident, 2026-07-29 - a target is used on
       dailyDate: "2026-07-15",
       flavor: "recognizable",
       computeReferencePath: true,
+      requireVerifiedReferencePath: true,
+      automaticRetryCursor: 1,
     });
   });
 });
