@@ -10,10 +10,9 @@ than restating the spec.
 ## Conventions
 
 - Work in `.worktrees/redesign`, branch `claude/redesign`. Never touch the
-  main checkout `/Users/vijayram/Cursor/vwiki-race`.
+  separate main checkout.
 - Both suites green before every commit (`npm test`, `npm run test:worker`);
-  `npm run build` before any release. Commits end with `Co-Authored-By:
-  Claude Fable 5 <noreply@anthropic.com>`.
+  `npm run build` before any release. Commit as the repository owner without co-author trailers.
 - Before Increment 1 and again before Increment 2, get a Codex merge-window
   agreement (clean tree, pushed, ff-only) — App.tsx is "the single highest
   merge-conflict-risk piece of the whole project" (council).

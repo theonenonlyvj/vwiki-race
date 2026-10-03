@@ -8,8 +8,7 @@ covers everything that happened between the UX redesign shipping
 procedure, the invariants below, or the open decisions — several of them
 encode a bug that cost real time to find, twice.
 
-Vijay's own framing, verbatim, from when he handed this project over: **"Claude
-is in charge of this game."** He reviews screenshots personally, texts real
+The game maintainer is engine-neutral. The owner reviews screenshots personally, texts real
 friends for feedback, and expects the agent to run the full council →
 implement → adversarial-review → ship loop without hand-holding. He decides
 fast when given ladders/options with a recommendation; he does not want to be
@@ -730,17 +729,11 @@ occurrence: exhaustion beacons via `POST /api/client-error` and structured
 `vgames_identity_call` proxy-side logs mean a new stall doesn't need a fresh
 manual evidence table — query the existing logs first.
 
-## 6. Community snapshot
+## 6. Community feedback
 
-Roughly a dozen real players as of this handoff: `theonenonlyvj` (owner),
-`lollerskates`, `rnaik24`, `Reks`, `FranTheGreat`, `chase3`, `mattman`,
-`Sylvia`, `RG`, `vinay`, `enthree`, `Goat`, `L`, `Mesh`, `Nisha`, `Rhubarb2`,
-`RK`, `SunnyD`, `jvtyson` — growing weekly. Vijay texts friends directly for
-feedback; their reports (lollerskates' old-iPhone bugs, a friend's "wrong
-link" redirect report, Vijay's own catalog screenshot that cracked the
-stall mystery) have driven multiple real fix cycles. Treat a friend bug
-report as high-signal, not anecdotal — it has been the proximate cause of
-several of the fixes in §1.
+Direct player feedback has driven fixes for older mobile browsers, redirect
+handling, and API connectivity. Keep player rosters and account identifiers
+in private operational records rather than public handoff documentation.
 
 ## 7. Open owner decisions (ask, don't guess)
 

@@ -47,7 +47,7 @@ describe("API origin", () => {
 
   it.each([
     "http://api.example.com",
-    "http://192.168.1.20:8787",
+    "http://192.0.2.20:8787",
     "http://0.0.0.0:8787",
   ])("rejects a non-loopback HTTP origin during development: %s", (value) => {
     expect(() => resolveApiOrigin(value)).toThrow("canonical HTTPS or loopback HTTP origin");

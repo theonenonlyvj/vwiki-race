@@ -113,11 +113,17 @@ Run the frontend against a local Worker:
 VITE_VWIKI_RACE_API_URL=http://127.0.0.1:8787 npm run dev -- --host 127.0.0.1
 ```
 
-Production builds require an HTTPS canonical Worker origin:
+Production builds normally leave the API override unset so Pages uses its
+same-origin API proxy:
 
 ```bash
-VITE_VWIKI_RACE_API_URL=https://vwikirace-api.example.workers.dev npm run build
+env -u VITE_VWIKI_RACE_API_URL npm run build
 ```
+
+Do not create a tracked `.env.production`. To deliberately bypass the Pages
+proxy during an incident, supply `VITE_VWIKI_RACE_API_URL` with the canonical
+HTTPS Worker origin for that build only. This is a rollback override, not the
+normal release configuration. Rebuild without it to restore same-origin routing.
 
 Run the complete test gates:
 

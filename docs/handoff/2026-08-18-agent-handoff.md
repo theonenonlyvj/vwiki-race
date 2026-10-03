@@ -71,38 +71,15 @@ npx wrangler d1 execute vwiki-race --remote --config wrangler.api.toml \
 
 ## Open work
 
-### 1. `kaymck` duplicate account — BLOCKED on a permission
+### 1. Historical account-consolidation investigation
 
-One human, two ghost accounts, created ten minutes apart on 2026-08-13. They
-started a run and abandoned it, then came back as a *new* account (probably a
-fresh tab / lost session) and finished. On the boards they read as two separate
-people with one race each instead of one person with two races and one finish.
+This account-specific investigation is superseded by the player-continuity
+release. Private recovery records retain the account details. Never infer
+shared ownership from similar names or replay a completed merge.
 
-```
-aa98b1e6-9b2c-4026-a21e-dbacd25a5a83   1 run, 0 completed, 19:00:34   <- merge THIS
-2705ec8d-f405-4e6e-9edb-f52f16698d2e   1 run, 1 completed, 19:10:14   <- INTO this
-```
-
-Both are `identity_status = ghost` with no password, so no login breaks. Vijay
-approved the intent. It is blocked because the documented `/admin/merge` flow
-needs `wrangler secret put ADMIN_JWT_SECRET`, and Claude Code's permission
-classifier refuses that command. It needs Vijay to allow it, then:
-
-1. set the secret (`printf '%s' "$(cat file)"` — piping `cat` stores the
-   trailing newline and every signed token then 401s)
-2. dry-run, then execute with `confirmNonce`
-3. **delete the secret and verify it is absent** — `wrangler secret delete` has
-   no `--force`, so pipe `yes |` and always re-check `secret list`; a failed
-   delete prints an unrelated-looking usage error and leaves the secret live
-4. write the `account_aliases` row in vwiki-race so the boards unify immediately
-
-Six alias rows already exist, so the machinery works; only this one is stuck.
-
-**Open question for Vijay, do not act on it alone:** a ghost named **`Kayden`**
-(`bc994b57-b351-4be1-afc8-fe3fcb6540d8`) played and finished on 2026-08-18
-19:33. The name is close enough that it may be the same person on a third
-account, or a completely different player. The data cannot distinguish them.
-Ask; do not merge on a hunch.
+Operational lessons: avoid trailing newlines when provisioning a temporary
+secret, remove it after the operation, and verify its absence. Public docs
+must not contain live account identifiers or raw query responses.
 
 ### 2. Old-challenge navigation — designed, not built, needs Vijay's call
 
@@ -138,7 +115,7 @@ Vijay wants it "sleeker". Measured on the live site:
 - "Start your streak today" floats between two cards with no container.
 - The hero title truncates on phone.
 
-Screenshots: `agents-shared/scratch/2026-08-15-vwiki-viewgraph/shots/prod-landing-{phone,desktop}.png`.
+Screenshots are retained in private operational records.
 
 **Note: you cannot render the landing page from local dev.** The API's
 `ALLOWED_ORIGINS` is the Pages origin only, so a dev-server load shows the CORS
@@ -161,7 +138,7 @@ npm test && npm run test:worker && npm run build
 ```
 
 Real prod path data for any challenge, read-only:
-`agents-shared/scratch/2026-08-15-vwiki-viewgraph/dump-paths.sh <challenge-id>`.
+Use the private operational evidence archive.
 
 A screenshot harness that renders the real graph component at any viewport with
 real data lives in that same scratch folder under `harness/`, with restore

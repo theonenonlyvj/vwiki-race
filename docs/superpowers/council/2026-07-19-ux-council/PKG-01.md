@@ -1,11 +1,11 @@
 # PKG-01 [P0/M] One source of truth for "today's daily" (Home = Boards = Browse)
 
 ## Files
-- /Users/vijayram/Cursor/vwiki-race/src/modes/AppShell.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/domain/challengeSelection.ts
-- /Users/vijayram/Cursor/vwiki-race/src/modes/Boards.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/challenges/Browse.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/Home.tsx
+- src/modes/AppShell.tsx
+- src/domain/challengeSelection.ts
+- src/modes/Boards.tsx
+- src/modes/challenges/Browse.tsx
+- src/modes/Home.tsx
 
 ## Changes
 Kill the dual derivation in AppShell.tsx (~115-130): Boards' Today segment currently gets `selectDefaultChallenge` (which silently falls back to activeChallenges[0] — an arbitrary user challenge) while Home gets `selectHomeHeroChallenge` (honest yesterday-daily fallback with a `kind` field). Pass the same homeHero selection to Boards. When `kind !== "today-daily"`, Boards must render Home's honest framing ("YESTERDAY'S DAILY · <flavor>" badge, "New daily drops 5:00 AM Central") — never an unqualified "TODAY" label or "Race today's daily" CTA on a non-daily challenge. Make the activeChallenges[0] fallback unreachable from any nav surface: if no daily exists at all, show an explicit empty state. Delete the now-false comment at Boards.tsx:63-66 ("the two screens can never disagree"). Then add the spec-mandated pinned daily row at the top of Browse ("⭐ DAILY #N · pair" per mockup-browse-detail), sourced from the SAME homeHero selection, routing to Home via onSelectMode("home") — above "ALL CHALLENGES", visually distinct from the catalog.

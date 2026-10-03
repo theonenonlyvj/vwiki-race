@@ -26,7 +26,7 @@
 
 ### Task 1: Extend VGames Introspection With Canonical Identity Receipts
 
-**Repository:** `/Users/vijayram/Cursor/viota`
+**Repository:** `../viota`
 
 **Files:**
 - Modify: `packages/worker/src/identity/canonical.ts`
@@ -39,7 +39,7 @@
 
 - [ ] **Step 1: Create a local implementation branch and write failing identity tests**
 
-From `/Users/vijayram/Cursor/viota`, create `codex/vwiki-race-identity` without changing `main`. Extend the existing introspection suite with a ghost case and a merged-chain case:
+From `../viota`, create `codex/vwiki-race-identity` without changing `main`. Extend the existing introspection suite with a ghost case and a merged-chain case:
 
 ```ts
 it('returns the canonical display name and durable sorted aliases', async () => {
@@ -123,7 +123,7 @@ Expected: both commands PASS. Leave the branch uncommitted.
 
 ### Task 2: Establish the Versioned API Boundary and Typed Clients
 
-**Repository:** `/Users/vijayram/Cursor/vwiki-race`
+**Repository:** `.`
 
 **Files:**
 - Create: `src/services/apiOrigin.ts`
@@ -260,7 +260,7 @@ Expected: PASS with a test-origin value; a production build without the variable
 
 ### Task 3: Add the Compatibility Migration and Atomic D1 Run Protocol
 
-**Repository:** `/Users/vijayram/Cursor/vwiki-race`
+**Repository:** `.`
 
 **Files:**
 - Create: `d1/migrations/0003_hardening_protocol.sql`
@@ -384,7 +384,7 @@ Expected: PASS, including concurrency and `batch()` metadata assertions against 
 
 ### Task 4: Add Canonical Challenge, Leaderboard, Path, and Stats Projections
 
-**Repository:** `/Users/vijayram/Cursor/vwiki-race`
+**Repository:** `.`
 
 **Files:**
 - Modify: `src/server/apiHandlers.ts`
@@ -480,7 +480,7 @@ Expected: PASS with no leaderboard path query. Leave changes uncommitted.
 
 ### Task 5: Correct Wikipedia Parsing, Rendering, and Cache Scope
 
-**Repository:** `/Users/vijayram/Cursor/vwiki-race`
+**Repository:** `.`
 
 **Files:**
 - Modify: `src/services/wikipediaGateway.ts`
@@ -531,7 +531,7 @@ Expected: PASS. Leave changes uncommitted.
 
 ### Task 6: Replace the Client Race Flow With an Authoritative State Machine
 
-**Repository:** `/Users/vijayram/Cursor/vwiki-race`
+**Repository:** `.`
 
 **Files:**
 - Create: `src/hooks/useRaceController.ts`
@@ -598,7 +598,7 @@ Expected: PASS with no duplicate catalog request, no separate completion call, a
 
 ### Task 7: Finish Responsive UX, Documentation, and Deployment Verification
 
-**Repository:** `/Users/vijayram/Cursor/vwiki-race`
+**Repository:** `.`
 
 **Files:**
 - Modify: `src/styles.css`

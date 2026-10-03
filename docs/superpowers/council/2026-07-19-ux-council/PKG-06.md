@@ -1,9 +1,9 @@
 # PKG-06 [P1/M] Home parity with the ratified mockup: never a bare hero card
 
 ## Files
-- /Users/vijayram/Cursor/vwiki-race/src/modes/Home.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/components/TeachingGate.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/styles.css
+- src/modes/Home.tsx
+- src/components/TeachingGate.tsx
+- src/styles.css
 
 ## Changes
 This is the direct answer to 'the landing/home page doesn't line up with our original design' (mockup-home-stateful-v2 is always populated: hero + streak/avg chips + yesterday's board). (1) Kill the hollow state: Home.tsx:241 suppresses the 'Yesterday's results' BoardSnippet exactly when the hero IS yesterday's daily (`!yesterdayIsHero`) — the current prod state. Render the hero's already-fetched `heroBoardMatches` (Home.tsx:158) as the recap snippet in that branch; if no prior daily exists at all, fall back to a compact Boards summary. Home must have a board visible in every pre-play state. (2) StreakTrendRow (Home.tsx:307-321) returns null for guests/zero stats; give it a progress-framed empty state ('Start your streak today') instead of nothing. (3) Teaching gate per mockup-onboarding-v2: replace the one-liner with the numbered strip ('1 Start on an article · 2 Tap links inside the page · 3 Reach the target fast') for never-played visitors, auto-hiding after their first finished race, and add the spec's 'No account needed to look around.' line. Phase 2 note: if the numbered strip needs design time, ship items 1, 2, and the reassurance line first — they are the bulk of the visual parity. (4) Sparse layout: give `.home-layout` viewport-height distribution (min-height: calc(100dvh - chrome) + content alignment) so the mobile CTA doesn't strand in the top third above a void.

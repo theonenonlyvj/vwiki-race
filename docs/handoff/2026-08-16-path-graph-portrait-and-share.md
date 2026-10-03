@@ -229,7 +229,7 @@ that should catch them, and the one that wasn't checked was the one that lied.
 ## Tooling
 
 Screenshot harness (real component, real prod data, chosen viewport) is in
-`agents-shared/scratch/2026-08-15-vwiki-viewgraph/harness/` with restore
+the private operational evidence archive with restore
 instructions. It lives in the repo only while in use and is git-excluded via
 `.git/info/exclude`. Real payloads come from prod D1 via `./dump-paths.sh
 <challenge-id>` — read-only SELECTs replicating `getChallengePaths`' ranking.
@@ -244,11 +244,9 @@ Playwright browsers are at `~/Library/Caches/ms-playwright`; the binary is
    repo's "ship it" definition: commit → verify D1 migration ledger → deploy the
    API Worker → push `main` / let Pages deploy → prod smoke. No server or D1
    changes are in this batch, so it is a Pages-only deploy.
-2. **`kaymck` duplicate merge — still BLOCKED on permission.** Two ghosts, same
-   display name, 11 minutes apart 2026-08-13, neither claimed. Merge
-   `aa98b1e6-9b2c-4026-a21e-dbacd25a5a83` INTO
-   `2705ec8d-f405-4e6e-9edb-f52f16698d2e`. The Claude Code permission classifier
-   blocks `wrangler secret put`, which the documented `/admin/merge` flow needs.
+2. **Historical duplicate-account operation.** The later account-consolidation
+   record supersedes this incident. Private account identifiers and operational
+   payloads are retained only in the private evidence archive, not in this repo.
 3. **Old-challenge navigation — designed, not built.** Vijay: "looking at old
    challenges to look at the graph is kind of a navigation nightmare (or maybe
    i'm overthinking)". He is not overthinking: the graph button exists only on
@@ -277,7 +275,7 @@ Playwright browsers are at `~/Library/Caches/ms-playwright`; the binary is
    - **"Start your streak today"** floats between the hero card and the results
      card with no container of its own.
    - The hero title truncates on phone ("Cooper's Hill Cheese-Rolling and W…").
-   Screenshots: `agents-shared/scratch/2026-08-15-vwiki-viewgraph/shots/prod-landing-{phone,desktop}.png`.
+   Screenshots: the private operational evidence archive.
 5. `truncateTitle` collisions: two different articles can share a truncated
    label ("Semiconductor d…" appears twice in the 11-strand export). Cosmetic.
 6. Pre-existing `npm audit --omit=dev`: nanoid (high), postcss (moderate).

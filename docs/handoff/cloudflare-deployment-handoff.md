@@ -259,7 +259,7 @@ D1 and prevents Pages from pointing at an unverified API deployment.
 
 ## Release Gates
 
-From `/Users/vijayram/Cursor/vwiki-race`:
+From `.`:
 
 ```bash
 npm test

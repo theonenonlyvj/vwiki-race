@@ -1,12 +1,12 @@
 # PKG-09 [P1/L] Desktop layout pass: anchor the footer, dock the CTAs, fill the width
 
 ## Files
-- /Users/vijayram/Cursor/vwiki-race/src/styles.css
-- /Users/vijayram/Cursor/vwiki-race/src/modes/Home.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/Boards.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/You.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/challenges/Browse.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/challenges/ChallengeDetail.tsx
+- src/styles.css
+- src/modes/Home.tsx
+- src/modes/Boards.tsx
+- src/modes/You.tsx
+- src/modes/challenges/Browse.tsx
+- src/modes/challenges/ChallengeDetail.tsx
 
 ## Changes
 Ship in two stages inside this package. Stage 1 (mechanical, do first): (a) make the app shell a flex column with min-height:100vh so `.site-footer` anchors to the viewport bottom instead of stranding at ~y340 of 900px; (b) extract Home's `.daily-hero` desktop docking grid (styles.css:2592-2596, title-left/CTA-right) into a shared `.route-header` rule and apply it to Boards' and Challenge Detail's identical title+`.player-gate` pattern so their Race CTAs stop floating in dead space; (c) fix `.stat-grid` (1926-1930): 6 tiles in repeat(4) leaves a broken half row — use repeat(3) or auto-fit minmax(160px,1fr); (d) cap Browse's search input at ~420px. Stage 2 (phase 2 within this package, needs owner sign-off since no desktop mockups exist): real ≥880px compositions per mode — Home/You as content-left + rail-right (~60/40: board/streak peek beside the hero; stats beside top-starts/targets), Challenges as a 2-up card grid — rather than the current 'recenter the phone column in more black'.

@@ -1,9 +1,9 @@
 # PKG-04 [P0/M] Brand system: coral = race action only, restore the slanted motif, fix the Browse coral-wash bug
 
 ## Files
-- /Users/vijayram/Cursor/vwiki-race/src/styles.css
-- /Users/vijayram/Cursor/vwiki-race/src/modes/challenges/ChallengeDetail.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/AppShell.tsx
+- src/styles.css
+- src/modes/challenges/ChallengeDetail.tsx
+- src/modes/AppShell.tsx
 
 ## Changes
 This is the core 'buttons/look-and-feel' consistency package the owner asked for. (1) Fix the Browse coral wash: `.challenge-list span { color:#ffad9f }` (styles.css:1704) outweighs the `.browse-card-title-row { color:inherit }` reset (1733, verified in code). Scope coral to a dedicated `.route-arrow` class only, or raise the reset's specificity (`.challenge-list .browse-card-title-row, .challenge-list .browse-card-meta`), so card titles are white and meta muted grey per mockup-browse-detail. (2) Canonical race CTA: add `className="start-race-button"` to ChallengeDetail's bare 'Race this' button (verified bare at ChallengeDetail.tsx ~60) so all race entry points are coral. (3) Enforce the ratified rule 'coral reserved for Start/End Run-class actions': switch `.mode-nav button.active` (658-662), `.board-segment-control button.active` (847-851), and `.auth-mode-switch button[aria-pressed=true]` (261-265) from coral fill to the mockups' teal outline/underline active treatment (see mockup-boards-trends, mockup-onboarding-v2); restyle `.daily-badge` (367-381) to a teal-outline pill so Home's hero has exactly one coral element. (4) Restore the clip-path motif on `.mode-nav button` (remove `clip-path:none` at 649, or a smaller cut sized for 44-48px buttons) and verify the ≤350px compaction breakpoint; give inactive nav buttons a real hover affordance instead of zeroing box-shadow/transform. (5) Link convention: make `.leaderboard summary` teal-underlined like `.link-button`; standardize small-caps section labels (`.stats-panel h3`) to the neutral grey of `.challenge-route span`. (6) Header lockup: drop or replace the mini 'VWiki' `.viota-mark` stacked above the 'VWiki Race' h1 (AppShell.tsx:173-175) — mockups show a single wordmark. (7) Wrap Challenge Detail's leaderboard+history in the shared card chrome (`.leaderboard-panel` group at styles.css:1431-1442) so it stops being the only mode with no frame. (8) While editing these rules, add `--muted-label:#9fb8bd` and `--text-bright:#dffbfb` tokens and point the ~35 raw-hex occurrences of #eef7f8/#9fb8bd/#dffbfb at var() tokens.

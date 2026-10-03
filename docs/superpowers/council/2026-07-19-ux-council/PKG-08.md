@@ -1,8 +1,8 @@
 # PKG-08 [P1/M] Race takeover scope: chrome back on Preview/Results, dark-skin the white preview card
 
 ## Files
-- /Users/vijayram/Cursor/vwiki-race/src/race/RaceFlow.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/styles.css
+- src/race/RaceFlow.tsx
+- src/styles.css
 
 ## Changes
 (1) RaceFlow.tsx:228-263 wraps PreRacePreview, RaceMode, AND RaceResults in one fixed-position `.race-takeover`; mockup-race-flow-v3 scopes the 'no tabs here — fully focused' treatment to step 2 (active race) only, keeping header + nav on steps 1 and 3. Split the takeover: RaceMode stays chrome-free; Preview and Results render inside the normal AppShell. (2) Reskin the preview card from raw Wikipedia styling to brand: `.pre-race-copy` (styles.css:1082-1092, #f8f9fa background / #202122 text), `.target-preview-blurb` (Georgia serif), `.target-preview-attribution a` (#36c Wikipedia blue) → the app's --ink-raised/--line surface, UI font, light text, var(--cyan) links — the same treatment `.recovery-notice` (1147-1158) already uses. All three preview/race-flow mockups show this card dark. IMPORTANT: the in-race article body keeps its raw Wikipedia styling — that is spec-approved; only the preview card changes. (3) Desktop: tie the floating back button into the preview card's composition (shared grid/max-width) so it stops orphaning 190px above the card.

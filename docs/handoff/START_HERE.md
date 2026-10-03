@@ -22,7 +22,7 @@ already cost real debugging time (some twice), the open owner decisions
 awaiting an answer, and the owner-approved work queue. This file is
 orientation; that one is operating knowledge.
 
-Vijay's own framing: **"Claude is in charge of this game."** He reviews
+The game maintainer is engine-neutral. The owner reviews
 screenshots personally, texts real friends for feedback, and expects the
 council → implement → adversarial-review → ship loop to run without
 hand-holding.
@@ -34,7 +34,7 @@ A temporary landing apology shipped after that release; see `docs/superpowers/pl
 - Production: <https://vwikirace.pages.dev>
 - GitHub: <https://github.com/theonenonlyvj/vwiki-race>
 - Canonical API (fallback/rollback path): <https://vwikirace-api.theonenonlyvj.workers.dev>
-- VGames identity (separate repo): <https://vgames-identity.theonenonlyvj.workers.dev>, source at `/Users/vijayram/Cursor/games/vgames-platform/services/identity`
+- VGames identity (separate repo): <https://vgames-identity.theonenonlyvj.workers.dev>, source at `../vgames-platform/services/identity`
 - Protected Daily moderation route: <https://vwikirace.pages.dev/admin/dailies>
 - Runtime release commit: `e7b001c` (measurement and visual UX; preceding discovery/recovery `438901b`), pushed to `origin/main` on 2026-09-19. Later documentation-only commits do not change the deployed artifact.
 - Live Worker version: `7262fcf4-3424-4631-a4f8-5ce719e6d22d`.
@@ -42,7 +42,7 @@ A temporary landing apology shipped after that release; see `docs/superpowers/pl
 - Verified release gates: **1470 client tests / 290 Worker tests passing**, production build and bundle check, Worker dry run, independent review, live data and browser navigation smoke. Identity remains unchanged from its preceding 142-test release.
 - Dependency audit has four pre-existing advisories (two high, two moderate); upgrades remain follow-up. See the release receipt for packages and evidence.
 - Production migration ledger contains `0001` through `0007`, matching local inventory. No game migration was needed; identity additive reset migration 0002 applied before identity code. Never replay an applied migration.
-- Product measurement: `npm run report:health` creates an ignored private report from existing D1 data; see `docs/product-health-report.md`. No scheduled monitoring is installed. Owner deferred replacement-today admin UI/queued backups and prefers agent-requested hot swaps.
+- Product measurement: `npm run report:health` creates an ignored private report from existing D1 data; see `docs/product-health-report.md`. No scheduled monitoring is installed. Owner deferred replacement-today admin UI/queued backups and allows hot swaps only on explicit request; they are not a standing duty.
 - Automatic dailies: Recognizable Monday–Friday, Hard weekends. Historical Weird metadata remains readable; new queue entries must use Recognizable or Hard. Sanitizer-verified path gating remains follow-up.
 - Remembered login: same-origin HttpOnly cookie, 30-day idle / 90-day absolute expiry; existing 24-hour access tokens renew automatically. See latest receipt for migration and rollback details.
 - `MAINTENANCE_MODE=false` (normal production mode).
@@ -397,7 +397,7 @@ Browser
   option.
 - VGames owns credentials, uniqueness, ghost accounts, sessions, and account
   merging, from a **separate repository**
-  (`/Users/vijayram/Cursor/games/vgames-platform/services/identity`) — read-only
+  (`../vgames-platform/services/identity`) — read-only
   from this repo. VWiki Race stores only canonical IDs/aliases needed to own
   game history.
 
@@ -534,10 +534,10 @@ commands and their gotchas are also fully spelled out in the companion doc's
 
 ## Next Session
 
-1. Read `/Users/vijayram/Cursor/AGENTS.md`, this file, and
+1. Read `AGENTS.md`, this file, and
    `docs/handoff/2026-07-26-agent-handoff.md` in full — the second document
    carries the operating detail this one only summarizes.
-2. From `/Users/vijayram/Cursor/vwiki-race`, run `git status` and `git log`.
+2. From `.`, run `git status` and `git log`.
    Do not work from the umbrella folder.
 3. Reconfirm the live Worker version (`wrangler deployments list --config
    wrangler.api.toml`) and the live Pages bundle hash (curl/view-source

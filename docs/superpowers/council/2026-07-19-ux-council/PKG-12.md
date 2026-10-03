@@ -1,11 +1,11 @@
 # PKG-12 [P1/M] Dialog & interaction hardening: modal placement bug, inert, focus, touch targets
 
 ## Files
-- /Users/vijayram/Cursor/vwiki-race/src/components/TeachingGate.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/components/ModalDialog.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/styles.css
-- /Users/vijayram/Cursor/vwiki-race/src/race/RaceResults.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/App.tsx
+- src/components/TeachingGate.tsx
+- src/components/ModalDialog.tsx
+- src/styles.css
+- src/race/RaceResults.tsx
+- src/App.tsx
 
 ## Changes
 (1) How-to-play placement: TeachingGate.tsx:56 borrows the `identity-dialog` class for base styling, so the popup matches `.modal-backdrop:has(.identity-dialog)` (styles.css:2420) — a top-anchor rule built solely for the iOS Safari keyboard bug in the save-stats dialog — producing the top-pinned card with a half-screen dead zone on mobile. Remove the shared class (share visual rules via a selector group `.identity-dialog, .teaching-gate-dialog { … }`) or rescope the :has() to a new `.save-stats-dialog` class only the real dialog carries; How-to-play falls back to the default centered/bottom-sheet placement End Run already uses. While there, give `.teaching-gate-dialog` real rules (heading ~1.8rem like `.recovery-notice h2`, tighter padding, softer shadow) so a 3-line tip stops wearing signup-form chrome. (2) Modality: when any ModalDialog opens, set `inert` on the sibling `.shell-topbar`/`.content-shell`/`.site-footer` so virtual-cursor AT can't wander into the background; clear on close. (3) Focus: on RaceResults mount, move focus to the result heading (tabIndex=-1 + ref.focus()), covering the DNF case where nothing currently receives focus. (4) Focus ring: replace the near-invisible `.name-control input:focus` outline (rgba cyan @0.22, ~1.7:1) with the app's strong :focus-visible ring or a solid ≥3:1 equivalent. (5) Targets: min-height 44px for `.auth-mode-switch button` and identity-form buttons (simplest: `.identity-dialog button { min-height:44px }`), and make `.target-reference summary`'s 44px the base rule, not mobile-only. (6) In App.tsx handleArticleClick (~1237-1253), bail out of preventDefault when ctrlKey/metaKey/shiftKey or button!==0 so modifier/middle-click behaves natively.

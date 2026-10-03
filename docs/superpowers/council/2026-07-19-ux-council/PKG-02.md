@@ -1,9 +1,9 @@
 # PKG-02 [P0/M] Race HUD: restore the always-on timer + click counter (and fix the label contrast on the same screen)
 
 ## Files
-- /Users/vijayram/Cursor/vwiki-race/src/race/RaceMode.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/race/RaceFlow.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/styles.css
+- src/race/RaceMode.tsx
+- src/race/RaceFlow.tsx
+- src/styles.css
 
 ## Changes
 In live prod the `<dl className="run-metrics">` (RaceMode.tsx:93-108, Clicks/Timer/Target chips) never paints, while its sibling PathStrip — gated on the same `session` truthy check — does. Six lenses independently confirmed this against mockup-race-flow-v3's 'Timer + clicks always on' contract. Debug systematically: (a) is prod running this code at all (stale deploy)? (b) is the `.race-hud` grid's 'metrics' row (styles.css:1020-1050) collapsing to zero height or being clipped by the sticky/backdrop-filter container? (c) is the session prop threading from RaceFlow stale? Restore a compact always-visible HUD row ('0:14 · 3 clicks' style) at every breakpoint; consider dropping run-metrics' duplicate Target chip since PathStrip already renders one. While in this screen, fix the WCAG AA failure: `.article-heading span` renders #9fb8bd muted-label color on the white article card (~2.1:1) — scope a dark color (e.g. #54595d, matching .attribution) to the light article-panel context. Add an automated visual/e2e assertion that Timer and Clicks are visible and non-empty during an active run so this can never silently regress again.

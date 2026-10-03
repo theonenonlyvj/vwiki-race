@@ -1,8 +1,8 @@
 # PKG-10 [P0/M] Boards fixes: illegible ranked row, segment overflow, tablist semantics, CTA order
 
 ## Files
-- /Users/vijayram/Cursor/vwiki-race/src/modes/Boards.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/styles.css
+- src/modes/Boards.tsx
+- src/styles.css
 
 ## Changes
 (1) P0 — the overlap smear: at ≥880px the ranked trend row renders name and 'avg #X.X (N dailies)' superimposed ('theeoge#h0ly3jdailies'). Cause: `.board-snippet li` and its only child `.trend-row-toggle` are BOTH 3-column grids with the same template (styles.css:874-889, 1554-1560, desktop override 2579-2584), so the button auto-places into the li's first 2.4em track and its inner columns overflow it. Fix: give `.trend-row-toggle` `grid-column: 1 / -1` (or drop grid from the li when it wraps a toggle), give the name column `minmax(0,1fr)` with ellipsis — mirroring the codebase's own 'Bug A fix' at styles.css:911-933 that was applied to unranked rows but never ranked ones. Verify at 880/1024/1440. (2) Segment control: make all 5 segments fit at 375-390px via the narrow-width font/padding pattern the spec's council notes called for, or move Lifetime behind 30d (spec Open Question 1's fallback). If it still scrolls at very narrow widths, make the edge fade scroll-aware or add an inert end spacer so a selected 'Lifetime' pill never renders half-faded, and keep a passive 'more' hint. (3) ARIA: complete the tablist pattern (roving tabindex, ArrowLeft/Right, aria-controls + role=tabpanel) or drop tab roles for the aria-pressed toggle-group pattern .mode-nav already uses correctly. (4) Give `.trend-row-toggle` min-height 44px (currently min-height:0/padding:0). (5) Move 'Race today's daily' below the leaderboard/DNF block per mockup-boards-trends' see-the-board-then-commit order.

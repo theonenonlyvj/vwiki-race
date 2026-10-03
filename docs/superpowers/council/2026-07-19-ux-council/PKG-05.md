@@ -1,10 +1,10 @@
 # PKG-05 [P1/M] Results screen rework: hierarchy, routing, share-first, DNF is not a dead end
 
 ## Files
-- /Users/vijayram/Cursor/vwiki-race/src/race/RaceResults.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/App.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/styles.css
-- /Users/vijayram/Cursor/vwiki-race/src/race/shared.tsx
+- src/race/RaceResults.tsx
+- src/App.tsx
+- src/styles.css
+- src/race/shared.tsx
 
 ## Changes
 (1) Hierarchy: give 'Try again'/'Play again' the coral `.start-race-button` class and 'View leaderboard' the existing `.secondary-button` (styles.css:296-299) — verified both are currently bare `<button>`s (RaceResults.tsx:141-152). (2) Routing: App.tsx:1316 unconditionally sends 'View leaderboard' to global Boards even after a custom-challenge race; route through the existing `exitCompletedRaceToChallenge(challenge.id)` (App.tsx:845-850, already used by onOpenChallenge one prop over) whenever the raced challenge isn't today's actual daily. (3) Share: move ShareResultButton from dead-last to directly under the result header with a distinct treatment, and un-gate both ShareResultButton and ClaimCta from `status === "completed"` (RaceResults.tsx:172-187) so DNF runs can share ('DNF · 0:04 · 1 clk — beat that') and guests can still claim after a loss. (4) Surface: return `.result-panel` (styles.css:1444-1453) from the one-off coral-tinted wash to the standard --ink-raised/--line card, keeping coral as a left-border accent like `.daily-hero`. (5) Copy/exits: first-use expansion 'DNF — Did not finish' in DnfResultHeader; demote PlayAnotherCard to the mockup's smaller bordered secondary card; add a low-emphasis Home text link so the daily loop can close on Home.

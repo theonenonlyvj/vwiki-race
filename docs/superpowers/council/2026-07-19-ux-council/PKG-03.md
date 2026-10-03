@@ -1,11 +1,11 @@
 # PKG-03 [P0/M] Leaderboard integrity: one rank per account, no spoilers, no debug badges, one time per run
 
 ## Files
-- /Users/vijayram/Cursor/vwiki-race/src/components/LeaderboardList.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/components/BoardSnippet.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/domain/boardSnippet.ts
-- /Users/vijayram/Cursor/vwiki-race/src/modes/challenges/ChallengeDetail.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/race/RaceResults.tsx
+- src/components/LeaderboardList.tsx
+- src/components/BoardSnippet.tsx
+- src/domain/boardSnippet.ts
+- src/modes/challenges/ChallengeDetail.tsx
+- src/race/RaceResults.tsx
 
 ## Changes
 Five changes to the boards-rendering trio so every leaderboard surface tells the same truth. (1) Best-rank-per-account everywhere: Results' snippet (boardSnippetRowsFromLeaderboard, boardSnippet.ts:62-74) and Challenge Detail's LeaderboardList rank every attempt, so one account fills multiple slots ('#1 theonenonlyvj / #2 theonenonlyvj'). Collapse to the same best-per-account rule Home's getChallengeBoard already applies (client-side: group RankedLeaderboardRow by accountId, keep min rank, re-rank — but verify the tie-break matches the server rule). Repeat attempts live in 'Your history', not as extra board rows. (2) Anti-spoiler: LeaderboardList.tsx:50-63 renders 'View winning path' unconditionally, violating invariant 5; add a `pathsUnlocked` prop computed in ChallengeDetail from yourRows containing a non-abandoned run, showing Boards' 'Paths hidden until you've played' copy otherwise. (3) Delete the 'Server tracked' badge (it's the default, not information) and the 'Repeat run' badge (moot after dedup); keep only 'Historical' for pre-migration rows, with a tap-to-reveal explanation (details element) instead of a hover-only title attribute. (4) Add the `.is-you` + '(you)' self-row treatment to LeaderboardList, matching Boards/BoardSnippet. (5) Results header vs board row disagree on the just-finished run's time (client 0:04 vs server 0:05): once the server row lands, render the server-persisted elapsed in the header too — one source of truth.

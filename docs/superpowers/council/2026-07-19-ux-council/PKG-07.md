@@ -1,13 +1,13 @@
 # PKG-07 [P1/M] Daily ritual identity: daily numbering, live countdown, streak on You
 
 ## Files
-- /Users/vijayram/Cursor/vwiki-race/src/domain/dailyEditorial.ts
-- /Users/vijayram/Cursor/vwiki-race/src/modes/Home.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/Boards.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/race/PreRacePreview.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/You.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/components/TeachingGate.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/race/shared.tsx
+- src/domain/dailyEditorial.ts
+- src/modes/Home.tsx
+- src/modes/Boards.tsx
+- src/race/PreRacePreview.tsx
+- src/modes/You.tsx
+- src/components/TeachingGate.tsx
+- src/race/shared.tsx
 
 ## Changes
 Every ratified mockup shows 'DAILY · WEIRD · #7' and '1:23 left today'; neither shipped. (1) Sequential daily number: derive N from the date-ordered daily list (NOT challenge ids — the in-race 'CHALLENGE #7' kicker is a global creation counter and misleading for dailies). Render 'DAILY #N' in the badge on Home's hero, Boards' Today, and the pre-race preview; lead share text with it ('VWiki Race — Daily #7 — …' in composeShareText, shared.tsx:98-107) the way Wordle leads with 'Wordle 942'. (2) Live countdown to the 5:00 AM Central drop on Home's hero pre-play and the pre-race preview, replacing the static 'New daily drops 5:00 AM Central.' sentence (spec Open Question 3, resolved per mockup-home-stateful-v2/mockup-target-preview). (3) Unify daily badge vocabulary: pair date and flavor everywhere a daily badge appears ('DAILY 7/17 · WEIRD') so Browse's date pills and Home/Boards' flavor words stop being two disconnected labels for the same object. (4) Add a streak tile (current + best if tracked) to You's Stats grid reusing the accountStats.dailyStreak value Home already fetches; add one How-to-play line establishing cadence: 'A new pair drops every day at 5:00 AM Central — keep your streak alive.'

@@ -16,8 +16,8 @@
 - Exclusion scope: `board_excluded = 1` removes a run from leaderboards and placements. Account stats are NOT affected.
 - Admin surface follows the existing dailies pattern exactly: VGames auth → `canManageDailies` allowlist (`DAILY_ADMIN_ACCOUNT_IDS`) → `DAILY_ADMIN_RATE_LIMITER`.
 - Cloudflare rate-limit bindings support only 10s/60s periods. Hourly quotas are D1-side and land with their endpoint (Increment 5); this increment ships binding config + burst helpers only where the consumer exists.
-- Never touch `/Users/vijayram/Cursor/vwiki-race` main checkout conventions: work in the assigned worktree, TDD, frequent commits, both suites green before every commit.
-- Commit messages end with: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
+- Never modify the separate main checkout conventions: work in the assigned worktree, TDD, frequent commits, both suites green before every commit.
+- Commit as the repository owner without co-author trailers.
 
 ---
 
@@ -100,9 +100,7 @@ Run: `npm run test:worker` and `npm test` → all green (existing leaderboard te
 
 ```bash
 git add d1/migrations/0006_board_exclusions.sql src/server/d1TrackingRepository.ts src/server/d1TrackingRepository.worker.test.ts
-git commit -m "feat(server): board_excluded flag filters leaderboards (migration 0006)
-
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+git commit -m "feat(server): board_excluded flag filters leaderboards (migration 0006)"
 ```
 
 ---
@@ -192,9 +190,7 @@ if (request.method === "POST" && runExclusionMatch) {
 
 ```bash
 git add src/server/worker.ts src/server/apiHandlers.ts src/server/d1TrackingRepository.ts <test files>
-git commit -m "feat(admin): run board-exclusion endpoint (containment for forged runs)
-
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+git commit -m "feat(admin): run board-exclusion endpoint (containment for forged runs)"
 ```
 
 ---
@@ -306,9 +302,7 @@ async listChallengePlacements(challengeId) {
 
 ```bash
 git add src/server/d1TrackingRepository.ts src/server/trackingRepository.ts src/server/d1TrackingRepository.worker.test.ts
-git commit -m "feat(server): listChallengePlacements — best-rank-per-account dedup (spec invariant 2)
-
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+git commit -m "feat(server): listChallengePlacements — best-rank-per-account dedup (spec invariant 2)"
 ```
 
 ---
@@ -382,9 +376,7 @@ Call sites: top of the three `/api/v2/identity/*` handlers (before proxying to V
 
 ```bash
 git add wrangler.api.toml src/server/worker.ts <test files>
-git commit -m "feat(server): rate-limit identity and run-start endpoints
-
-Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+git commit -m "feat(server): rate-limit identity and run-start endpoints"
 ```
 
 ---

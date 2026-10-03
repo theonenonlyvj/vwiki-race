@@ -3,7 +3,7 @@
 > Historical implementation plan. Do not restore its hourly UTC cron; the
 > current contract is the DST-safe 5:00 AM Central schedule.
 
-**Repository:** `/Users/vijayram/Cursor/vwiki-race`
+**Repository:** `.`
 
 **Design:** `docs/superpowers/specs/2026-07-15-daily-challenge-design.md`
 

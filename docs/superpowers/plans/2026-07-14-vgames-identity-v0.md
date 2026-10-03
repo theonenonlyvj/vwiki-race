@@ -144,8 +144,8 @@
 ## Task 6: VGames Origin Game Support
 
 **Files:**
-- Modify: `/Users/vijayram/Cursor/viota/packages/worker/src/d1/accounts.ts`
-- Modify: `/Users/vijayram/Cursor/viota/packages/worker/test/accounts.test.ts`
+- Modify: `../viota/packages/worker/src/d1/accounts.ts`
+- Modify: `../viota/packages/worker/test/accounts.test.ts`
 
 **Interfaces:**
 - Produces: `/auth/quick` accepts `game: "vwiki-race"` and stores `origin_game='vwiki-race'`.

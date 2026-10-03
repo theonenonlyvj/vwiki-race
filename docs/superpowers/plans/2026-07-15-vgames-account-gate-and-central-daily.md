@@ -22,10 +22,10 @@
 ### Task 1: Authoritative VGames Name Semantics
 
 **Files:**
-- Modify: `/Users/vijayram/Cursor/viota/.worktrees/vgames-identity-names/packages/worker/src/d1/accounts.ts`
-- Modify: `/Users/vijayram/Cursor/viota/.worktrees/vgames-identity-names/packages/worker/src/identity/routes.ts`
-- Test: `/Users/vijayram/Cursor/viota/.worktrees/vgames-identity-names/packages/worker/test/accounts.test.ts`
-- Test: `/Users/vijayram/Cursor/viota/.worktrees/vgames-identity-names/packages/worker/test/identity-set-credentials.test.ts`
+- Modify: `../viota/.worktrees/vgames-identity-names/packages/worker/src/d1/accounts.ts`
+- Modify: `../viota/.worktrees/vgames-identity-names/packages/worker/src/identity/routes.ts`
+- Test: `../viota/.worktrees/vgames-identity-names/packages/worker/test/accounts.test.ts`
+- Test: `../viota/.worktrees/vgames-identity-names/packages/worker/test/identity-set-credentials.test.ts`
 
 **Interfaces:**
 - Consumes: `POST /auth/quick`, `POST /auth/set-credentials`.
@@ -98,4 +98,3 @@
 - [ ] Fast-forward and push Viota `main`; deploy `vgames-identity` before VWiki.
 - [ ] Push VWiki `main`; deploy Worker, then Pages.
 - [ ] Verify live account creation, login, guest reservation, Challenge #3 history, and the configured cron triggers.
-

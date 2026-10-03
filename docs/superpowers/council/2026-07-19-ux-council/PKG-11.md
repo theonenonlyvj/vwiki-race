@@ -1,15 +1,15 @@
 # PKG-11 [P1/S] Copy pass: one casing rule, one race verb, no jargon, one brand name
 
 ## Files
-- /Users/vijayram/Cursor/vwiki-race/src/race/RaceResults.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/challenges/Browse.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/challenges/ChallengeDetail.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/Boards.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/You.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/Home.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/modes/AppShell.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/App.tsx
-- /Users/vijayram/Cursor/vwiki-race/src/components/LeaderboardList.tsx
+- src/race/RaceResults.tsx
+- src/modes/challenges/Browse.tsx
+- src/modes/challenges/ChallengeDetail.tsx
+- src/modes/Boards.tsx
+- src/modes/You.tsx
+- src/modes/Home.tsx
+- src/modes/AppShell.tsx
+- src/App.tsx
+- src/components/LeaderboardList.tsx
 
 ## Changes
 One sweep, one writer's voice. (1) Sentence case for all buttons: 'Play Again'→'Play again', 'Create Challenge'→'Create challenge', 'Create New'→'Create new', 'Log In / Existing'→'Log in / existing'; document 'End Run' as the sole Title Case exception (it's ratified in mockup-race-flow-v3) or normalize it too. (2) One race verb: '▶ Race' for all list/browse entry CTAs (Boards.tsx:421 'Race today's daily' → keep only when it IS the daily post-PKG-01; ChallengeDetail 'Race this' → '▶ Race'); 'Start race ▶' stays reserved for the clock-commit moment in Preview. (3) Jargon: 'No one has cleared the ranking guard yet.' (Boards.tsx:369) → 'Nobody's played enough dailies to rank yet — play 10 to show up here.'; unify empty states on the warm second-person template ('You haven't tried this one yet.'). (4) You's stat tiles: show 0 for true zeros with proper labels, a real loading state instead of bare '-', and consolidate the nine stacked 'nothing here' signals into the Boards-style progress framing. (5) Brand: 'VGames' everywhere including the plural ('every VGames title', fixing the 'V games' drift in App.tsx:1479-1482); one account-verb pair app-wide: 'Create account' / 'Log in' across dialog tabs, submits, Results claim card, and You's nudge. (6) Replace literal '->' with '→' at Home.tsx:206, Boards.tsx:408, Browse.tsx:215, ChallengeDetail.tsx:52, LeaderboardList.tsx:59. (7) Footer: rewrite in product voice ('Bugs or ideas? Tell us · More VGames') or relocate to You only — make the placement a decision, not a leftover. (8) Spell out time windows in prose ('Rolling 30 days'); introduce 'clk' once in how-to or spell 'clicks' where room allows.

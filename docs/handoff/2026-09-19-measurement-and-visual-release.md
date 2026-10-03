@@ -80,4 +80,4 @@ Dependency advisories and sanitizer-verified daily path gating remain separate f
 
 Local Vite and read-only preview adapter processes were stopped. Agent-created verification tabs were closed and the temporary viewport override was reset. No synthetic race was created by this final visual/report release. Private test/baseline artifacts were retained rather than destructively cleaned up.
 
-The LAN task registry at `vmachine1.local:8080` refused connections during release closeout. This did not affect Cloudflare deployment or Git pushes; canonical project docs and the shared local worklog are the continuity record. No background work remains scheduled from this session.
+Local session-registry integration was unavailable during closeout. This did not affect game deployment. Release receipts remain the project continuity record.

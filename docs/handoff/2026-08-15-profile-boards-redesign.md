@@ -76,16 +76,9 @@ unrelated and leaves the secret live.
 
 ## OPEN
 
-1. **`kaymck` duplicate merge — BLOCKED on permission.** Two ghosts, same
-   display name, created 11 min apart 2026-08-13, both origin vwiki-race,
-   neither claimed (no password, so no login dies).
-   Merge `aa98b1e6-9b2c-4026-a21e-dbacd25a5a83` (1 run, 0 completed, 19:00)
-   INTO `2705ec8d-f405-4e6e-9edb-f52f16698d2e` (1 run, 1 completed, 19:10).
-   Owner approved the intent; the Claude Code permission classifier blocks
-   `wrangler secret put`, which the documented `/admin/merge` flow requires.
-   Needs the owner to allow that action, then: set secret → dry-run → execute
-   with `confirmNonce` → **delete secret and verify absent** → write the
-   `account_aliases` row in vwiki-race so boards unify immediately.
+1. **Historical duplicate-account operation.** Superseded by the later
+   consolidation record. Account identifiers, player activity, and execution
+   payloads are retained privately; this document authorizes no account merge.
 
 2. **View graph — NEXT, not started.** Owner: "a super popular feature but it
    sucks on mobile. it's the coolest thing to look at the next day!" and
