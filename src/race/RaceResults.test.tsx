@@ -97,13 +97,13 @@ describe("RaceResults: saved result, guest continuity, and sharing hierarchy", (
     const onPlayAgain = vi.fn();
     const user = userEvent.setup();
     renderResults({ outcome: status === "completed" ? completedOutcome() : dnfOutcome(), onShowStats, onPlayAgain });
-    const stats = screen.getByRole("button", { name: "Your stats" });
-    const share = screen.getByRole("region", { name: "Challenge a friend" });
+    const stats = screen.getByRole("button", { name: "Your Stats" });
+    const share = screen.getByRole("button", { name: "Share Results / Challenge a Friend" });
     expect(stats.compareDocumentPosition(share) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await user.click(stats);
     expect(onShowStats).toHaveBeenCalledOnce();
     expect(onPlayAgain).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: status === "completed" ? "Play again" : "Try again" }));
+    await user.click(screen.getByRole("button", { name: "Play Again" }));
     expect(onPlayAgain).toHaveBeenCalledOnce();
   });
 
@@ -116,9 +116,7 @@ describe("RaceResults: saved result, guest continuity, and sharing hierarchy", (
     renderResults({ outcome: completedOutcome() });
 
     expect(screen.getByText("Result saved to your VGames account.")).toBeVisible();
-    const invitation = screen.getByRole("region", { name: "Challenge a friend" });
-    expect(within(invitation).getByText(/share your result and the challenge link/i)).toBeVisible();
-    expect(within(invitation).getByRole("button", { name: "Share result" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Share Results / Challenge a Friend" })).toBeVisible();
     expect(screen.queryByRole("region", { name: /keep your name and stats/i })).toBeNull();
   });
 

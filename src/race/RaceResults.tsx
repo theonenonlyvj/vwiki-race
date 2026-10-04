@@ -356,21 +356,18 @@ export default function RaceResults({
         ) : null}
         <div className="result-actions">
           <button className="start-race-button" disabled={playAgainDisabled} type="button" onClick={onPlayAgain}>
-            {outcome.status === "dnf" ? "Try again" : "Play again"}
+            Play Again
           </button>
-          <button className="secondary-button" type="button" onClick={onShowStats}>Your stats</button>
-        </div>
-        <section aria-label="Challenge a friend" className="result-share-invitation">
-          <h3>Challenge a friend</h3>
-          <p>Share your result and the challenge link.</p>
+          <button className="secondary-button" type="button" onClick={onShowStats}>Your Stats</button>
           <ShareResultButton
+            label="Share Results / Challenge a Friend"
             challenge={challenge}
             clicks={justFinishedRow.clickCount}
             elapsedMs={justFinishedRow.elapsedMs}
             rank={justFinishedRow.rank}
             status={justFinishedRow.status}
           />
-        </section>
+        </div>
 
         {/* "I gave up" (owner spec, 2026-08-02): no in-race button - this
             muted link-button is the entire affordance, next to the retry

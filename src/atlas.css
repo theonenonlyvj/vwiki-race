@@ -116,16 +116,23 @@ input, select, textarea { border-radius: 8px; }
   .connection-atlas { width: 128px; right: 0; opacity: .35; }
 }
 
-/* Finish first, choose a destination next. Sharing stays compact and optional. */
-.result-panel .result-actions { margin-block: 16px 4px; }
-.result-panel .result-share-invitation {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px;
-  padding: 14px 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
-  background: transparent;
+/* Keep the finish destinations together, including on narrow screens. */
+.result-panel .result-actions {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr);
+  align-items: stretch; gap: 8px; margin-block: 16px 4px;
 }
-.result-share-invitation h3 { font-size: 1rem; margin: 0; }
-.result-share-invitation > p { flex-basis: 100%; margin: 0; font-size: .82rem; }
-.result-panel .result-share-invitation .share-result { margin: 0; padding: 0; border: 0; }
+.result-panel .result-actions .share-result { display: contents; }
+.result-panel .result-actions > button,
+.result-panel .result-actions .share-result > button {
+  width: 100%; min-width: 0; min-height: 44px; margin: 0; padding: 10px 8px;
+  white-space: normal; overflow-wrap: anywhere;
+}
+.result-panel .result-actions .share-result > span,
+.result-panel .result-actions .share-result > input { grid-column: 1 / -1; min-width: 0; }
+@media (max-width: 480px) {
+  .result-panel .result-actions > button,
+  .result-panel .result-actions .share-result > button { padding-inline: 4px; font-size: .85rem; line-height: 1.35; }
+}
 .result-home-exit { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin-top: 18px; }
 
 .identity-dialog input:focus-visible { outline: 3px solid var(--cyan); outline-offset: -3px; }

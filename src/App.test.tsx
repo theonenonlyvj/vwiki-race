@@ -6692,7 +6692,7 @@ describe("Race flow: full-screen takeover", () => {
     // the coral `.start-race-button` class; "View leaderboard" gets the
     // existing `.secondary-button` treatment. Neither is a bare
     // default-cyan button anymore.
-    const tryAgain = screen.getByRole("button", { name: /try again/i });
+    const tryAgain = screen.getByRole("button", { name: /play again/i });
     expect(tryAgain).toBeVisible();
     expect(tryAgain).toHaveClass("start-race-button");
     const viewLeaderboard = screen.getByRole("button", { name: /view leaderboard/i });
@@ -6917,7 +6917,7 @@ describe("Race flow: full-screen takeover", () => {
     await user.click(screen.getByRole("button", { name: /confirm end run/i }));
     expect(await screen.findByText(/that one got away/i)).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: /try again/i }));
+    await user.click(screen.getByRole("button", { name: /play again/i }));
 
     expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
     // Not a shell-and-takeover double-render, and not the old DNF frame.

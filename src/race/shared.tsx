@@ -192,7 +192,9 @@ export function ShareResultButton({
   clicks,
   rank,
   status,
+  label = "Share result",
 }: {
+  label?: string;
   challenge: Challenge;
   elapsedMs: number;
   clicks: number;
@@ -209,7 +211,7 @@ export function ShareResultButton({
         type="button"
         onClick={() => void shareOrCopy(shareText, copy)}
       >
-        Share result
+        {label}
       </button>
       {copyStatus !== "idle" ? (
         <span aria-live="polite" role="status">
