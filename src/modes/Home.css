@@ -27,10 +27,6 @@
 .home-layout .daily-route strong { color: var(--text); font-family: var(--viota-ui-font); font-size: clamp(1.25rem, 2.3vw, 1.8rem); font-weight: 600; letter-spacing: -.04em; line-height: 1.25; overflow-wrap: anywhere; }
 .home-layout .daily-route .route-arrow { display: grid; place-items: center; justify-self: center; width: 36px; height: 36px; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--ink); transform: none; }
 .home-layout .daily-route .route-arrow::before { content: "→"; color: var(--cyan); font-size: 1.2rem; line-height: 1; }
-.home-layout .daily-hero-invitation { color: var(--muted); font-size: .82rem; margin: 0; }
-.home-layout .daily-race-steps { display: flex; flex-wrap: wrap; gap: 7px 18px; list-style: none; margin: 0; padding: 0; }
-.home-layout .daily-race-steps li { color: var(--muted); font-size: .8rem; line-height: 1.5; padding: 0; }
-.home-layout .daily-race-steps li::before { content: ""; display: inline-block; width: 4px; height: 4px; border-radius: 50%; margin: 0 7px 2px 0; background: var(--cyan); }
 .home-layout .daily-hero .ritual-line { font-size: .78rem; color: var(--muted); margin: 0; padding: 0; }
 .home-layout .daily-hero .player-gate { display: flex; align-items: center; }
 .home-layout .daily-hero .race-preview-button { min-height: 54px; width: 100%; margin: 0; padding: 14px 20px; border-radius: 12px; font-size: .9rem; white-space: normal; overflow-wrap: anywhere; box-shadow: none; }
@@ -60,7 +56,6 @@
   .home-layout .daily-route { grid-template-columns: minmax(0, 1fr) 26px minmax(0, 1fr); gap: 9px; }
   .home-layout .daily-route strong { font-size: 1.15rem; }
   .home-layout .daily-route .route-arrow { width: 26px; height: 26px; }
-  .home-layout .daily-race-steps { display: grid; gap: 3px; }
 }
 @media (max-width: 350px) {
   .atlas-introduction h2 { font-size: 2.35rem; }

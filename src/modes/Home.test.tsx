@@ -197,7 +197,7 @@ describe("Home: inviting daily overview", () => {
     expect(screen.getByText("Log in to keep your name and your progress.")).toBeVisible();
   });
 
-  it("labels the route, explains the race in three compact steps, and preserves the daily action", async () => {
+  it("labels the route, explains the race once, and preserves the daily action", async () => {
     const user = userEvent.setup();
     const { onRaceChallenge } = renderHome();
 
@@ -206,13 +206,8 @@ describe("Home: inviting daily overview", () => {
     expect(within(daily).getByText("Apple")).toBeVisible();
     expect(within(daily).getByText("Target")).toBeVisible();
     expect(within(daily).getByText("Fruit")).toBeVisible();
-    expect(within(daily).getByText("Find your path, one Wikipedia link at a time.")).toBeVisible();
-    const howToRace = within(daily).getByRole("list", { name: /how to race/i });
-    expect(within(howToRace).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
-      "Follow Wikipedia links",
-      "Reach the target article",
-      "The clock stops when you arrive",
-    ]);
+    expect(screen.getByText("Follow Wikipedia links from the start article to the target. Fastest time wins.")).toBeVisible();
+    expect(within(daily).queryByRole("list", { name: /how to race/i })).toBeNull();
 
     const raceButton = within(daily).getByRole("button", { name: /race today.s challenge/i });
     await user.click(raceButton);

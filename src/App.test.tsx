@@ -250,7 +250,7 @@ describe("VWiki Race app", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={storage} />);
 
     const feedback = await screen.findByRole("link", {
-      name: "I’d love your feedback. Help me make this game better! (Vijay)",
+      name: "Feedback",
     });
     expect(feedback).toHaveAttribute(
       "href",
@@ -258,7 +258,7 @@ describe("VWiki Race app", () => {
     );
     expect(feedback).toHaveAttribute("target", "_blank");
     expect(feedback.getAttribute("rel")).toContain("noopener");
-    const portfolio = screen.getByRole("link", { name: "More VGames" });
+    const portfolio = screen.getByRole("link", { name: "More games" });
     expect(portfolio).toHaveAttribute(
       "href",
       "https://theonenonlyvj.github.io/personal-site",
@@ -270,9 +270,9 @@ describe("VWiki Race app", () => {
     for (const tab of ["Stats", "Challenges", "You"]) {
       await userEvent.click(within(tabbar).getByRole("button", { name: tab }));
       expect(screen.getByRole("link", {
-        name: "I’d love your feedback. Help me make this game better! (Vijay)",
+        name: "Feedback",
       })).toBeVisible();
-      expect(screen.getByRole("link", { name: "More VGames" })).toBeVisible();
+      expect(screen.getByRole("link", { name: "More games" })).toBeVisible();
     }
 
     await userEvent.click(within(tabbar).getByRole("button", { name: "Home" }));
@@ -282,17 +282,17 @@ describe("VWiki Race app", () => {
     await userEvent.click(await screen.findByRole("button", { name: /start race/i }));
     expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
     expect(screen.queryByRole("link", {
-      name: "I’d love your feedback. Help me make this game better! (Vijay)",
+      name: "Feedback",
     })).toBeNull();
-    expect(screen.queryByRole("link", { name: "More VGames" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "More games" })).toBeNull();
   });
 
-  it("shows the first-visit teaching gate rules strip before start (supersedes the old how-to-play line)", async () => {
+  it("explains the race once on arrival with permanent access to the rules", async () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={memoryStorage()} />);
 
     expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
     expect(
-      screen.getByText(/two articles\. links only\. beat the clock\./i),
+      screen.getByText("Follow Wikipedia links from the start article to the target. Fastest time wins."),
     ).toBeVisible();
   });
 
@@ -7011,7 +7011,7 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
 
     expect(screen.getByRole("button", { name: /share result/i })).toBeVisible();
     expect(screen.getByRole("region", { name: /play another challenge/i })).toBeVisible();
-    expect(screen.getByText(/new daily drops 5:00 am central/i)).toBeVisible();
+    expect(screen.getByText("New daily at 5:00 AM Central.")).toBeVisible();
     // Finished takes precedence over the pre-play yesterday card, per spec.
     expect(screen.queryByRole("region", { name: /yesterday's results/i })).toBeNull();
   });
@@ -7269,12 +7269,13 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
     }
   });
 
-  it("PKG-06: the teaching gate strip carries the spec's 'No account needed to look around.' footer line, and it hides along with the strip once accountStats reports a finish", async () => {
+  it("keeps redundant teaching copy off Home for anonymous and returning players", async () => {
     const fetchImpl = createFetchMock({ challenges: twoChallenges(), accountCompleted: 0 });
     const view = render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={memoryStorage()} />);
 
-    expect(await screen.findByText(/two articles\. links only\. beat the clock\./i)).toBeVisible();
-    expect(screen.getByText(/no account needed to look around\./i)).toBeVisible();
+    await screen.findByRole("button", { name: /▶ race/i });
+    expect(screen.queryByText(/two articles\. links only\. beat the clock\./i)).toBeNull();
+    expect(screen.queryByText(/no account needed to look around\./i)).toBeNull();
     view.unmount();
     window.history.pushState({}, "", "/");
 
@@ -7286,12 +7287,13 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
     ).toBeNull());
   });
 
-  it("shows the first-visit teaching gate on Home AND Challenge Detail for a zero-finish account, and hides it once accountStats reports a finish", async () => {
+  it("avoids duplicate instructions on Home and keeps the teaching gate on Challenge Detail for a zero-finish account, and hides it once accountStats reports a finish", async () => {
     const fetchImpl = createFetchMock({ challenges: twoChallenges(), accountCompleted: 0 });
     const user = userEvent.setup();
     const view = render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
-    expect(await screen.findByText(/two articles\. links only\. beat the clock\./i)).toBeVisible();
+    await screen.findByRole("button", { name: /▶ race/i });
+    expect(screen.queryByText(/two articles\. links only\. beat the clock\./i)).toBeNull();
 
     const nav = screen.getByRole("navigation", { name: /vwiki race views/i });
     await user.click(within(nav).getByRole("button", { name: "Challenges" }));
@@ -7348,10 +7350,9 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
       />,
     );
 
-    // Scoped to the first-visit strip specifically - QF-05 added a second,
-    // permanent "how to play" trigger in the footer that opens the exact
-    // same popup, so an unscoped query now matches both.
-    const strip = await screen.findByRole("note", { name: "" });
+    // Home explains the race once; full rules remain in the permanent footer.
+    await screen.findByRole("button", { name: /▶ race/i });
+    const strip = document.querySelector(".site-footer") as HTMLElement;
     await user.click(within(strip).getByRole("button", { name: /how to play/i }));
     const dialog = await screen.findByRole("dialog", { name: /how to play/i });
     expect(within(dialog).getByText(/get from/i)).toHaveTextContent(/apple/i);
@@ -7879,10 +7880,9 @@ describe("PKG-07 (council 2026-07-19, owner-proxy ruling): daily ritual identity
     const user = userEvent.setup();
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
-    // Scoped to the first-visit strip specifically - QF-05 added a second,
-    // permanent "how to play" trigger in the footer that opens the exact
-    // same popup, so an unscoped query now matches both.
-    const strip = await screen.findByRole("note", { name: "" });
+    // Home explains the race once; full rules remain in the permanent footer.
+    await screen.findByRole("button", { name: /▶ race/i });
+    const strip = document.querySelector(".site-footer") as HTMLElement;
     await user.click(within(strip).getByRole("button", { name: /how to play/i }));
     const dialog = await screen.findByRole("dialog", { name: /how to play/i });
     expect(

@@ -1,5 +1,7 @@
 # VWiki Race: Start Here
 
+**Latest local interface refinement:** [`landing-typography.md`](landing-typography.md) covers the selected editorial typography, black palette, concise landing and footer, and CTA clearance. Confirm publication separately.
+
 **Read `maintenance-release.md` first for the current maintenance release.**
 The dated runtime identifiers below describe the preceding release and are
 superseded by that receipt. Product invariants and historical decisions remain.

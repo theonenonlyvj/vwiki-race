@@ -371,7 +371,7 @@ export default function AppShell({
           This page is not available.
         </p>
       ) : null}
-      {showTeachingGate ? <TeachingGate pairChallenge={homeHero?.challenge ?? null} /> : null}
+      {showTeachingGate && visibleMode !== "home" ? <TeachingGate pairChallenge={homeHero?.challenge ?? null} /> : null}
 
       <section className="content-shell">
         {visibleMode === "home" ? (
@@ -494,9 +494,7 @@ export default function AppShell({
           fixed `.mode-nav` bar - `.app-shell`'s own bottom padding (PKG-09)
           already reserves clearance below it; the council's mobile-07-you.png
           evidence of an overlap was captured on an older build (pre-PKG-09's
-          footer-anchor fix), not the current code. The feedback invitation is
-          intentionally first-person: this is a small game Vijay is actively
-          improving, and the owner wants players to know their notes reach him. */}
+          footer-anchor fix), not the current code. */}
       <footer className="site-footer">
         <p>
           {/* QF-05: permanent - unlike the first-visit TeachingGate strip
@@ -513,23 +511,21 @@ export default function AppShell({
           >
             How to play
           </button>
-          {" · "}
           <a
             className="feedback-invitation"
             href="https://theonenonlyvj.github.io/personal-site/contact"
             rel="noopener noreferrer"
             target="_blank"
           >
-            I’d love your feedback. Help me make this game better! (Vijay)
+            Feedback
           </a>
-          {" · "}
           <a
             href="https://theonenonlyvj.github.io/personal-site"
             rel="noopener noreferrer"
             target="_blank"
           >
-            More VGames
-          </a>.
+            More games
+          </a>
         </p>
       </footer>
 

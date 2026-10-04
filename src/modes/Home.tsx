@@ -391,17 +391,8 @@ export default function Home({
       {dailyUpdateNotice}
       <div className="atlas-introduction">
         <div className="atlas-introduction-copy">
-          <h2>Every link leads somewhere.</h2>
-          <p>A race through the unexpected. Find your way between two Wikipedia articles, one link at a time.</p>
-          <p className="home-player-status" role="status">{playingAsLabel}</p>
-          {identitySession?.status !== "claimed" && onClaimIdentity ? (
-            <div className="home-account-actions" role="group" aria-label="Your VGames account">
-              <button className="link-button" type="button" onClick={() => onClaimIdentity("login")}>Log in</button>
-              <button className="link-button" type="button" onClick={() => onClaimIdentity("create")}>
-                {identitySession?.status === "ghost" ? "Keep this guest account" : "Create account"}
-              </button>
-            </div>
-          ) : null}
+          <h2>Every link leads <em>somewhere.</em></h2>
+          <p>Follow Wikipedia links from the start article to the target. Fastest time wins.</p>
         </div>
         <ConnectionAtlas />
       </div>
@@ -430,17 +421,6 @@ export default function Home({
               <strong>{heroChallenge.target.title}</strong>
             </span>
           </div>
-
-          {dailyState !== "finished" && dailyState !== "resolving" ? (
-            <>
-              <p className="daily-hero-invitation">Find your path, one Wikipedia link at a time.</p>
-              <ol className="daily-race-steps" aria-label="How to race">
-                <li>Follow Wikipedia links</li>
-                <li>Reach the target article</li>
-                <li>The clock stops when you arrive</li>
-              </ol>
-            </>
-          ) : null}
 
           {dailyState === "resolving" ? (
             // RC-05 part B: the neutral skeleton-hold. Follows RC-06's own
@@ -504,6 +484,18 @@ export default function Home({
                   : hero.kind === "yesterday-daily"
                     ? `${"▶"} Race this daily`
                     : `${"▶"} Race this challenge`}
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="home-account-entry">
+        <p className="home-player-status" role="status">{playingAsLabel}</p>
+        {identitySession?.status !== "claimed" && onClaimIdentity ? (
+          <div className="home-account-actions" role="group" aria-label="Your VGames account">
+            <button className="link-button" type="button" onClick={() => onClaimIdentity("login")}>Log in</button>
+            <button className="link-button" type="button" onClick={() => onClaimIdentity("create")}>
+              {identitySession?.status === "ghost" ? "Keep this guest account" : "Create account"}
             </button>
           </div>
         ) : null}
@@ -647,7 +639,7 @@ export default function Home({
           <StreakTrendRow hasIdentifiedSession={identityAccountId !== null} stats={accountStats} />
 
           <p className="ritual-line muted">
-            New daily drops 5:00 AM Central — come defend your spot.
+            New daily at 5:00 AM Central.
           </p>
         </>
       ) : null}
