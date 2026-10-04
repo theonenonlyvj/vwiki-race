@@ -212,7 +212,7 @@ describe("Home: inviting daily overview", () => {
     expect(screen.getByText("Follow Wikipedia links from the start article to the target. Fastest time wins.")).toBeVisible();
     expect(within(daily).queryByRole("list", { name: /how to race/i })).toBeNull();
 
-    const raceButton = within(daily).getByRole("button", { name: /race today.s challenge/i });
+    const raceButton = within(daily).getByRole("button", { name: /^▶ Race$/i });
     await user.click(raceButton);
     expect(onRaceChallenge).toHaveBeenCalledWith(todaysDaily.id);
   });
@@ -378,7 +378,7 @@ describe("Home: RC-05 part B - heroBoard tri-state skeleton-hold (unblocked by R
     });
 
     expect(await screen.findByText(/last try: dnf/i)).toBeVisible();
-    expect(screen.getByRole("button", { name: /try again/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^▶ Race$/i })).toBeVisible();
   });
 
   it("a failed hero board fetch fails open to the pre-play chrome instead of a stuck skeleton (Judge A amendment 2)", async () => {

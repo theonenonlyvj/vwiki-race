@@ -18,18 +18,6 @@
 .atlas-page-secondary rect { fill: #1b444e; stroke: #79e6d0; }
 .atlas-page-secondary path { stroke: #79e6d0; }
 .atlas-sparks { color: #efd087; }
-.home-layout > .daily-hero { position: relative; border: 1px solid var(--line-strong); border-radius: 22px; background: var(--ink-raised); padding: clamp(20px, 3vw, 32px); gap: 24px; box-shadow: none; }
-.home-layout .daily-hero-copy { gap: 16px; }
-.home-layout .daily-hero .daily-badge { border: 0; color: var(--text-dim); background: #263957; padding: 7px 10px; border-radius: 6px; font-size: .7rem; }
-.home-layout .daily-route { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 38px minmax(0, 1fr); align-items: center; gap: 16px; }
-.home-layout .daily-route .daily-route-endpoint { min-width: 0; display: grid; gap: 9px; padding: 0; border: 0; background: transparent; }
-.home-layout .daily-route .daily-route-label { font-size: .75rem; text-transform: none; letter-spacing: .015em; color: var(--muted); }
-.home-layout .daily-route strong { color: var(--text); font-family: var(--viota-ui-font); font-size: clamp(1.25rem, 2.3vw, 1.8rem); font-weight: 600; letter-spacing: -.04em; line-height: 1.25; overflow-wrap: anywhere; }
-.home-layout .daily-route .route-arrow { display: grid; place-items: center; justify-self: center; width: 36px; height: 36px; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--ink); transform: none; }
-.home-layout .daily-route .route-arrow::before { content: "→"; color: var(--cyan); font-size: 1.2rem; line-height: 1; }
-.home-layout .daily-hero .ritual-line { font-size: .78rem; color: var(--muted); margin: 0; padding: 0; }
-.home-layout .daily-hero .player-gate { display: flex; align-items: center; }
-.home-layout .daily-hero .race-preview-button { min-height: 54px; width: 100%; margin: 0; padding: 14px 20px; border-radius: 12px; font-size: .9rem; white-space: normal; overflow-wrap: anywhere; box-shadow: none; }
 .home-layout .home-streak-trend-row { font-size: .78rem; color: var(--muted); margin: 0; }
 .home-layout .board-snippet { background: var(--ink-raised); border-radius: 18px; }
 .home-layout .board-snippet h2 { font-family: var(--viota-ui-font); font-size: 1.05rem; font-weight: 600; }

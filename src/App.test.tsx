@@ -2636,7 +2636,7 @@ describe("VWiki Race app", () => {
       expect(window.location.search).toBe("?challenge=challenge-0002");
     });
     const detail = await screen.findByRole("region", { name: /challenge detail/i });
-    expect(within(detail).getByRole("button", { name: /^(preview this race|try again|race again)$/i })).toBeEnabled();
+    expect(within(detail).getByRole("button", { name: /^▶ Race$/i })).toBeEnabled();
   });
 
   it("clears the completed result when another challenge is opened from Browse (plan-drift fix: opens Detail)", async () => {
@@ -3536,7 +3536,7 @@ describe("VWiki Race app", () => {
     await user.click(within(loginForm as HTMLFormElement).getByRole("button", { name: /^log in$/i }));
 
     expect(await screen.findByRole("region", { name: /challenge detail/i })).toBeVisible();
-    expect(screen.getByRole("button", { name: /^(preview this race|try again|race again)$/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^▶ Race$/i })).toBeVisible();
     expect(createChallengeCalls(fetchImpl)).toBe(2);
     expect(createChallengeBodies(fetchImpl)).toEqual([
       { startTitle: "Mars", targetTitle: "Water", nominateForDaily: true },
@@ -3773,7 +3773,7 @@ describe("VWiki Race app", () => {
     // Home (see App.tsx's createChallengeWithSession) - "Race this" is the
     // Detail-native stand-in for the old "Start Challenge #2" button.
     expect(await screen.findByRole("region", { name: /challenge detail/i })).toBeVisible();
-    expect(screen.getByRole("button", { name: /^(preview this race|try again|race again)$/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^▶ Race$/i })).toBeVisible();
     expect(within(nav).getByRole("button", { name: "Challenges" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -3791,7 +3791,7 @@ describe("VWiki Race app", () => {
     await act(async () => { await staleCatalog.promise; });
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /^(preview this race|try again|race again)$/i })).toBeVisible();
+      expect(screen.getByRole("button", { name: /^▶ Race$/i })).toBeVisible();
       expect(window.location.search).toBe("?challenge=challenge-0002");
     });
     expect(within(nav).getByRole("button", { name: "Challenges" })).toHaveAttribute(
@@ -4070,7 +4070,7 @@ describe("VWiki Race app", () => {
     expect(await screen.findByText(notice)).toBeVisible();
     // Plan-drift fix: lands on the new/existing challenge's own Detail.
     expect(await screen.findByRole("region", { name: /challenge detail/i })).toBeVisible();
-    expect(screen.getByRole("button", { name: /^(preview this race|try again|race again)$/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^▶ Race$/i })).toBeVisible();
   });
 
   it("preserves authoritative catalog Daily metadata from a legacy duplicate outcome", async () => {
@@ -4229,7 +4229,7 @@ describe("VWiki Race app", () => {
     // Plan-drift fix: still lands on Detail even when the leaderboard
     // refresh itself failed - the selection/navigation isn't gated on it.
     expect(await screen.findByRole("region", { name: /challenge detail/i })).toBeVisible();
-    expect(screen.getByRole("button", { name: /^(preview this race|try again|race again)$/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^▶ Race$/i })).toBeVisible();
     expect(window.location.search).toBe("?challenge=challenge-0012");
   });
 
@@ -4283,7 +4283,7 @@ describe("VWiki Race app", () => {
     );
     expect(screen.getByRole("button", { name: /← challenges/i })).toBeVisible();
     expect(screen.queryByRole("button", { name: /start challenge #2/i })).toBeNull();
-    await user.click(await screen.findByRole("button", { name: /^(preview this race|try again|race again)$/i }));
+    await user.click(await screen.findByRole("button", { name: /^▶ Race$/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
 
     await waitFor(() => {
@@ -4744,7 +4744,7 @@ describe("VWiki Race app", () => {
       render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
       const detail = await screen.findByRole("region", { name: /challenge detail/i });
-      expect(within(detail).getByRole("button", { name: /^(preview this race|try again|race again)$/i })).toBeVisible();
+      expect(within(detail).getByRole("button", { name: /^▶ Race$/i })).toBeVisible();
       // The fixture row's accountId defaults to claimedStorage's own "acc-1"
       // - it shows up on BOTH the main deduped board (by display name, "Ari")
       // and "Your history" (a plain "#1 · 0:01 · 1 clk" line, no name) -
@@ -4761,7 +4761,7 @@ describe("VWiki Race app", () => {
       render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={claimedStorage()} />);
 
       const detail = await screen.findByRole("region", { name: /challenge detail/i });
-      const raceThis = within(detail).getByRole("button", { name: /^(preview this race|try again|race again)$/i });
+      const raceThis = within(detail).getByRole("button", { name: /^▶ Race$/i });
       // PKG-04 (owner-proxy ruling): Detail's "Race this" only opens the
       // preview - it's non-committal, same as Home's hero and Boards' CTA,
       // so it carries their shared teal `.race-preview-button` class, never
@@ -5940,7 +5940,7 @@ describe("Race flow: full-screen takeover", () => {
     await screen.findByRole("region", { name: /challenge detail/i });
     expect(wikipediaArticleCalls(fetchImpl, "Fruit")).toBe(0);
 
-    await user.click(screen.getByRole("button", { name: /^(preview this race|try again|race again)$/i }));
+    await user.click(screen.getByRole("button", { name: /^▶ Race$/i }));
     await screen.findByRole("region", { name: /pre-race preview/i });
     await waitFor(() => expect(wikipediaArticleCalls(fetchImpl, "Fruit")).toBeGreaterThan(0));
   });
@@ -7029,8 +7029,7 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
 
     expect(await screen.findByText(/last try: dnf/i)).toBeVisible();
-    expect(screen.getByRole("button", { name: /try again/i })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: /▶ race/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /^▶ Race$/i })).toBeEnabled();
   });
 
   it("shows the finished post-play state - done hero, today's board, share, play-another, ritual line - from a completed leaderboard row", async () => {
@@ -7470,7 +7469,7 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
     await user.click(await screen.findByRole("button", { name: /challenge #2/i }));
 
     const detail = await screen.findByRole("region", { name: /challenge detail/i });
-    expect(within(detail).getByRole("button", { name: /^(preview this race|try again|race again)$/i })).toBeVisible();
+    expect(within(detail).getByRole("button", { name: /^▶ Race$/i })).toBeVisible();
     expect(within(detail).getByText(/water/i)).toBeVisible();
     expect(window.location.search).toBe("?challenge=challenge-0002");
   });
@@ -7558,7 +7557,7 @@ describe("Home board dedup + pre-drop hero (desktop pass, FIX 3/FIX 4)", () => {
     );
 
     expect(await screen.findByText(/last try: dnf/i)).toBeVisible();
-    expect(screen.getByRole("button", { name: /try again/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^▶ Race$/i })).toBeEnabled();
     // Home's state came from the board endpoint (App.tsx's own
     // selected-challenge leaderboard read for Detail/paths is out of scope
     // here and may still fire once).

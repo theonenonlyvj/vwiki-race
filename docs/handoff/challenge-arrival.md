@@ -16,11 +16,18 @@ and detail headings use the featured date. Hide system creator attribution
 using the immutable system account ID; retain human attribution even when a
 human chooses the same display name as the system.
 
-The detail landing distinguishes unplayed, DNF, completed and revealed-route
-states. Preview and retry open the existing preview; they never start a run.
-Finished players can open the graph or race again. Eligible DNF players can
-confirm a reveal; ineligible DNF copy offers retry without promising reveal.
-Revealed-route players can view graphs and practise unranked.
+Home and challenge details share the same article-pair card component and bold
+triangle-plus-Race entry button. The action is vertically centered beside the
+article pair on desktop; compact Home layouts keep its existing visible-entry
+ordering. Detail leaderboard, history, solution and share boxes are centered.
+
+The card has no added invitation heading or explanatory paragraph. Compact
+finished/best, DNF, loading/error and unranked-practice information remains.
+Graph access sits in the leaderboard heading; eligible DNF players retain the
+explicit give-up confirmation. Human authorship and Daily date metadata remain.
+
+Race opens the target briefing. Only the briefing's separate Start race action
+starts a run. The account reassurance line remains removed.
 
 ## Preserved rules
 

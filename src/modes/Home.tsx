@@ -1,3 +1,4 @@
+import RaceCard from "../components/RaceCard";
 import ConnectionAtlas from "../components/ConnectionAtlas";
 import { useEffect, useMemo, useState } from "react";
 import BoardSnippet from "../components/BoardSnippet";
@@ -404,32 +405,13 @@ export default function Home({
         </div>
         <ConnectionAtlas />
       </div>
-      <div
-        className="daily-hero challenge-route route-header"
-        aria-label={heroIsYesterday ? "Yesterday's daily" : "Today's daily"}
+      <RaceCard
+        challenge={heroChallenge}
+        label={heroIsYesterday ? "Yesterday's daily" : "Today's daily"}
+        metadata={flavorBadge ? <span className="daily-badge">{flavorBadge}</span> : null}
+        onRace={dailyState !== "finished" && dailyState !== "resolving" ? () => onRaceChallenge(heroChallenge.id) : undefined}
+        disabled={raceBusy}
       >
-        {/* FIX 5: badge + title + status copy grouped left/top; the Race
-            button is a sibling so CSS can dock it right on desktop and
-            stretch it full-width on mobile - no giant empty middle. PKG-09:
-            the docking grid itself now lives on the shared `.route-header`
-            class (styles.css) so Challenge Detail's identical shape can
-            reuse it. */}
-        <div className="daily-hero-copy">
-          <div className="challenge-meta">
-            {flavorBadge ? <span className="daily-badge">{flavorBadge}</span> : null}
-          </div>
-          <div className="daily-route" aria-label={`${heroChallenge.start.title} to ${heroChallenge.target.title}`}>
-            <span className="daily-route-endpoint">
-              <span className="daily-route-label">Start</span>
-              <strong>{heroChallenge.start.title}</strong>
-            </span>
-            <span aria-hidden="true" className="route-arrow" />
-            <span className="daily-route-endpoint">
-              <span className="daily-route-label">Target</span>
-              <strong>{heroChallenge.target.title}</strong>
-            </span>
-          </div>
-
           {dailyState === "resolving" ? (
             // RC-05 part B: the neutral skeleton-hold. Follows RC-06's own
             // tri-state primitive (StagedLoadingNotice/useStagedLoading, not
@@ -469,33 +451,7 @@ export default function Home({
           {hero.kind !== "default" && dailyState !== "finished" && dailyState !== "resolving" && countdownText ? (
             <p className="ritual-line muted">{countdownText}</p>
           ) : null}
-        </div>
-
-        {dailyState !== "finished" && dailyState !== "resolving" ? (
-          <div className="player-gate surface-entrance">
-            {/* PKG-04 (owner-proxy ruling): this only opens the pre-race
-                preview (App.tsx's openRacePreviewFor) - non-committal, same
-                as Boards' CTA and Detail's "Race this" - so it shares their
-                teal `.race-preview-button` class. Coral is reserved for
-                PreRacePreview's actual "Start race" and RaceMode's
-                "End Run". */}
-            <button
-              className="race-preview-button"
-              disabled={raceBusy}
-              onClick={() => onRaceChallenge(heroChallenge.id)}
-              type="button"
-            >
-              {dailyState === "dnf"
-                ? "Try again"
-                : hero.kind === "today-daily"
-                  ? `${"▶"} Race today's challenge`
-                  : hero.kind === "yesterday-daily"
-                    ? `${"▶"} Race this daily`
-                    : `${"▶"} Race this challenge`}
-            </button>
-          </div>
-        ) : null}
-      </div>
+      </RaceCard>
 
       <div className="home-account-entry">
         <p className="home-player-status" role="status">{playingAsLabel}</p>

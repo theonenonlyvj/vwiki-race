@@ -15,8 +15,8 @@ import ModalDialog from "./ModalDialog";
  * liner + popup copy is what ships - NOT the numbered 3-step strip an
  * earlier, superseded exploratory mockup proposed; that would silently
  * un-ratify a documented simplification (the spec cuts the rivalry strip
- * the same way) rather than execute one. The one real, verified gap was the
- * missing reassurance footer line the spec calls for right under the strip.
+ * the same way) rather than execute one. The account reassurance was later
+ * removed to keep this strip focused on gameplay.
  */
 export default function TeachingGate({ pairChallenge }: { pairChallenge: Challenge | null }) {
   const [popupOpen, setPopupOpen] = useState(false);
@@ -36,8 +36,6 @@ export default function TeachingGate({ pairChallenge }: { pairChallenge: Challen
         >
           (how to play)
         </button>
-        <br />
-        No account needed to look around.
       </p>
 
       {popupOpen ? (

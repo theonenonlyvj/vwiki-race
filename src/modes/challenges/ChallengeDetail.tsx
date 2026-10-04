@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import RaceCard from "../../components/RaceCard";
 import ChallengePathGraphButton from "../../components/ChallengePathGraphButton";
 import GiveUpAffordance from "../../components/GiveUpAffordance";
 import LeaderboardList from "../../components/LeaderboardList";
@@ -201,8 +202,6 @@ export default function ChallengeDetail({
   const unfinished = outcome?.outcome === "dnf" || yourRows.some(row => row.status === "abandoned");
   const progressPending = Boolean(identityToken) && (!currentOutcome || leaderboardStatus === "loading");
   const progressFailed = Boolean(currentOutcome?.failed) || leaderboardStatus === "error";
-  const intentTitle = peeked ? "The routes are open." : finished ? "You found your way." : progressPending ? "Checking your progress…" : progressFailed ? "Choose your next move." : unfinished ? "A different path might get you there." : "Find your way there.";
-  const raceLabel = peeked ? "Practice this race" : finished ? "Race again" : unfinished ? "Try again" : "Preview this race";
   // DT-1 (owner-proxy ruling, "anything else" (b)): a lone completed
   // attempt that's ALSO this account's placement on the main board above is
   // pure duplication - same rank/time/clicks shown twice, once per panel.
@@ -234,34 +233,31 @@ export default function ChallengeDetail({
         ← Challenges
       </button>
 
-      <div className="route-header challenge-hero">
-        <div className="challenge-route" aria-label="Current challenge">
-          <div className="challenge-meta">
-            <span>{challengeHeading(challenge)}</span>
-            {humanChallengeCreator(challenge) ? <span>Created by {humanChallengeCreator(challenge)}</span> : null}
-          </div>
-          <div className="challenge-journey" aria-label={`Start article: ${challenge.start.title}. Target article: ${challenge.target.title}.`}>
-            <div><span className="muted">Start</span><strong>{challenge.start.title}</strong></div>
-            <span className="route-arrow" aria-hidden="true">→</span>
-            <div><span className="muted">Target</span><strong>{challenge.target.title}</strong></div>
-          </div>
-          {isPastDaily && onPlayTodaysDaily ? (
-            <button className="link-button" onClick={onPlayTodaysDaily} type="button">Play today&apos;s daily ›</button>
-          ) : null}
-        </div>
-        <div className="player-gate challenge-intent">
-          <h2>{intentTitle}</h2>
-          <p className="muted">{peeked ? "Explore the paths. Future attempts here are unranked." : finished ? "See how everyone got there, or find another route yourself." : progressPending ? "You can still preview the route." : progressFailed ? "Your progress is unavailable. You can still preview this race." : unfinished ? (showGiveUp ? "Start fresh, or reveal the routes when you're ready to give up your ranked attempts." : "Start fresh and try a different route. Your next attempt can still rank.") : "Follow the links from the start article to the target. Your clock starts only when you press Start."}</p>
-          {finished && outcome?.best ? <p className="challenge-best">Your best: {formatTimeAndClicks(outcome.best.elapsedMs, outcome.best.clickCount)}</p> : null}
-          {pathsUnlocked ? (
-            <ChallengePathGraphButton apiClient={apiClient} challengeId={challenge.id} errorReporter={errorReporter} identityToken={identityToken} unlocked={pathsUnlocked} />
-          ) : null}
-          <button className={pathsUnlocked ? "link-button" : "race-preview-button"} type="button" disabled={raceDisabled} onClick={onRaceThis}>{raceLabel}</button>
-          {showGiveUp ? (
-            <GiveUpAffordance apiClient={apiClient} challengeId={challenge.id} errorReporter={errorReporter} identityToken={identityToken} onPeeked={() => setOutcomeRefreshToken(value => value + 1)} />
-          ) : null}
-        </div>
-      </div>
+      <RaceCard
+        challenge={challenge}
+        label="Current challenge"
+        routeLabel={`Start article: ${challenge.start.title}. Target article: ${challenge.target.title}.`}
+        metadata={<>
+          <span className="daily-badge">{challengeHeading(challenge)}</span>
+          {humanChallengeCreator(challenge) ? <span>Created by {humanChallengeCreator(challenge)}</span> : null}
+        </>}
+        onRace={onRaceThis}
+        disabled={raceDisabled}
+        describedBy={peeked ? "challenge-race-status" : undefined}
+      >
+        {peeked ? <p id="challenge-race-status" className="daily-hero-status muted">Unranked practice</p>
+          : finished ? <p className="daily-hero-status daily-hero-done">Finished{outcome?.best ? ` · Your best: ${formatTimeAndClicks(outcome.best.elapsedMs, outcome.best.clickCount)}` : ""}</p>
+          : progressPending ? <p className="daily-hero-status muted">Checking your progress…</p>
+          : progressFailed ? <p className="daily-hero-status muted">Your progress is unavailable.</p>
+          : unfinished ? <p className="daily-hero-status daily-hero-dnf">Last try: DNF</p> : null}
+        {showGiveUp ? (
+          <GiveUpAffordance apiClient={apiClient} challengeId={challenge.id} errorReporter={errorReporter} identityToken={identityToken} onPeeked={() => setOutcomeRefreshToken(value => value + 1)} />
+        ) : null}
+      </RaceCard>
+
+      {isPastDaily && onPlayTodaysDaily ? (
+        <button className="link-button challenge-today-link" onClick={onPlayTodaysDaily} type="button">Play today&apos;s daily ›</button>
+      ) : null}
 
       {peeked && identityToken ? (
         <TheSolution
@@ -279,7 +275,9 @@ export default function ChallengeDetail({
       <section className="leaderboard-panel" aria-label="Challenge leaderboard">
         <div className="leaderboard-heading">
           <h2>Leaderboard</h2>
-
+          {pathsUnlocked ? (
+            <ChallengePathGraphButton apiClient={apiClient} challengeId={challenge.id} errorReporter={errorReporter} identityToken={identityToken} unlocked={pathsUnlocked} />
+          ) : null}
         </div>
         <LeaderboardList
           dnfs={board.dnfs}

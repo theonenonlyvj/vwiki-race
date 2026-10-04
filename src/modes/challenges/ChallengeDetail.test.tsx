@@ -411,26 +411,26 @@ describe("\"I gave up\" affordance + solution view (owner spec, 2026-08-02)", ()
 });
 
 describe("Challenge landing intent", () => {
-  it("invites an unplayed visitor to preview without starting a run", async () => {
+  it("invites an unplayed visitor to start through the existing briefing", async () => {
     const { onRaceThis } = renderDetail();
-    expect(screen.getByText("Find your way there.")).toBeVisible();
-    await userEvent.setup().click(screen.getByRole("button", { name: /preview this race/i }));
+    expect(screen.queryByText("Find your way there.")).toBeNull();
+    await userEvent.setup().click(screen.getByRole("button", { name: /^▶ Race$/i }));
     expect(onRaceThis).toHaveBeenCalledOnce();
   });
-  it("leads a finished player to the graph and makes replay secondary", async () => {
+  it("keeps graph access and finished status alongside the shared race entry", async () => {
     renderDetail({ identityAccountId: "me", identityToken: "token", apiClient: mockApiClient({
       getAccountChallengeOutcomes: vi.fn(async () => [{ challengeId: challenge.id, outcome: "completed" as const, best: { elapsedMs: 20000, clickCount: 3 } }]),
     }) });
-    expect(await screen.findByText("You found your way.")).toBeVisible();
+    expect(await screen.findByText(/^Finished/)).toBeVisible();
     expect(screen.getByRole("button", { name: /view graph/i })).toBeVisible();
-    expect(screen.getByRole("button", { name: /race again/i })).toHaveClass("link-button");
+    expect(screen.getByRole("button", { name: /^▶ Race$/i })).toHaveClass("race-preview-button");
   });
   it("acknowledges DNF and preserves the explicit reveal confirmation", async () => {
     renderDetail({ identityAccountId: "me", identityToken: "token", apiClient: mockApiClient({
       getAccountChallengeOutcomes: vi.fn(async () => [{ challengeId: challenge.id, outcome: "dnf" as const, best: null, giveUpEligible: true }]),
     }) });
-    expect(await screen.findByText("A different path might get you there.")).toBeVisible();
-    expect(screen.getByRole("button", { name: /try again/i })).toBeVisible();
+    expect(await screen.findByText("Last try: DNF")).toBeVisible();
+    expect(screen.getByRole("button", { name: /^▶ Race$/i })).toBeVisible();
     await userEvent.setup().click(screen.getByRole("button", { name: /i give up/i }));
     expect(screen.getByRole("group", { name: /give up confirmation/i })).toBeVisible();
   });
@@ -444,21 +444,21 @@ describe("Challenge progress isolation", () => {
     view.rerender(<ChallengeDetail {...view.props} identityToken="second" identityAccountId="second" />);
     expect(screen.queryByRole("button", { name: "View graph" })).toBeNull();
     expect(screen.queryByText("The routes are open.")).toBeNull();
-    expect(await screen.findByText("Find your way there.")).toBeVisible();
+    expect(await screen.findByRole("button", { name: "▶ Race" })).toBeVisible();
   });
   it("offers explicitly unranked practice after a reveal", async () => {
     const { onRaceThis } = renderDetail({ identityToken: "first", identityAccountId: "first", apiClient: mockApiClient({
       getAccountChallengeOutcomes: vi.fn(async () => [{ challengeId: challenge.id, outcome: "dnf" as const, best: null, peeked: true }]),
     }) });
-    await userEvent.setup().click(await screen.findByRole("button", { name: "Practice this race" }));
-    expect(screen.getByText(/future attempts here are unranked/i)).toBeVisible();
+    await userEvent.setup().click(await screen.findByRole("button", { name: "▶ Race" }));
+    expect(screen.getByText(/unranked practice/i)).toBeVisible();
     expect(onRaceThis).toHaveBeenCalledOnce();
   });
 });
 
 it("does not offer route reveal before an unfinished player is eligible", async () => {
   renderDetail({ identityToken: "token", identityAccountId: "me", apiClient: mockApiClient({ getAccountChallengeOutcomes: vi.fn(async () => [{challengeId:challenge.id,outcome:"dnf" as const,best:null,giveUpEligible:false}]) }) });
-  expect(await screen.findByText("Start fresh and try a different route. Your next attempt can still rank.")).toBeVisible();
+  expect(await screen.findByText("Last try: DNF")).toBeVisible();
   expect(screen.queryByRole("button",{name:/i give up/i})).toBeNull();
   expect(screen.queryByText(/reveal the routes when/i)).toBeNull();
 });
