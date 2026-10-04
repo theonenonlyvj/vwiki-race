@@ -1,3 +1,4 @@
+import { PlayerProfiles } from "./components/PlayerProfiles";
 import {
   useEffect,
   useMemo,
@@ -459,6 +460,7 @@ export default function App({
   // Home's "see full board" link under its yesterday recap means Yesterday
   // specifically - see goToBoardsFor/selectMode below.
   const [boardsInitialSegment, setBoardsInitialSegment] = useState<BoardsSegment>("today");
+  const previewOrigin = useRef<{ mode: ModeKey; segment?: BoardsSegment; challengeId?: string; detail?: boolean }>({ mode: "home" });
   const [endConfirmationOpen, setEndConfirmationOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runNotice, setRunNotice] = useState<string | null>(null);
@@ -1174,6 +1176,15 @@ export default function App({
       if (lockedChallengeId) nav.pinLockedChallenge(lockedChallengeId);
       return;
     }
+    if (raceStage === "preview") {
+      if (authBusy) {
+        if (selectedChallengeId) nav.pinLockedChallenge(selectedChallengeId);
+      } else {
+        closeAuthPrompt();
+        backFromPreview();
+      }
+      return;
+    }
     if (isAdminDailiesRoute()) {
       setError(null);
       return;
@@ -1481,9 +1492,10 @@ export default function App({
   // challenge was last browsed elsewhere in the app). Named distinctly from
   // RaceFlow's own `raceChallenge` prop (the currently in-flight challenge)
   // to avoid confusion between the two.
-  function openRacePreviewFor(challengeId: string) {
+  function openRacePreviewFor(challengeId: string, segment?: BoardsSegment) {
     if (challengeLockRef.current) return;
     if (!challenges.some((item) => item.id === challengeId)) return;
+    previewOrigin.current = { mode, segment, challengeId: selectedChallenge?.id, detail: challengesView === "detail" };
     setSelectedChallengeId(challengeId);
     nav.enterRacePreview(challengeId);
   }
@@ -1657,6 +1669,21 @@ export default function App({
     } finally {
       randomChallengeLockRef.current = false;
       setRandomChallengeBusy(false);
+    }
+  }
+
+  function backFromPreview() {
+    const origin = previewOrigin.current;
+    setRaceStage(null);
+    if (origin.mode === "boards") {
+      nav.exitRaceTo("boards");
+      setBoardsInitialSegment(origin.segment ?? "today");
+    } else if (origin.mode === "challenges" && origin.detail && origin.challengeId) {
+      setSelectedChallengeId(origin.challengeId);
+      syncChallengeUrl(origin.challengeId, "replace");
+      nav.openDetail(origin.challengeId);
+    } else {
+      nav.exitRaceTo(origin.mode);
     }
   }
 
@@ -2522,6 +2549,7 @@ export default function App({
   const bannerNotice = showBanners ? runNotice : null;
 
   return (
+    <PlayerProfiles apiClient={apiClient} errorReporter={errorReporter} refreshKey={`${identitySession?.accountId ?? ""}:${statsRefreshVersion}`}>
     <main
       className="app-shell"
       aria-busy={isBusy}
@@ -2586,7 +2614,7 @@ export default function App({
           onRetryRecovery={() => void retryRecovery()}
           onRetryCatalog={() => setCatalogRefreshVersion((version) => version + 1)}
           onRequestEndRun={requestEndRun}
-          onBackFromPreview={() => exitRaceFlow("home")}
+          onBackFromPreview={backFromPreview}
           onSeeOtherChallengesFromPreview={() => exitRaceFlow("challenges")}
           onStartFromPreview={() => void startSelectedChallenge()}
           onPlayAgain={() => void startSelectedChallenge()}
@@ -2749,6 +2777,7 @@ export default function App({
         </ModalDialog>
       ) : null}
     </main>
+    </PlayerProfiles>
   );
 }
 

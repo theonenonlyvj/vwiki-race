@@ -1,3 +1,4 @@
+import { PlayerName } from "./PlayerProfiles";
 import StagedLoadingNotice from "./StagedLoadingNotice";
 import WinningPathChain from "./WinningPathChain";
 import { formatTimeAndClicks } from "../domain/formatting";
@@ -93,7 +94,7 @@ export default function LeaderboardList({
                 <li className={isYou ? "is-you" : undefined} key={row.accountId}>
                   <span className="rank">#{row.placement}</span>
                   <span>
-                    {row.displayName ?? "Unknown"}
+                    <PlayerName accountId={row.accountId} displayName={row.displayName} />
                     {isYou ? <span className="muted"> (you)</span> : null}
                   </span>
                   {/* Pre-finish spoiler mask (owner ask): "before I finish
@@ -151,7 +152,7 @@ export default function LeaderboardList({
                       teal. */}
                   <span className="rank rank-dnf">{"—"}</span>
                   <span>
-                    {row.displayName ?? "Unknown"}
+                    <PlayerName accountId={row.accountId} displayName={row.displayName} />
                     {isYou ? <span className="muted"> (you)</span> : null}
                   </span>
                   {/* Pre-finish spoiler mask (owner ask): same gate as the

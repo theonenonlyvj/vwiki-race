@@ -1498,8 +1498,8 @@ h1 {
   cursor: default;
 }
 
-.trend-row-toggle:not(:disabled):hover,
-.trend-row-toggle:not(:disabled):focus-visible {
+button.trend-row-toggle:not(:disabled):hover,
+button.trend-row-toggle:not(:disabled):focus-visible {
   box-shadow: none;
   transform: none;
   color: var(--cyan);

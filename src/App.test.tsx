@@ -7935,6 +7935,10 @@ describe("Owner-approved URL policy (2026-07-21): ?challenge= is Detail's addres
     expect(await screen.findByRole("button", { name: /start race/i })).toBeVisible();
     expect(screen.getByText(/water/i)).toBeVisible();
     expect(window.location.search).toBe("?challenge=challenge-0012");
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    const original = await screen.findByRole("region", { name: /challenge detail/i });
+    expect(within(original).getByText("Daily 7/20")).toBeVisible();
+    expect(window.location.search).toBe("?challenge=challenge-0011");
   });
 
   it("a nav tap away from Detail clears ?challenge= so a later refresh lands on Home, not Detail (fixes the live leak)", async () => {
@@ -8974,7 +8978,7 @@ describe("Boards v1: Today/Yesterday daily views (Increment 3)", () => {
     expect(footnote.compareDocumentPosition(raceCta) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("hides the Race CTA once the viewer has a completed placement, and never shows it on Yesterday", async () => {
+  it("opens an unplayed Yesterday daily even after finishing Today, and Back restores Yesterday", async () => {
     const todayChallenge = dailyChallenge("challenge-0001", {
       dailyDate: "2026-07-17",
       start: "Apple",
@@ -9014,6 +9018,19 @@ describe("Boards v1: Today/Yesterday daily views (Increment 3)", () => {
     await user.click(within(board).getByRole("tab", { name: "Yesterday" }));
     await waitFor(() => expect(within(board).queryByText("Vijay")).toBeNull());
     expect(within(board).queryByRole("button", { name: /race today's daily/i })).toBeNull();
+    await user.click(await within(board).findByRole("button", { name: /race yesterday's daily/i }));
+    const preview = await screen.findByRole("region", { name: /pre-race preview/i });
+    expect(within(preview).getByText("Start: Mars", { exact: true })).toBeVisible();
+    expect(within(preview).getByText("Water", { exact: true })).toBeVisible();
+    expect(fetchImpl.mock.calls.filter(([input]) => String(input) === apiUrl("/api/v2/runs/start"))).toHaveLength(0);
+    await user.click(within(preview).getByRole("button", { name: /back/i }));
+    expect(await screen.findByRole("tab", { name: "Yesterday", selected: true })).toBeVisible();
+    expect(window.location.search).not.toContain("challenge=");
+    await user.click(screen.getByRole("button", { name: /race yesterday's daily/i }));
+    window.history.replaceState({ vwrDepth: 1 }, "", "/");
+    act(() => window.dispatchEvent(new PopStateEvent("popstate")));
+    expect(await screen.findByRole("tab", { name: "Yesterday", selected: true })).toBeVisible();
+    expect(screen.queryByRole("region", { name: /pre-race preview/i })).not.toBeInTheDocument();
   });
 
   it("switches to Yesterday and shows that daily's own board, never mixing the two", async () => {
@@ -9105,7 +9122,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     // The hot board leads with the bare percentage - the subheader already
     // says it is the share of racers beaten, and repeating that on every
     // row was noise. The detail line carries the context.
-    expect(within(board).getByRole("button", { name: /vijay/i })).toHaveTextContent(
+    expect(within(board).getByRole("button", { name: "View Vijay's profile" }).closest("li")).toHaveTextContent(
       /3 races · 4:37 · 9\.3 clk75%/,
     );
     expect(within(board).getByText(/\(you\)/i)).toBeVisible();
@@ -9177,7 +9194,7 @@ describe("Boards v2: 7d/30d/lifetime trends (Increment 4)", () => {
     await user.click(await screen.findByRole("button", { name: "Stats" }));
     const board = screen.getByRole("region", { name: "Stats" });
     await user.click(within(board).getByRole("tab", { name: "7d" }));
-    await user.click(await within(board).findByRole("button", { name: /vijay.*100%/i }));
+    await user.click(await within(board).findByRole("button", { name: "Your recent dailies" }));
 
     expect(await within(board).findByText("2026-07-18")).toBeVisible();
     expect(within(board).getByText(/#1 · 0:05 · 2 clk/)).toBeVisible();

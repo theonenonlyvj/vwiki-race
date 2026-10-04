@@ -1,0 +1,26 @@
+button.player-profile-link {
+  display: inline-block; min-width: 24px; min-height: 44px; max-width: 100%; padding: 4px 0;
+  border: 0; border-radius: 2px; background: transparent; color: inherit;
+  font: inherit; text-align: left; text-transform: none; letter-spacing: inherit;
+  text-decoration: underline; text-decoration-color: var(--line-strong);
+  text-underline-offset: .18em; overflow-wrap: anywhere; box-shadow: none;
+}
+button.player-profile-link:hover { color: var(--cyan); box-shadow: none; text-decoration-color: currentColor; }
+button.player-profile-link:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.player-profile-dialog {
+  width: min(480px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto;
+  border: 1px solid var(--line-strong); border-radius: 16px; padding: 24px;
+  background: var(--ink-raised); color: var(--text); font-family: var(--viota-ui-font);
+}
+.player-profile-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.player-profile-heading h2 { min-width: 0; overflow-wrap: anywhere; font: 650 1.7rem/1.2 var(--viota-ui-font); }
+.player-profile-heading button { min-height: 44px; flex-shrink: 0; }
+.player-profile-dialog h3 { margin-top: 24px; font-size: 1rem; }
+.player-profile-dialog p { font-size: .85rem; line-height: 1.6; margin-block: 12px; }
+.player-profile-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-block: 18px; }
+.player-profile-totals dt { color: var(--muted); font-size: .78rem; }
+.player-profile-totals dd { margin: 8px 0 0; font-size: 1.65rem; font-variant-numeric: tabular-nums; }
+.board-own-history-toggle { grid-column: 1 / -1; justify-self: start; }
+
+.boards-mode .board-trend-drilldown > li { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.boards-mode .board-trend-drilldown > li > button { justify-self: start; white-space: nowrap; min-height: 44px; }

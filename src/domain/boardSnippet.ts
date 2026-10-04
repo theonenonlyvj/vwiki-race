@@ -23,6 +23,7 @@ import type {
  */
 export interface BoardSnippetRow {
   key: string;
+  accountId?: string;
   /** "#1", "#2", ... for placements; "DNF" for abandoned/DNF rows. */
   rankLabel: string;
   /** Numeric placement, or `null` for a DNF - lets callers merge-insert a
@@ -75,6 +76,7 @@ export function boardSnippetRowsFromBoard(
 ): BoardSnippetRow[] {
   const placements = board.placements.map((row): BoardSnippetRow => ({
     key: `placement-${row.accountId}`,
+    accountId: row.accountId,
     rankLabel: `#${row.placement}`,
     rank: row.placement,
     displayName: row.displayName ?? "Unknown",
@@ -84,6 +86,7 @@ export function boardSnippetRowsFromBoard(
   }));
   const dnfs = board.dnfs.map((row): BoardSnippetRow => ({
     key: `dnf-${row.accountId}`,
+    accountId: row.accountId,
     rankLabel: "DNF",
     rank: null,
     displayName: row.displayName ?? "Unknown",
@@ -159,6 +162,7 @@ export function boardSnippetRowsForResult(
   const dedupedRank = dedupedRankForJustFinished(board.placements, justFinished);
   const yourRow: BoardSnippetRow = {
     key: `you-${identityAccountId}`,
+    accountId: identityAccountId,
     // "DNF" is reserved for genuinely abandoned runs. A completed run with
     // no rank (excluded from the board's ranked CTE - containment-flagged,
     // ranked_eligible=0, or an older response with no leaderboardContext at

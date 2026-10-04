@@ -171,7 +171,7 @@ export default function AppShell({
   onOpenChallengeDetail: (challengeId: string) => void;
   // "Honest You" (State B, spec §2.3): routes through the ghost-loss guard.
   onPlayAsSomeoneElse: () => void;
-  onRaceChallenge: (challengeId: string) => void;
+  onRaceChallenge: (challengeId: string, segment?: BoardsSegment) => void;
   // RC-06: bumps App.tsx's statsRefreshVersion - You's "Couldn't load your
   // stats — Retry" only.
   onRetryAccountStats: () => void;

@@ -1,3 +1,4 @@
+import { PlayerName } from "../components/PlayerProfiles";
 import {
   useEffect,
   useMemo,
@@ -80,7 +81,7 @@ function boardsTabId(segment: BoardsSegment): string {
 
 type RecentDailyDetail =
   | { challengeId: string; dailyDate: string; status: "loading" }
-  | { challengeId: string; dailyDate: string; status: "not-played" }
+  | { challengeId: string; dailyDate: string; status: "not-played" | "error" }
   | { challengeId: string; dailyDate: string; status: "placement"; placement: number; elapsedMs: number; clickCount: number }
   | { challengeId: string; dailyDate: string; status: "dnf"; elapsedMs: number; clickCount: number };
 
@@ -219,7 +220,7 @@ export default function Boards({
   // exists until Start") - reuses App.tsx's existing onOpenChallengeDetail,
   // same callback Home already receives as its own `onOpenChallenge`.
   onOpenChallenge: (challengeId: string) => void;
-  onRaceChallenge: (challengeId: string) => void;
+  onRaceChallenge: (challengeId: string, segment?: BoardsSegment) => void;
   // Zero-finisher escape hatch: the "Browse all challenges ›" fallback (no
   // suggestion available, or an anonymous viewer) - same
   // `onSelectMode("challenges")` callback Home already receives as its own
@@ -291,6 +292,7 @@ export default function Boards({
   const [trendsRetryToken, setTrendsRetryToken] = useState(0);
   const [ownRowExpanded, setOwnRowExpanded] = useState(false);
   const [recentDailyDetails, setRecentDailyDetails] = useState<RecentDailyDetail[]>([]);
+  const [recentDetailsAccountId, setRecentDetailsAccountId] = useState(identityAccountId);
 
   const yesterdayCentral = useMemo(
     () => previousCentralDate(todayCentral),
@@ -428,6 +430,7 @@ export default function Boards({
       setRecentDailyDetails([]);
       return;
     }
+    setRecentDetailsAccountId(identityAccountId);
     setRecentDailyDetails(
       recentDailyChallenges.map(({ challenge, dailyDate }) => ({
         challengeId: challenge.id,
@@ -470,7 +473,10 @@ export default function Boards({
             }
             return { challengeId: challenge.id, dailyDate, status: "not-played" };
           })
-          .catch((): RecentDailyDetail => ({ challengeId: challenge.id, dailyDate, status: "not-played" })),
+          .catch((caught): RecentDailyDetail => {
+            if (!cancelled) errorReporter.reportVisibleError("boards-recent-daily", apiErrorCode(caught), "Couldn't load result.", { accountId: identityAccountId ?? undefined });
+            return { challengeId: challenge.id, dailyDate, status: "error" };
+          }),
       ),
     ).then((details) => {
       if (!cancelled) setRecentDailyDetails(details);
@@ -540,7 +546,7 @@ export default function Boards({
     : null;
   // Invariant 2: a DNF (below) never counts as "finished" - only a
   // completed placement row does, so the CTA stays up through a DNF retry.
-  const showRaceCta = segment === "today" && Boolean(activeChallenge) && !ownPlacement;
+  const showRaceCta = !isTrendSegment(segment) && Boolean(activeChallenge) && !ownPlacement;
   // FB-4 (invariant 5): "played" means finished THIS board's challenge -
   // same completed-placement-row test `showRaceCta` above already uses, so
   // the two can't independently drift on what counts as "played".
@@ -666,17 +672,13 @@ export default function Boards({
                     const figures = trendRowFigures(row, segment);
                     return (
                       <li className={isYou ? "is-you" : undefined} key={row.accountId}>
-                        <button
-                          aria-expanded={isYou ? ownRowExpanded : undefined}
+                        <div
                           className="trend-row-toggle"
-                          disabled={!isYou}
-                          onClick={isYou ? () => setOwnRowExpanded((value) => !value) : undefined}
                           style={{ "--fill": trendBarWidth(row, rankedRows[0]) } as CSSProperties}
-                          type="button"
                         >
                           <span className="rank">{index + 1}</span>
                           <span className="trend-row-name">
-                            {row.displayName ?? "Unknown"}
+                            <PlayerName accountId={row.accountId} displayName={row.displayName} />
                             {isYou ? <span className="muted"> (you)</span> : null}
                           </span>
                           <span className="trend-detail">{figures.detail}</span>
@@ -706,13 +708,17 @@ export default function Boards({
                               )}
                             </span>
                           </span>
-                        </button>
+                        </div>
+                        {isYou ? <button type="button" className="link-button board-own-history-toggle"
+                          aria-expanded={ownRowExpanded} onClick={() => setOwnRowExpanded(value => !value)}>
+                          {ownRowExpanded ? "Hide recent dailies" : "Your recent dailies"}
+                        </button> : null}
                         {isYou && ownRowExpanded ? (
                           <ol className="board-trend-drilldown muted" aria-label="Recent dailies">
-                            {recentDailyDetails.length ? (
+                            {recentDetailsAccountId !== identityAccountId ? <li>Loading recent dailies…</li> : recentDailyDetails.length ? (
                               recentDailyDetails.map((detail) => (
                                 <li key={detail.challengeId}>
-                                  <span>{detail.dailyDate}</span>
+                                  <button className="link-button" type="button" onClick={() => onOpenChallenge(detail.challengeId)}>{detail.dailyDate}</button>
                                   <span>{recentDailyDetailText(detail)}</span>
                                 </li>
                               ))
@@ -761,7 +767,7 @@ export default function Boards({
                     return (
                       <li key={row.accountId}>
                         <span>
-                          {row.displayName ?? "Unknown"}
+                          <PlayerName accountId={row.accountId} displayName={row.displayName} />
                           {isYou ? <span className="muted"> (you)</span> : null}
                         </span>
                         <span>{trendUnrankedProgressCopy(row, trendFloorForSegment(segment, guard))}</span>
@@ -800,7 +806,7 @@ export default function Boards({
                       return (
                         <li key={row.accountId}>
                           <span>
-                            {row.displayName ?? "Unknown"}
+                            <PlayerName accountId={row.accountId} displayName={row.displayName} />
                             {isYou ? <span className="muted"> (you)</span> : null}
                           </span>
                           <span>{rosterCountsText(row)}</span>
@@ -887,7 +893,7 @@ export default function Boards({
                     <li className={isYou ? "is-you" : undefined} key={row.accountId}>
                       <span className="rank">#{row.placement}</span>
                       <span>
-                        {row.displayName ?? "Unknown"}
+                        <PlayerName accountId={row.accountId} displayName={row.displayName} />
                         {isYou ? <span className="muted"> (you)</span> : null}
                       </span>
                       {/* Pre-finish spoiler mask (owner ask): "before I
@@ -961,7 +967,7 @@ export default function Boards({
                           unconditionally - salmon, never CTA teal. */}
                       <span className="rank rank-dnf">{"—"}</span>
                       <span>
-                        {row.displayName ?? "Unknown"}
+                        <PlayerName accountId={row.accountId} displayName={row.displayName} />
                         {isYou ? <span className="muted"> (you)</span> : null}
                       </span>
                       {/* Pre-finish spoiler mask (owner ask): same gate as
@@ -993,12 +999,11 @@ export default function Boards({
             />
           )}
 
-          {/* PKG-10: below the leaderboard/DNF/footnote, matching
-              mockup-boards-trends' "Daily view" bottom-of-screen CTA
-              placement (council: see-the-board-then-commit order) - it used
-              to render right under the badge/title, above any board data at
-              all. */}
-          {showRaceCta ? (
+
+        </>
+      )}
+      {/* A scoreboard outage must not block an otherwise playable challenge. */}
+          {showRaceCta && activeChallenge ? (
             <div className="player-gate">
               {/* PKG-04: opens the preview only (non-committal), same class
                   as Home's hero and Detail's "Race this" - see Home.tsx's
@@ -1009,15 +1014,13 @@ export default function Boards({
               <button
                 className="race-preview-button"
                 disabled={raceBusy}
-                onClick={() => onRaceChallenge(activeChallenge.id)}
+                onClick={() => onRaceChallenge(activeChallenge.id, segment)}
                 type="button"
               >
-                {todayShowsYesterdayFraming ? `${"▶"} Race` : `${"▶"} Race today's daily`}
+                {segment === "yesterday" ? "▶ Race yesterday's daily" : todayShowsYesterdayFraming ? "▶ Race" : "▶ Race today's daily"}
               </button>
             </div>
           ) : null}
-        </>
-      )}
       </div>
     </section>
   );
@@ -1038,6 +1041,8 @@ function recentDailyDetailText(detail: RecentDailyDetail): string {
   switch (detail.status) {
     case "loading":
       return "…";
+    case "error":
+      return "Couldn’t load result";
     case "placement":
       return `#${detail.placement} · ${formatTimeAndClicks(detail.elapsedMs, detail.clickCount)}`;
     case "dnf":

@@ -108,6 +108,35 @@ function renderBoards(overrides: Partial<Parameters<typeof Boards>[0]> = {}) {
 }
 
 describe("Boards: Today shares Home's honest hero selection (PKG-01)", () => {
+  it("lets an unplayed Yesterday daily open its own race preview", async () => {
+    const user = userEvent.setup();
+    const { onRaceChallenge } = renderBoards({
+      challenges: [yesterdaysDaily, todaysDaily],
+      heroSelection: { challenge: todaysDaily, kind: "today-daily" },
+      initialSegment: "yesterday",
+    });
+    const race = await screen.findByRole("button", { name: /race yesterday's daily/i });
+    await user.click(race);
+    expect(onRaceChallenge).toHaveBeenCalledWith(yesterdaysDaily.id, "yesterday");
+    expect(screen.queryByRole("button", { name: /race today's daily/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps Yesterday's preview action disabled while a race transition is busy", async () => {
+    renderBoards({ initialSegment: "yesterday", raceBusy: true });
+    expect(await screen.findByRole("button", { name: /race yesterday's daily/i })).toBeDisabled();
+  });
+
+  it("still lets Yesterday open when its scoreboard is unavailable", async () => {
+    const user = userEvent.setup();
+    const { onRaceChallenge } = renderBoards({
+      initialSegment: "yesterday",
+      apiClient: mockApiClient({ getChallengeBoard: vi.fn(async () => { throw new Error("offline"); }) }),
+    });
+    await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: /race yesterday's daily/i }));
+    expect(onRaceChallenge).toHaveBeenCalledWith(yesterdaysDaily.id, "yesterday");
+  });
+
   it("kind today-daily: renders the ordinary TODAY framing + 'Race today's daily' CTA", async () => {
     const { onRaceChallenge } = renderBoards({
       challenges: [randomUserChallenge, yesterdaysDaily, todaysDaily],
@@ -125,7 +154,7 @@ describe("Boards: Today shares Home's honest hero selection (PKG-01)", () => {
 
     const cta = screen.getByRole("button", { name: /race today's daily/i });
     await userEvent.setup().click(cta);
-    expect(onRaceChallenge).toHaveBeenCalledWith(todaysDaily.id);
+    expect(onRaceChallenge).toHaveBeenCalledWith(todaysDaily.id, "today");
   });
 
   it("kind yesterday-daily (pre-drop): Today mirrors Home's honest framing - no unqualified TODAY label, bare 'Race' CTA", async () => {

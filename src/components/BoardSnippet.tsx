@@ -1,3 +1,4 @@
+import { PlayerName } from "./PlayerProfiles";
 import { useState, type ReactNode } from "react";
 import StagedLoadingNotice from "./StagedLoadingNotice";
 import { NO_ATTEMPTS_LABEL, windowBoardRows, type BoardSnippetRow } from "../domain/boardSnippet";
@@ -54,7 +55,7 @@ function BoardSnippetRowItem({
         {isDnf ? "Did not finish" : row.rankLabel}
       </span>
       <span className="board-snippet-player">
-        <span className="board-snippet-player-name">{row.displayName}</span>
+        <PlayerName className="board-snippet-player-name" accountId={row.accountId} displayName={row.displayName} />
         {row.isYou ? <span className="muted board-snippet-you-marker">(you)</span> : null}
       </span>
       {unlocked ? (
