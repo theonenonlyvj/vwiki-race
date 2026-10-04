@@ -198,27 +198,26 @@ export default function RaceResults({
     };
   }, [apiClient, challenge.id]);
 
-  // "I gave up" (owner spec, 2026-08-02): only a DNF outcome could ever
-  // qualify (a completion has nothing to give up on), so the fetch is
-  // skipped entirely for a "completed" result - no wasted network call on
-  // the app's single most common Results outcome. "Any attempt" (see
-  // `MIN_GIVE_UP_CLICKS`/`MIN_GIVE_UP_WALL_MS`'s own doc comment) means
-  // eligibility is account-wide on this challenge, not just this literal
-  // just-ended run - a trivial "Try again" DNF's own Results screen can
-  // still show the affordance if an EARLIER attempt already qualified, so
-  // this reads the same bulk outcomes endpoint Challenge Detail does rather
-  // than deriving anything from `outcome` itself.
-  const [giveUpEligible, setGiveUpEligible] = useState(false);
-  const [peeked, setPeeked] = useState(false);
+  // A DNF exposes either the reveal confirmation or the unmet-requirements
+  // explanation. Fetch account-wide eligibility: an earlier attempt may
+  // qualify even when this just-ended run was short. An absent outcome after
+  // a successful lookup means no counted attempt; pending/failed lookups
+  // must never be described as an ineligible attempt.
+  const [revealAccess, setRevealAccess] = useState<{
+    token: string; challengeId: string; eligible: boolean; peeked: boolean; finished: boolean; countedDnf: boolean;
+  } | null>(null);
+  const currentRevealAccess = revealAccess?.token === identityToken && revealAccess?.challengeId === challenge.id
+    ? revealAccess : null;
+  const peeked = Boolean(currentRevealAccess?.peeked);
   useEffect(() => {
+    setRevealAccess(null);
     if (outcome.status !== "dnf" || !identityToken) return;
     let cancelled = false;
     void apiClient.getAccountChallengeOutcomes(identityToken)
       .then((outcomes) => {
         if (cancelled) return;
         const mine = outcomes.find((entry) => entry.challengeId === challenge.id);
-        setGiveUpEligible(Boolean(mine?.giveUpEligible));
-        setPeeked(Boolean(mine?.peeked));
+        setRevealAccess({ token: identityToken, challengeId: challenge.id, eligible: Boolean(mine?.giveUpEligible), peeked: Boolean(mine?.peeked), finished: mine?.outcome === "completed", countedDnf: mine?.outcome === "dnf" });
       })
       .catch(() => undefined);
     return () => {
@@ -375,8 +374,13 @@ export default function RaceResults({
             "Detail shows 'The solution'") - confirming here just jumps
             straight to Challenge Detail, which will render it once the
             peek has landed. */}
-        {outcome.status === "dnf" && giveUpEligible && !peeked ? (
+        {outcome.status === "dnf" && currentRevealAccess && !currentRevealAccess.finished && !peeked ? (
           <GiveUpAffordance
+            eligible={currentRevealAccess.eligible}
+            ineligibleReason={currentRevealAccess.countedDnf ? "more-progress" : "minimum-clicks"}
+            attemptClickCount={outcome.clicks}
+            onRace={onPlayAgain}
+            raceDisabled={playAgainDisabled}
             apiClient={apiClient}
             challengeId={challenge.id}
             errorReporter={errorReporter}
@@ -404,10 +408,7 @@ export default function RaceResults({
           rows={boardSnippetRowsForResult(board, identityAccountId, boardLoaded ? justFinishedRow : null)}
           unlocked={outcome.status === "completed" || peeked}
         >
-          {/* GR-1 ("View graph"): a completed outcome always qualifies for
-              disclosure (the run that just landed here IS the viewer's own
-              eligible completed run on this challenge) - a DNF outcome never
-              does, same invariant 5 rule every other surface follows. */}
+          {/* Graph and measurements share finished-or-confirmed-reveal access. */}
           <div className="result-board-actions">
           <button className="secondary-button" type="button" onClick={onShowLeaderboard}>View leaderboard</button>
           <ChallengePathGraphButton
@@ -415,7 +416,7 @@ export default function RaceResults({
             challengeId={challenge.id}
             errorReporter={errorReporter}
             identityToken={identityToken}
-            unlocked={outcome.status === "completed"}
+            unlocked={outcome.status === "completed" || peeked}
           />
           </div>
         </BoardSnippet>

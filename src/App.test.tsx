@@ -2079,15 +2079,10 @@ describe("VWiki Race app", () => {
     // Locks in the dedicated styling hook so the control reads as an obvious,
     // actionable "end / give up" affordance rather than a bare header button.
     expect(endRun).toHaveClass("end-run-button");
-    // Zero global chrome during an active race: End Run lives in the
-    // full-screen takeover's path-strip row, not the old app header/tabbar
-    // (which no longer render at all while engaged - see (a) below). HD-1:
-    // moved out of the sticky `.race-hud` itself (owner report) into the
-    // path-strip row alongside the breadcrumb - `.race-hud` now carries only
-    // the Run/Target chips.
+    // End Run stays in the sticky takeover HUD while the breadcrumb scrolls.
     expect(endRun.closest(".race-takeover")).not.toBeNull();
-    expect(endRun.closest(".path-strip")).not.toBeNull();
-    expect(endRun.closest(".race-hud")).toBeNull();
+    expect(endRun.closest(".race-hud")).not.toBeNull();
+    expect(endRun.closest(".path-strip")).toBeNull();
     expect(screen.queryByRole("navigation", { name: /vwiki race views/i })).toBeNull();
 
     await user.click(endRun);
@@ -3170,7 +3165,7 @@ describe("VWiki Race app", () => {
     // Invariant 5: once you've finished the challenge, the anti-spoiler
     // copy stands down (paths are no longer hidden - see the next test for
     // OTHER players' paths becoming disclosable too, not just your own).
-    expect(screen.queryByText(/paths (hidden until you've played|stay hidden until you finish)/i)).toBeNull();
+    expect(screen.queryByText(/paths,? (hidden until you've played|stay hidden until you finish)/i)).toBeNull();
   });
 
   it("PKG-03 remainder fix: once you've played, OTHER players' winning paths become disclosable too, not just your own", async () => {
@@ -3196,7 +3191,7 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: "Challenges" }));
     await user.click(await screen.findByRole("button", { name: /challenge #1/i }));
 
-    expect(screen.queryByText(/paths (hidden until you've played|stay hidden until you finish)/i)).toBeNull();
+    expect(screen.queryByText(/paths,? (hidden until you've played|stay hidden until you finish)/i)).toBeNull();
     const board = screen.getByRole("region", { name: "Leaderboard placements" });
     const ariRow = (await within(board).findByText("Ari")).closest("li");
     expect(ariRow).not.toBeNull();
@@ -3233,7 +3228,7 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: /challenge #1/i }));
 
     expect(await screen.findByText("Ari")).toBeVisible();
-    expect(screen.getByText(/paths (hidden until you've played|stay hidden until you finish)/i)).toBeVisible();
+    expect(screen.getByText(/paths,? (hidden until you've played|stay hidden until you finish)/i)).toBeVisible();
     expect(screen.queryByText(/view winning path/i)).toBeNull();
     expect(screen.queryByText(/view path/i)).toBeNull();
     expect(screen.getByText(/you haven't tried this one yet/i)).toBeVisible();
@@ -3260,7 +3255,7 @@ describe("VWiki Race app", () => {
 
     const history = await screen.findByRole("region", { name: /your history/i });
     expect(within(history).getByText("DNF")).toBeVisible();
-    expect(screen.getByText(/paths (hidden until you've played|stay hidden until you finish)/i)).toBeVisible();
+    expect(screen.getByText(/paths,? (hidden until you've played|stay hidden until you finish)/i)).toBeVisible();
     expect(screen.queryByText(/view path/i)).toBeNull();
     expect(screen.queryByText(/view winning path/i)).toBeNull();
   });
@@ -8933,17 +8928,11 @@ describe("Boards v1: Today/Yesterday daily views (Increment 3)", () => {
     // path disclosure (added this package - see the FB-4 test below) stays
     // hidden the same as it always has for a never-played challenge.
     expect(within(board).queryByText(/view path/i)).toBeNull();
-    // Pre-finish spoiler mask (owner ask): the same "haven't played this
-    // board's challenge" gate above now also hides time/clicks, not just
-    // paths - Vijay's own DNF time (0:08 · 2 clk) stays masked until they've
-    // finished (or given up). The DNF row now carries two em dashes - the
-    // pre-existing DNF rank glyph (`.rank-dnf`) and the new masked-time
-    // placeholder (`.muted`, distinct from the rank one).
-    expect(within(dnfSection).queryByText("0:08 · 2 clk")).toBeNull();
-    const vijayRow = within(dnfSection).getByText("Vijay").closest("li")!;
-    const dashes = within(vijayRow).getAllByText("—");
-    expect(dashes).toHaveLength(2);
-    expect(dashes.some((el) => el.className === "muted")).toBe(true);
+    // Personal measurements remain available without disclosing any path.
+    expect(within(dnfSection).getByText("0:08 · 2 clk")).toBeVisible();
+    const yourRow = within(dnfSection).getByText("Vijay").closest("li")!;
+    expect(within(yourRow).getAllByText("—")).toHaveLength(1);
+
   });
 
   it("FB-4: once the viewer has finished today's daily, Boards discloses ANY placement's winning path (not just your own)", async () => {
@@ -8976,7 +8965,7 @@ describe("Boards v1: Today/Yesterday daily views (Increment 3)", () => {
     await user.click(await screen.findByRole("button", { name: "Stats" }));
     const board = screen.getByRole("region", { name: "Stats" });
     expect(await within(board).findByText("Ari")).toBeVisible();
-    expect(within(board).queryByText(/paths (hidden until you've played|stay hidden until you finish)/i)).toBeNull();
+    expect(within(board).queryByText(/paths,? (hidden until you've played|stay hidden until you finish)/i)).toBeNull();
 
     const ariRow = screen.getByText("Ari").closest("li");
     expect(ariRow).not.toBeNull();
@@ -9041,7 +9030,7 @@ describe("Boards v1: Today/Yesterday daily views (Increment 3)", () => {
     await user.click(await screen.findByRole("button", { name: "Stats" }));
     const board = screen.getByRole("region", { name: "Stats" });
     const dnfSection = await within(board).findByRole("region", { name: "DNF" });
-    const footnote = within(board).getByText(/paths hidden until you.ve played/i);
+    const footnote = within(board).getByText(/all paths, stay hidden until you finish/i);
     const raceCta = within(board).getByRole("button", { name: /race today's daily/i });
 
     // DOCUMENT_POSITION_FOLLOWING (4): raceCta comes after both.

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import RaceResults, { type RaceResultOutcome } from "./RaceResults";
@@ -87,8 +87,8 @@ function renderResults(overrides: Partial<Parameters<typeof RaceResults>[0]> = {
     handleArticlePrewarm: vi.fn(),
     ...overrides,
   };
-  render(<RaceResults {...props} />);
-  return { onOpenChallenge };
+  const view = render(<RaceResults {...props} />);
+  return { ...view, props, onOpenChallenge };
 }
 
 describe("RaceResults: saved result, guest continuity, and sharing hierarchy", () => {
@@ -172,7 +172,7 @@ describe("RaceResults: saved result, guest continuity, and sharing hierarchy", (
     });
 
     const board = await screen.findByRole("region", { name: "Leaderboard" });
-    expect(within(board).getByText("Times and clicks unlock after you finish or give up.")).toBeVisible();
+    expect(within(board).getByText("Other players’ times and clicks unlock after you finish or confirm a reveal.")).toBeVisible();
     expect(within(board).queryByText("0:18 · 4 clk")).toBeNull();
   });
 
@@ -234,17 +234,30 @@ describe("RaceResults: \"I gave up\" affordance (owner spec, 2026-08-02)", () =>
 
     await waitFor(() => expect(screen.queryByText(/no completed runs yet/i)).not.toBeNull());
     expect(getAccountChallengeOutcomes).not.toHaveBeenCalled();
-    expect(screen.queryByText(/i give up/i)).toBeNull();
+    expect(screen.queryByText(/show me the answers/i)).toBeNull();
   });
 
-  it("does not show the affordance when the account has no qualifying DNF on this challenge", async () => {
-    const getAccountChallengeOutcomes = vi.fn(async () => [
-      { challengeId: challenge.id, outcome: "dnf" as const, best: null },
-    ]);
-    renderResults({ apiClient: mockApiClient({ getAccountChallengeOutcomes }) });
+  it("explains the missed progress requirement for a counted but ineligible DNF", async () => {
+    renderResults({ outcome: dnfOutcome({ clicks: 3, elapsedMs: 800 }),
+      apiClient: mockApiClient({ getAccountChallengeOutcomes: vi.fn(async () => [
+        { challengeId: challenge.id, outcome: "dnf" as const, best: null, giveUpEligible: false },
+      ]) }) });
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Show me the answers" }));
+    expect(screen.getByText("This attempt recorded 3 accepted clicks, below the 5-click requirement, and didn't qualify for the 3-minute alternative.")).toBeVisible();
+  });
 
-    await waitFor(() => expect(getAccountChallengeOutcomes).toHaveBeenCalled());
-    expect(screen.queryByText(/i give up/i)).toBeNull();
+  it("explains an uncounted DNF and returns to racing without revealing", async () => {
+    const giveUpChallenge = vi.fn();
+    const onPlayAgain = vi.fn();
+    renderResults({ onPlayAgain, outcome: dnfOutcome({ clicks: 1, elapsedMs: 800 }),
+      apiClient: mockApiClient({ giveUpChallenge, getAccountChallengeOutcomes: vi.fn(async () => []) }) });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Show me the answers" }));
+    expect(screen.getByRole("dialog", { name: "Answers are still locked" })).toBeVisible();
+    expect(screen.getByText(/this attempt recorded 1 accepted click/i)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "▶ Race" }));
+    expect(onPlayAgain).toHaveBeenCalledOnce();
+    expect(giveUpChallenge).not.toHaveBeenCalled();
   });
 
   it("shows the affordance on a DNF Results screen once a qualifying DNF exists - even if THIS run's own outcome was trivial (\"any attempt\")", async () => {
@@ -256,7 +269,13 @@ describe("RaceResults: \"I gave up\" affordance (owner spec, 2026-08-02)", () =>
       apiClient: mockApiClient({ getAccountChallengeOutcomes }),
     });
 
-    expect(await screen.findByRole("button", { name: /i give up/i })).toBeVisible();
+    expect(await screen.findByRole("button", { name: /show me the answers/i })).toBeVisible();
+  });
+
+  it("keeps the graph available after a revealed player's practice DNF", async () => {
+    const getAccountChallengeOutcomes = vi.fn(async () => [{ challengeId: challenge.id, outcome: "dnf" as const, best: null, peeked: true }]);
+    renderResults({ apiClient: mockApiClient({ getAccountChallengeOutcomes }) });
+    expect(await screen.findByRole("button", { name: /view graph/i })).toBeEnabled();
   });
 
   it("does not show the affordance once already peeked", async () => {
@@ -266,7 +285,7 @@ describe("RaceResults: \"I gave up\" affordance (owner spec, 2026-08-02)", () =>
     renderResults({ apiClient: mockApiClient({ getAccountChallengeOutcomes }) });
 
     await waitFor(() => expect(getAccountChallengeOutcomes).toHaveBeenCalled());
-    expect(screen.queryByText(/i give up/i)).toBeNull();
+    expect(screen.queryByText(/show me the answers/i)).toBeNull();
   });
 
   it("confirming give-up navigates to Challenge Detail (the solution view itself is Detail-only)", async () => {
@@ -279,10 +298,35 @@ describe("RaceResults: \"I gave up\" affordance (owner spec, 2026-08-02)", () =>
       apiClient: mockApiClient({ getAccountChallengeOutcomes, giveUpChallenge }),
     });
 
-    await user.click(await screen.findByRole("button", { name: /i give up/i }));
+    await user.click(await screen.findByRole("button", { name: /show me the answers/i }));
     await user.click(screen.getByRole("button", { name: /yes, show me/i }));
 
     await waitFor(() => expect(giveUpChallenge).toHaveBeenCalledWith(challenge.id, "jwt-1"));
     await waitFor(() => expect(onOpenChallenge).toHaveBeenCalledWith(challenge.id));
   });
+});
+
+describe("RaceResults: reveal eligibility and identity", () => {
+ it("withholds the reveal popup while eligibility is unknown or failed", async () => {
+   let rejectLookup!: (error: Error) => void;
+   const getAccountChallengeOutcomes = vi.fn(() => new Promise<never>((_, reject) => { rejectLookup = reject; }));
+   renderResults({ apiClient: mockApiClient({ getAccountChallengeOutcomes }) });
+   expect(screen.queryByRole("button", { name: "Show me the answers" })).toBeNull();
+   await act(async () => { rejectLookup(new Error("offline")); });
+   await waitFor(() => expect(getAccountChallengeOutcomes).toHaveBeenCalledOnce());
+   expect(screen.queryByRole("button", { name: "Show me the answers" })).toBeNull();
+ });
+
+ it("removes an open reveal confirmation on account change", async () => {
+   const apiClient = mockApiClient({ getAccountChallengeOutcomes: vi.fn(async token => token === "jwt-1"
+     ? [{ challengeId: challenge.id, outcome: "dnf" as const, best: null, giveUpEligible: true }]
+     : []) });
+   const view = renderResults({ apiClient });
+   await userEvent.setup().click(await screen.findByRole("button", { name: "Show me the answers" }));
+   expect(screen.getByRole("dialog", { name: "Show me the answers?" })).toBeVisible();
+   view.rerender(<RaceResults {...view.props} identityToken="jwt-2" identityAccountId="acc-2" />);
+   expect(screen.queryByRole("dialog")).toBeNull();
+   expect(screen.queryByRole("button", { name: "Yes, show me" })).toBeNull();
+ });
+
 });

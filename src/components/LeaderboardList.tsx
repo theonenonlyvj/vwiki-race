@@ -97,14 +97,9 @@ export default function LeaderboardList({
                     <PlayerName accountId={row.accountId} displayName={row.displayName} />
                     {isYou ? <span className="muted"> (you)</span> : null}
                   </span>
-                  {/* Pre-finish spoiler mask (owner ask): "before I finish
-                      the race... I shouldn't be able to see how long or #
-                      clicks on the leaderboard - just rankings and
-                      usernames" - the SAME `pathsUnlocked` gate already
-                      controlling "View path" just below, extended to this
-                      column. */}
+                  {/* Personal measurements stay visible; other players remain masked. */}
                   <span>
-                    {pathsUnlocked
+                    {pathsUnlocked || isYou
                       ? formatTimeAndClicks(row.elapsedMs, row.clickCount)
                       : <span className="muted">—</span>}
                   </span>
@@ -155,11 +150,9 @@ export default function LeaderboardList({
                     <PlayerName accountId={row.accountId} displayName={row.displayName} />
                     {isYou ? <span className="muted"> (you)</span> : null}
                   </span>
-                  {/* Pre-finish spoiler mask (owner ask): same gate as the
-                      placements column above - a DNF row's time/clicks are
-                      no less of a spoiler. */}
+                  {/* Personal measurements stay visible; other players remain masked. */}
                   <span>
-                    {pathsUnlocked
+                    {pathsUnlocked || isYou
                       ? formatTimeAndClicks(row.elapsedMs, row.clickCount)
                       : <span className="muted">—</span>}
                   </span>

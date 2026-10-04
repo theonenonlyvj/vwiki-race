@@ -140,9 +140,9 @@ export function TeachingGatePopup({
           <p>The daily is scheduled for 5:00 AM Central. Recognizable picks run Monday through
             Friday, with Hard picks on weekends. You can also play older challenges or create
             a start-and-target pair to share.</p>
-          <p>Rankings and names remain visible before you finish. Times, clicks, and other players'
-            routes unlock when you finish the challenge.
-            After an eligible unfinished attempt, you can instead confirm I give up to reveal
+          <p>Rankings, names, and your own times and clicks remain visible before you finish. Other players'
+            times, clicks, and routes unlock when you finish the challenge.
+            After an eligible unfinished attempt, you can instead choose Show me the answers and confirm to reveal
             the solution and routes. That choice makes your future runs on that challenge unranked. Log in to keep your history across devices, or
             choose Guest and secure that guest account later to keep its history.</p>
         </section>

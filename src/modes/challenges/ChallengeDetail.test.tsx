@@ -222,7 +222,7 @@ function leaderboardRow(overrides: Partial<RankedLeaderboardRow> = {}): RankedLe
  * test file) and "Your history" below, which this file owns directly.
  */
 describe("ChallengeDetail: pre-finish spoiler mask (time/clicks)", () => {
-  it("locked (no completed row, not peeked): 'Your history' shows rank only - no time/clicks - for a DNF-only account", async () => {
+  it("locked (no completed row, not peeked): 'Your history' shows personal time/clicks for a DNF-only account", async () => {
     renderDetail({
       identityAccountId: "acc-1",
       leaderboard: [
@@ -231,10 +231,10 @@ describe("ChallengeDetail: pre-finish spoiler mask (time/clicks)", () => {
     });
 
     expect(await screen.findByText("DNF")).toBeVisible();
-    expect(screen.queryByText("0:08 · 2 clk")).toBeNull();
+    expect(screen.getByText("0:08 · 2 clk")).toBeVisible();
     const historyPanel = screen.getByRole("region", { name: "Your history" });
-    expect(within(historyPanel).getByText("—")).toHaveClass("muted");
-    expect(screen.getByText(/times, clicks, and paths stay hidden until you finish or confirm a reveal/i))
+    expect(within(historyPanel).queryByText("View path")).toBeNull();
+    expect(screen.getByText(/other players.*times and clicks, and all paths, stay hidden until you finish or confirm a reveal/i))
       .toBeVisible();
   });
 
@@ -256,10 +256,10 @@ describe("ChallengeDetail: pre-finish spoiler mask (time/clicks)", () => {
 describe("\"I gave up\" affordance + solution view (owner spec, 2026-08-02)", () => {
   it("renders nothing when signed out - the affordance requires a real identity", () => {
     renderDetail({ identityToken: null, identityAccountId: null });
-    expect(screen.queryByText(/i give up/i)).toBeNull();
+    expect(screen.queryByText(/show me the answers/i)).toBeNull();
   });
 
-  it("renders nothing when the account has no qualifying DNF on this challenge", async () => {
+  it("offers an explanation when the account has no qualifying DNF on this challenge", async () => {
     const getAccountChallengeOutcomes = vi.fn(async () => [
       { challengeId: challenge.id, outcome: "dnf" as const, best: null },
     ]);
@@ -270,7 +270,9 @@ describe("\"I gave up\" affordance + solution view (owner spec, 2026-08-02)", ()
     });
 
     await waitFor(() => expect(getAccountChallengeOutcomes).toHaveBeenCalled());
-    expect(screen.queryByText(/i give up/i)).toBeNull();
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Show me the answers" }));
+    expect(screen.getByRole("dialog", { name: "Answers are still locked" })).toBeVisible();
+    expect(screen.getByText(/None of your attempts with at least 2 clicks has met/)).toBeVisible();
   });
 
   it("renders nothing once the account has finished the challenge (giveUpEligible is never set for a completed outcome)", async () => {
@@ -284,7 +286,7 @@ describe("\"I gave up\" affordance + solution view (owner spec, 2026-08-02)", ()
     });
 
     await waitFor(() => expect(getAccountChallengeOutcomes).toHaveBeenCalled());
-    expect(screen.queryByText(/i give up/i)).toBeNull();
+    expect(screen.queryByText(/show me the answers/i)).toBeNull();
   });
 
   it("shows the muted 'I give up' link when eligible and not yet peeked, with the confirm copy behind it", async () => {
@@ -298,10 +300,10 @@ describe("\"I gave up\" affordance + solution view (owner spec, 2026-08-02)", ()
       apiClient: mockApiClient({ getAccountChallengeOutcomes }),
     });
 
-    const giveUpButton = await screen.findByRole("button", { name: /i give up/i });
+    const giveUpButton = await screen.findByRole("button", { name: /show me the answers/i });
     await user.click(giveUpButton);
 
-    expect(screen.getByText(/this challenge's boards close for you/i)).toBeVisible();
+    expect(screen.getByText(/future attempts on this challenge/i)).toBeVisible();
     expect(screen.getByRole("button", { name: /yes, show me/i })).toBeVisible();
     expect(screen.getByRole("button", { name: /cancel/i })).toBeVisible();
   });
@@ -318,7 +320,7 @@ describe("\"I gave up\" affordance + solution view (owner spec, 2026-08-02)", ()
     });
 
     await screen.findByRole("heading", { name: /the solution/i });
-    expect(screen.queryByText(/^i give up/i)).toBeNull();
+    expect(screen.queryByText(/^show me the answers/i)).toBeNull();
   });
 
   it("confirming give-up calls the API and re-fetches outcomes", async () => {
@@ -333,7 +335,7 @@ describe("\"I gave up\" affordance + solution view (owner spec, 2026-08-02)", ()
       apiClient: mockApiClient({ getAccountChallengeOutcomes, giveUpChallenge }),
     });
 
-    await user.click(await screen.findByRole("button", { name: /i give up/i }));
+    await user.click(await screen.findByRole("button", { name: /show me the answers/i }));
     await user.click(screen.getByRole("button", { name: /yes, show me/i }));
 
     await waitFor(() => expect(giveUpChallenge).toHaveBeenCalledWith(challenge.id, "jwt-1"));
@@ -431,8 +433,8 @@ describe("Challenge landing intent", () => {
     }) });
     expect(await screen.findByText("Last try: DNF")).toBeVisible();
     expect(screen.getByRole("button", { name: /^▶ Race$/i })).toBeVisible();
-    await userEvent.setup().click(screen.getByRole("button", { name: /i give up/i }));
-    expect(screen.getByRole("group", { name: /give up confirmation/i })).toBeVisible();
+    await userEvent.setup().click(screen.getByRole("button", { name: /show me the answers/i }));
+    expect(screen.getByRole("dialog", { name: /show me the answers/i })).toBeVisible();
   });
 });
 
@@ -456,9 +458,33 @@ describe("Challenge progress isolation", () => {
   });
 });
 
-it("does not offer route reveal before an unfinished player is eligible", async () => {
-  renderDetail({ identityToken: "token", identityAccountId: "me", apiClient: mockApiClient({ getAccountChallengeOutcomes: vi.fn(async () => [{challengeId:challenge.id,outcome:"dnf" as const,best:null,giveUpEligible:false}]) }) });
-  expect(await screen.findByText("Last try: DNF")).toBeVisible();
-  expect(screen.queryByRole("button",{name:/i give up/i})).toBeNull();
-  expect(screen.queryByText(/reveal the routes when/i)).toBeNull();
+it("explains the short-history DNF even when it has no counted outcome", async () => {
+  const giveUpChallenge = vi.fn();
+  const view = renderDetail({ identityToken: "token", identityAccountId: "acc-1",
+    leaderboard: [leaderboardRow({ status: "abandoned", clickCount: 1 })],
+    apiClient: mockApiClient({ giveUpChallenge, getAccountChallengeOutcomes: vi.fn(async () => []) }) });
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Show me the answers" }));
+  const dialog = screen.getByRole("dialog", { name: "Answers are still locked" });
+  expect(within(dialog).getByText(/this attempt recorded 1 accepted click/i)).toBeVisible();
+  await user.click(within(dialog).getByRole("button", { name: "▶ Race" }));
+  expect(view.onRaceThis).toHaveBeenCalledOnce();
+  expect(giveUpChallenge).not.toHaveBeenCalled();
+});
+
+it("does not call a failed eligibility lookup an ineligible attempt", async () => {
+  renderDetail({ identityToken: "token", identityAccountId: "acc-1",
+    leaderboard: [leaderboardRow({ status: "abandoned", clickCount: 1 })],
+    apiClient: mockApiClient({ getAccountChallengeOutcomes: vi.fn(async () => { throw new Error("offline"); }) }) });
+  await screen.findByText("Your progress is unavailable.");
+  expect(screen.queryByRole("button", { name: "Show me the answers" })).toBeNull();
+});
+
+it.each([true, false])("keeps an outcome-confirmed DNF action available when the leaderboard fails (eligible: %s)", async (eligible) => {
+  renderDetail({ identityToken: "token", identityAccountId: "acc-1", leaderboardStatus: "error",
+    apiClient: mockApiClient({ getAccountChallengeOutcomes: vi.fn(async () => [
+      { challengeId: challenge.id, outcome: "dnf" as const, best: null, giveUpEligible: eligible },
+    ]) }) });
+  await userEvent.setup().click(await screen.findByRole("button", { name: "Show me the answers" }));
+  expect(screen.getByRole("dialog", { name: eligible ? "Show me the answers?" : "Answers are still locked" })).toBeVisible();
 });

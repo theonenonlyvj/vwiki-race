@@ -169,6 +169,17 @@ describe("LeaderboardList: pre-finish spoiler mask (time/clicks)", () => {
     expect(screen.queryByText(/view path/i)).toBeNull();
   });
 
+  it.each(["acc-1", "acc-2"])("shows only %s personal measurements while locked, then masks them after sign-out", (identityAccountId) => {
+    const props = { dnfs: [dnf()], placements: [placement({ runId: "run-1" })], onDisclosePath: vi.fn(), pathsUnlocked: false, runPaths: {} };
+    const { rerender } = render(<LeaderboardList {...props} identityAccountId={identityAccountId} />);
+    expect(screen.getByText(identityAccountId === "acc-1" ? "0:42 · 6 clk" : "0:08 · 2 clk")).toBeVisible();
+    expect(screen.queryByText(identityAccountId === "acc-1" ? "0:08 · 2 clk" : "0:42 · 6 clk")).toBeNull();
+    expect(screen.queryByText("View path")).toBeNull();
+    rerender(<LeaderboardList {...props} identityAccountId={null} />);
+    expect(screen.queryByText("0:42 · 6 clk")).toBeNull();
+    expect(screen.queryByText("0:08 · 2 clk")).toBeNull();
+  });
+
   it("unlocked (pathsUnlocked=true): shows time/clicks for both a placement and a DNF row", () => {
     render(
       <LeaderboardList

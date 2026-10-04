@@ -424,7 +424,7 @@ describe("Home: pre-finish spoiler mask on 'Yesterday's results' (owner ask, 202
     expect(await screen.findByText("Ari")).toBeVisible();
     expect(screen.queryByText("0:20 · 3 clk")).toBeNull();
     expect(screen.queryByText("—")).toBeNull();
-    expect(screen.getByText("Times and clicks unlock after you finish or give up.")).toBeVisible();
+    expect(screen.getByText("Other players’ times and clicks unlock after you finish or confirm a reveal.")).toBeVisible();
   });
 
   it("unlocked: the viewer already has a placement on yesterday's board - shows time/clicks normally", async () => {

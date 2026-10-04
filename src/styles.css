@@ -808,24 +808,7 @@ h1 {
   white-space: nowrap;
 }
 
-/* RC-1: was a 2-column grid (`.path-history` + the target disclosure cell
-   that's now `.target-chip` in `.race-hud` instead) - briefly a single
-   implicit column while `.path-history` was its only child.
-   HD-1 (owner report - "the end run can be in the line with the path?"):
-   End Run moved here from `.race-hud`, as a second child alongside
-   `.path-history` - switched to `display: flex` + `justify-content:
-   space-between` (breadcrumb left, End Run right) rather than reintroducing
-   a 2-column grid, matching `.race-hud-metrics`'s identical Run/Target
-   pattern above.
-   `position: sticky`/`top` below are currently inert in the only place this
-   class renders: `.race-mode .path-strip` (below) forces `position: static;
-   top: auto;` so the strip scrolls away with the page - INTENTIONAL, owner-
-   accepted (see RaceMode.tsx's PathStrip HD-1 comment). The ghost-HUD family
-   (race-hud's sticky top:0 visually colliding with this strip once scrolled)
-   is guarded entirely by `.article-heading h2`'s `scroll-margin-top` instead
-   - see raceHudScrollMargin.test.ts's doc comment for that live-DOM
-   measurement method. Left here, unchanged, only in case this class is ever
-   reused outside `.race-mode` again. */
+/* The path trail scrolls normally in race mode; HUD controls stay sticky. */
 .path-strip {
   position: sticky;
   top: 96px;
@@ -860,7 +843,7 @@ h1 {
    compact to fit this shorter row instead of the old HUD's roomier one.
    `min-height: 44px` is NOT relaxed (tap-target floor, non-negotiable per
    the brief) - only the padding/font-size shrink. */
-.path-strip .end-run-button {
+.race-hud-actions .end-run-button {
   flex: 0 0 auto;
   min-height: 44px;
   padding: 6px 12px;
@@ -972,16 +955,7 @@ h1 {
 .target-preview-popover {
   position: absolute;
   top: calc(100% + 9px);
-  /* HD-1 (owner report): was `left: 0` - fine when the target chip sat
-     hugged-left in the metrics row (RC-1), but HD-1's `justify-content:
-     space-between` now pins that chip flush right, so a left-anchored
-     popover on a wide viewport opened far from the trigger that opened it.
-     `right: 0` anchors it to `.race-hud`'s own right padding edge (its
-     containing block, being the nearest positioned ancestor) instead,
-     lining up under the Target chip. `width: min(420px, 100%)` still caps
-     it at the padding box's own width, so growing leftward from the right
-     edge can't push past the LEFT edge either - verified no overflow at
-     320/390px (hd1-after-*.png). */
+  /* Align the popover under the right-hand control group. */
   right: 0;
   z-index: 30;
   width: min(420px, 100%);
@@ -1812,30 +1786,9 @@ button.trend-row-toggle:not(:disabled):focus-visible {
     max(14px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
 }
 
-/* HD-1 (owner report, two phone screenshots - "the end run can be at the
-   top and not always visible, just the timer, click count and the [target]
-   peek"): End Run moved out of `.race-hud` entirely, into the path-strip row
-   below (`.path-strip .end-run-button`) - the old "Bug C fix" grid (named
-   areas pinning End Run to a fixed top-right cell so it couldn't jump when
-   `.run-metrics` mounted) no longer has an End Run cell to protect, so it's
-   gone too. Plain block stacking now: `.race-hud-status` (collapses to zero
-   height via `:not(:empty)` below whenever there's no pending navigation -
-   it carries no button anymore to force a minimum row height) sits above
-   `.race-hud-metrics` (Run chip flush left, Target chip flush right - see
-   that rule's own comment). One row in the common case (no pending nav) is
-   the height budget the ghost-HUD scroll-margin regression guard depends on
-   - see raceHudScrollMargin.test.ts.
-   `min-width: 0` (HD-1, live-DOM caught): `.race-mode` (this element's
-   grid-container parent) declares no `grid-template-columns`, so its one
-   implicit column sizes off each item's own "automatic minimum size" -
-   which, left at the `auto` default, is the item's own min-content/
-   max-content contribution, NOT the container's actual available inline
-   size. `.path-strip` hit this first when HD-1 gave it a second,
-   non-shrinking child (its own `min-width: 0` below has the same job) - a
-   sufficiently long-but-realistic breadcrumb pushed the whole `.race-mode`
-   column past the viewport width at 390px, opening a horizontal scrollbar.
-   Same defensive `min-width: 0` here even though race-hud's own content
-   (Run/Target chips, both already capped) doesn't currently trigger it. */
+/* One compact sticky row carries metrics, Target and End Run. Pending
+   navigation status may add a row. Keep the automatic grid minimum at zero
+   so long article titles cannot push the takeover beyond the viewport. */
 .race-hud {
   position: sticky;
   top: 0;
@@ -1905,11 +1858,7 @@ button.trend-row-toggle:not(:disabled):focus-visible {
   margin-bottom: 6px;
 }
 
-/* RC-1: `.run-metrics` (Run chip) and `.target-chip` (Target chip) are flex
-   siblings sharing this one row - see RaceMode.tsx's RC-1 comment on why
-   they must never wrap to a second line. HD-1: `justify-content:
-   space-between` is the only change here - Run pins flush left, Target
-   flush right (owner report), same two DOM children as before. */
+/* Metrics left, target and end controls right, without wrapping. */
 .race-hud-metrics {
   display: flex;
   min-width: 0;
@@ -2803,16 +2752,7 @@ button.trend-row-toggle:not(:disabled):focus-visible {
   margin-top: 8px;
 }
 
-/* "I gave up" (owner spec, 2026-08-02): the give-up affordance itself is
-   just `.link-button.muted` (no bespoke rule needed - `.give-up-link` exists
-   as a stable hook for that specific instance, not its own visual rule).
-   The confirm panel is a small inline block, never a full-bleed card - it
-   sits directly under the Race/Try-again CTA on both Challenge Detail and
-   the DNF Results screen. */
-.give-up-confirm {
-  margin-top: 10px;
-}
-
+/* Answer reveal uses the shared modal shell; keep the action subdued. */
 .give-up-confirm-actions {
   display: flex;
   gap: 8px;
@@ -4578,3 +4518,21 @@ button.trend-row-toggle:not(:disabled):focus-visible {
 .rules-content h3 { font-size: 1.1rem; margin: 0 0 8px; }
 .rules-content p { line-height: 1.5; margin: 0 0 10px; }
 .home-rules-link { font: inherit; white-space: nowrap; }
+
+/* Keep target disclosure and End Run together at the right of the sticky HUD. */
+.race-hud-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.race-hud-actions .end-run-button {
+  white-space: nowrap;
+  padding-inline: 8px;
+}
+@media (max-width: 380px) {
+  .race-hud-actions { gap: 4px; }
+  .race-hud-actions .target-chip { padding-inline: 6px; gap: 4px; }
+  .race-hud-actions .target-chip small { display: none; }
+}

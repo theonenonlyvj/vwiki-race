@@ -178,7 +178,6 @@ export default function ChallengeDetail({
   const currentOutcome = outcomeLoad?.token === identityToken && outcomeLoad?.challengeId === challenge.id ? outcomeLoad : null;
   const outcome = currentOutcome?.outcome;
   const peeked = Boolean(outcome?.peeked);
-  const showGiveUp = Boolean(outcome?.giveUpEligible) && !peeked;
 
   const yourRows = identityAccountId
     ? leaderboard.filter((row) => row.accountId === identityAccountId)
@@ -190,18 +189,21 @@ export default function ChallengeDetail({
   // peeked", matching the server's own extended disclosure guard
   // (`viewerFinishedOrPeekedChallengeExistsSql`) - a peeked account earns
   // the same "View path"/"View graph" access a finisher gets.
-  // Pre-finish spoiler mask (owner ask, extends invariant 5): the name stays
-  // `pathsUnlocked` (unchanged definition), but it now ALSO gates every
-  // row's time·clicks column (both the main Leaderboard panel via
-  // `LeaderboardList` and "Your history" below), not just "View
-  // path"/"View graph" - "before I finish the race, I shouldn't be able to
-  // see how long or # clicks on the leaderboard, just rankings and
-  // usernames."
+  // Other players’ measurements share the spoiler gate; personal history does not.
   const finished = yourRows.some((row) => row.status === "completed") || outcome?.outcome === "completed";
   const pathsUnlocked = finished || peeked;
   const unfinished = outcome?.outcome === "dnf" || yourRows.some(row => row.status === "abandoned");
   const progressPending = Boolean(identityToken) && (!currentOutcome || leaderboardStatus === "loading");
   const progressFailed = Boolean(currentOutcome?.failed) || leaderboardStatus === "error";
+  // A confirmed outcome does not depend on the separately loaded leaderboard.
+  // Only the short-attempt history fallback needs a successful history load.
+  const latestListedDnf = leaderboardStatus === "ready"
+    ? [...yourRows].filter(row => row.status === "abandoned")
+      .sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt))[0]
+    : undefined;
+  const knownDnf = outcome?.outcome === "dnf" || (leaderboardStatus === "ready" && unfinished);
+  const showGiveUp = Boolean(currentOutcome) && !currentOutcome?.failed
+    && knownDnf && !finished && !peeked;
   // DT-1 (owner-proxy ruling, "anything else" (b)): a lone completed
   // attempt that's ALSO this account's placement on the main board above is
   // pure duplication - same rank/time/clicks shown twice, once per panel.
@@ -251,7 +253,7 @@ export default function ChallengeDetail({
           : progressFailed ? <p className="daily-hero-status muted">Your progress is unavailable.</p>
           : unfinished ? <p className="daily-hero-status daily-hero-dnf">Last try: DNF</p> : null}
         {showGiveUp ? (
-          <GiveUpAffordance apiClient={apiClient} challengeId={challenge.id} errorReporter={errorReporter} identityToken={identityToken} onPeeked={() => setOutcomeRefreshToken(value => value + 1)} />
+          <GiveUpAffordance ineligibleReason={outcome?.outcome === "dnf" ? "more-progress" : "minimum-clicks"} attemptClickCount={latestListedDnf?.clickCount} eligible={Boolean(outcome?.giveUpEligible)} onRace={onRaceThis} raceDisabled={raceDisabled} apiClient={apiClient} challengeId={challenge.id} errorReporter={errorReporter} identityToken={identityToken} onPeeked={() => setOutcomeRefreshToken(value => value + 1)} />
         ) : null}
       </RaceCard>
 
@@ -291,7 +293,7 @@ export default function ChallengeDetail({
         />
         {!pathsUnlocked ? (
           <p className="muted board-footnote">
-            Times, clicks, and paths stay hidden until you finish or confirm a reveal.
+            Other players’ times and clicks, and all paths, stay hidden until you finish or confirm a reveal.
           </p>
         ) : null}
       </section>
@@ -326,16 +328,7 @@ export default function ChallengeDetail({
                     {row.status === "abandoned" ? "DNF" : `#${row.rank}`}
                   </span>
                   <span className="leaderboard-player">
-                    {/* Pre-finish spoiler mask (owner ask): the SAME
-                        `pathsUnlocked` gate below that controls "View path"
-                        - a DNF-only history's own time/clicks stay hidden
-                        alongside it until you've finished (or given up on)
-                        this challenge. */}
-                    <span>
-                      {pathsUnlocked
-                        ? formatTimeAndClicks(row.elapsedMs, row.clickCount)
-                        : <span className="muted">—</span>}
-                    </span>
+                    <span>{formatTimeAndClicks(row.elapsedMs, row.clickCount)}</span>
                     {row.protocolVersion === 1 ? (
                       // PKG-03: a tap-to-reveal explanation (mobile has no
                       // hover) replaces the old hover-only `title` attribute -

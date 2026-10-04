@@ -179,6 +179,7 @@ describe("BoardSnippet: BD-1 windowed snippet", () => {
     const yourRow = screen.getByText("Vijay").closest("li")!;
     expect(yourRow).toHaveClass("is-you");
     expect(within(yourRow).getByText("(you)")).toBeVisible();
+    expect(within(yourRow).getByText("0:42 · 6 clk")).toBeVisible();
   });
 
   it("expander reveals its gap's rows in place on tap - one tap, no collapse back", () => {
@@ -304,7 +305,7 @@ describe("BoardSnippet: pre-finish spoiler mask (unlocked)", () => {
     expect(screen.getByText("Loser")).toBeVisible();
     expect(screen.queryByText("0:42 · 6 clk")).toBeNull();
     expect(screen.queryByText("—")).toBeNull();
-    expect(screen.getAllByText("Times and clicks unlock after you finish or give up.")).toHaveLength(1);
+    expect(screen.getAllByText("Other players’ times and clicks unlock after you finish or confirm a reveal.")).toHaveLength(1);
     expect(screen.getByText("Did not finish")).toBeVisible();
   });
 
@@ -320,6 +321,7 @@ describe("BoardSnippet: pre-finish spoiler mask (unlocked)", () => {
     const yourRow = screen.getByText("FranTheGreat").closest("li")!;
     expect(yourRow).toHaveClass("is-you");
     expect(within(yourRow).getByText("(you)")).toBeVisible();
+    expect(within(yourRow).getByText("0:42 · 6 clk")).toBeVisible();
   });
 });
 

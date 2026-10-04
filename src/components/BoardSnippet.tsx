@@ -58,7 +58,7 @@ function BoardSnippetRowItem({
         <PlayerName className="board-snippet-player-name" accountId={row.accountId} displayName={row.displayName} />
         {row.isYou ? <span className="muted board-snippet-you-marker">(you)</span> : null}
       </span>
-      {unlocked ? (
+      {unlocked || row.isYou ? (
         <span className="board-snippet-metric">
           {formatTimeAndClicks(row.elapsedMs, row.clickCount)}
         </span>
@@ -227,7 +227,7 @@ export default function BoardSnippet({
       <h3>{title}</h3>
       {!unlocked ? (
         <p className="board-snippet-lock-note muted">
-          Times and clicks unlock after you finish or give up.
+          Other players’ times and clicks unlock after you finish or confirm a reveal.
         </p>
       ) : null}
       <ol>

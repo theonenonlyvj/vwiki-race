@@ -555,7 +555,7 @@ describe("Boards: FB-4 path comparison (council 2026-07-19, owner decision 10)",
     });
 
     await screen.findByText("Ari");
-    expect(screen.getByText(/paths hidden until you've played/i)).toBeVisible();
+    expect(screen.getByText(/all paths, stay hidden until you finish/i)).toBeVisible();
     expect(screen.queryByText(/view path/i)).toBeNull();
   });
 
@@ -582,7 +582,7 @@ describe("Boards: FB-4 path comparison (council 2026-07-19, owner decision 10)",
 
     await screen.findByText("Ari");
     expect(screen.getByText("Sam")).toBeVisible();
-    expect(screen.getByText(/times, clicks, and paths hidden until you've played/i)).toBeVisible();
+    expect(screen.getByText(/other players.*times and clicks, and all paths, stay hidden until you finish/i)).toBeVisible();
 
     // Ari's completed row: rank/name visible, time/clicks masked.
     expect(screen.queryByText("0:25 · 4 clk")).toBeNull();
@@ -596,6 +596,19 @@ describe("Boards: FB-4 path comparison (council 2026-07-19, owner decision 10)",
     const samDashes = within(samRow).getAllByText("—");
     expect(samDashes).toHaveLength(2);
     expect(samDashes.some((el) => el.className === "muted")).toBe(true);
+  });
+
+  it("shows personal DNF measurements while other players and paths remain locked", async () => {
+    const apiClient = mockApiClient({ getChallengeBoard: vi.fn(async () => ({
+      ...boardWithRunIds,
+      placements: boardWithRunIds.placements.filter(row => row.accountId !== "acc-1"),
+      dnfs: [...boardWithRunIds.dnfs, { accountId: "acc-1", displayName: "Me", elapsedMs: 9000, clickCount: 3 }],
+    })) });
+    renderBoards({ apiClient, identityAccountId: "acc-1", heroSelection: { challenge: yesterdaysDaily, kind: "yesterday-daily" }, initialSegment: "yesterday" });
+    expect(await screen.findByText("0:09 · 3 clk")).toBeVisible();
+    expect(screen.queryByText("0:25 · 4 clk")).toBeNull();
+    expect(screen.queryByText("0:05 · 1 clk")).toBeNull();
+    expect(screen.queryByText("View path")).toBeNull();
   });
 
   it("shows time/clicks on every row (placement and DNF) once the viewer has finished this board's challenge", async () => {
@@ -628,7 +641,7 @@ describe("Boards: FB-4 path comparison (council 2026-07-19, owner decision 10)",
 
     expect(await screen.findByText("Ari")).toBeVisible();
     // Invariant 5 stands down once the viewer's own placement row exists.
-    expect(screen.queryByText(/paths hidden until you've played/i)).toBeNull();
+    expect(screen.queryByText(/all paths, stay hidden until you finish/i)).toBeNull();
 
     const ariRow = screen.getByText("Ari").closest("li");
     expect(ariRow).not.toBeNull();
