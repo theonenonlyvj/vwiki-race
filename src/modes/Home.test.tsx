@@ -104,6 +104,16 @@ function renderHome(overrides: Partial<Parameters<typeof Home>[0]> = {}) {
 }
 
 describe("Home: inviting daily overview", () => {
+  it("opens the chosen account flow from Home without starting a race", async () => {
+    const onClaimIdentity = vi.fn();
+    const user = userEvent.setup();
+    const { onRaceChallenge } = renderHome({ onClaimIdentity });
+    await user.click(screen.getByRole("button", { name: "Log in" }));
+    expect(onClaimIdentity).toHaveBeenLastCalledWith("login");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+    expect(onClaimIdentity).toHaveBeenLastCalledWith("create");
+    expect(onRaceChallenge).not.toHaveBeenCalled();
+  });
   it("makes the current claimed identity visible beside the daily race", () => {
     renderHome({
       identityAccountId: "acc-1",
@@ -184,7 +194,7 @@ describe("Home: inviting daily overview", () => {
       />,
     );
 
-    expect(screen.getByText("Ready when you are. No account needed to start.")).toBeVisible();
+    expect(screen.getByText("Log in to keep your name and your progress.")).toBeVisible();
   });
 
   it("labels the route, explains the race in three compact steps, and preserves the daily action", async () => {

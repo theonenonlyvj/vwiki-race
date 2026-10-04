@@ -21,6 +21,7 @@ import { formatTimeAndClicks } from "../domain/formatting";
 import type { GameSession } from "../domain/gameSession";
 import type { PlayAnotherSuggestionState } from "../domain/playAnother";
 import type { Article, Challenge, LeaderboardContext } from "../domain/types";
+import { MIN_COUNTED_DNF_CLICKS } from "../server/runProtocol";
 import type { ChallengeBoardResponse } from "../server/contracts";
 import type { ErrorReporter } from "../services/errorReporting";
 import type { VWikiRaceApiClient } from "../services/vwikiRaceApiClient";
@@ -81,6 +82,7 @@ export default function RaceResults({
   onOpenChallenge,
   onPlayAgain,
   onShowLeaderboard,
+  onShowStats,
   onShowChallenges,
   onClaimIdentity,
   onGoHome,
@@ -128,6 +130,7 @@ export default function RaceResults({
   onOpenChallenge: (challengeId: string) => void;
   onPlayAgain: () => void;
   onShowLeaderboard: () => void;
+  onShowStats: () => void;
   onShowChallenges: () => void;
   onClaimIdentity: (mode: "create" | "login") => void;
   // PKG-05 (council 2026-07-19): low-emphasis, nice-to-have exit straight to
@@ -155,25 +158,12 @@ export default function RaceResults({
     stableArticlePrewarm(event.target);
   }, [stableArticlePrewarm]);
 
-  // PKG-12 (council 2026-07-19): a DNF lands here with nothing to receive
-  // focus at all - WikipediaArticlePanel only renders below for the
-  // "completed" outcome, so a keyboard/screen-reader user got silence.
-  // Scoped to the DNF outcome only: the "completed" case already has a
-  // focus target (WikipediaArticlePanel's own mount effect, RaceMode.tsx,
-  // focuses the article heading - React fires that child effect before
-  // this parent one on mount, so adding an unconditional focus-here effect
-  // would silently steal focus from an existing, already-tested behavior
-  // for no reason - "Fruit"'s article heading is the right landing spot
-  // when there's an article to land on).
+  // Land on the outcome before the optional frozen article below it. The
+  // article's navigation focus behavior still applies during an active race.
   const resultHeadingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
-    if (outcome.status === "dnf") {
-      resultHeadingRef.current?.focus();
-    }
-    // Mount-only: RaceFlow always fully unmounts/remounts RaceResults
-    // between runs (RaceMode <-> RaceResults, never the same instance
-    // re-purposed), so `outcome` can't change under an already-mounted
-    // instance.
+    resultHeadingRef.current?.closest(".result-panel")?.scrollIntoView?.({ behavior: "auto", block: "start" });
+    resultHeadingRef.current?.focus({ preventScroll: true });
   }, []);
 
   const challenge = outcome.status === "completed" ? outcome.session.challenge : outcome.challenge;
@@ -307,7 +297,7 @@ export default function RaceResults({
     <section className="race-results">
       <aside aria-live="polite" className="result-panel">
         {outcome.status === "completed" ? (
-          <CompletedResultHeader isDailyToday={isDailyToday} outcome={outcome} rank={justFinishedRow.rank} />
+          <CompletedResultHeader headingRef={resultHeadingRef} isDailyToday={isDailyToday} outcome={outcome} rank={justFinishedRow.rank} />
         ) : (
           <DnfResultHeader
             clicks={outcome.clicks}
@@ -342,9 +332,11 @@ export default function RaceResults({
 
         {outcome.runId && identityStatus ? (
           <p className="result-persistence" role="status">
-            {isGuest
-              ? "Result saved to this guest profile on this device."
-              : "Result saved to your VGames account."}
+            {outcome.status === "dnf" && outcome.clicks < MIN_COUNTED_DNF_CLICKS
+              ? "Run saved, but not counted as an attempt."
+              : isGuest
+                ? "Result saved to this guest profile on this device."
+                : "Result saved to your VGames account."}
           </p>
         ) : null}
 
@@ -362,6 +354,12 @@ export default function RaceResults({
             onClaimIdentity={onClaimIdentity}
           />
         ) : null}
+        <div className="result-actions">
+          <button className="start-race-button" disabled={playAgainDisabled} type="button" onClick={onPlayAgain}>
+            {outcome.status === "dnf" ? "Try again" : "Play again"}
+          </button>
+          <button className="secondary-button" type="button" onClick={onShowStats}>Your stats</button>
+        </div>
         <section aria-label="Challenge a friend" className="result-share-invitation">
           <h3>Challenge a friend</h3>
           <p>Share your result and the challenge link.</p>
@@ -373,28 +371,6 @@ export default function RaceResults({
             status={justFinishedRow.status}
           />
         </section>
-
-        {/* Hierarchy (PKG-05): the clock-commit action gets the same coral
-            `.start-race-button` class PreRacePreview's "Start race" uses -
-            Play Again/Try again restarts the race clock immediately, same
-            as Start, so it earns the same "clock-commit" treatment (design
-            spec: "coral reserved for primary/destructive race actions").
-            "View leaderboard" only opens a board, so it gets the existing
-            `.secondary-button` treatment (already used by
-            ChallengeShareButton) instead of matching solid-cyan weight. */}
-        <div className="result-actions">
-          <button
-            className="start-race-button"
-            disabled={playAgainDisabled}
-            type="button"
-            onClick={onPlayAgain}
-          >
-            {outcome.status === "dnf" ? "Try again" : "Play again"}
-          </button>
-          <button className="secondary-button" type="button" onClick={onShowLeaderboard}>
-            View leaderboard
-          </button>
-        </div>
 
         {/* "I gave up" (owner spec, 2026-08-02): no in-race button - this
             muted link-button is the entire affordance, next to the retry
@@ -435,6 +411,8 @@ export default function RaceResults({
               disclosure (the run that just landed here IS the viewer's own
               eligible completed run on this challenge) - a DNF outcome never
               does, same invariant 5 rule every other surface follows. */}
+          <div className="result-board-actions">
+          <button className="secondary-button" type="button" onClick={onShowLeaderboard}>View leaderboard</button>
           <ChallengePathGraphButton
             apiClient={apiClient}
             challengeId={challenge.id}
@@ -442,6 +420,7 @@ export default function RaceResults({
             identityToken={identityToken}
             unlocked={outcome.status === "completed"}
           />
+          </div>
         </BoardSnippet>
 
         <PlayAnotherCard
@@ -478,6 +457,7 @@ export default function RaceResults({
           onPointerDown={stableArticlePointerDown}
           pendingNavigationTitle={null}
           navigationRetrying={false}
+          focusOnArticleChange={false}
         />
       ) : null}
     </section>
@@ -485,10 +465,12 @@ export default function RaceResults({
 }
 
 function CompletedResultHeader({
+  headingRef,
   isDailyToday,
   outcome,
   rank,
 }: {
+  headingRef: RefObject<HTMLHeadingElement | null>;
   isDailyToday: boolean;
   outcome: Extract<RaceResultOutcome, { status: "completed" }>;
   // PKG-03 remainder fix (2026-07-19): the caller's already-resolved,
@@ -506,7 +488,7 @@ function CompletedResultHeader({
   return (
     <>
       <span className="result-kicker">YOU REACHED IT 🏁</span>
-      <h2>{outcome.session.challenge.target.title}</h2>
+      <h2 ref={headingRef} tabIndex={-1}>{outcome.session.challenge.target.title}</h2>
       <p className="result-score">{resultLine}</p>
     </>
   );
@@ -519,11 +501,7 @@ function DnfResultHeader({
 }: {
   clicks: number;
   elapsedMs: number;
-  // PKG-12: the DNF outcome has no article panel to land focus on (unlike
-  // "completed", where WikipediaArticlePanel's own mount effect already
-  // focuses the article heading) - nothing received focus here at all.
-  // tabIndex=-1 + a mount-effect focus() call (RaceResults) makes this the
-  // landing spot for a keyboard/screen-reader user arriving at a DNF.
+  // Both result outcomes receive focus on their summary heading.
   headingRef: RefObject<HTMLHeadingElement | null>;
 }) {
   return (

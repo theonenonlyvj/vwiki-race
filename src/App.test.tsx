@@ -14,6 +14,7 @@ import { appleParseResponse, fruitParseResponse } from "./test/fixtures";
 
 const apiOrigin = "http://localhost:8787";
 const apiUrl = (path: string) => `${apiOrigin}${path}`;
+const identityPromptName = /^(welcome back|create your account|play as guest)$/i;
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -94,7 +95,7 @@ describe("VWiki Race app", () => {
     const claimCta = screen.getByRole("region", { name: /claim your stats/i });
     await user.click(within(claimCta).getByRole("button", { name: /^create account$/i }));
 
-    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const dialog = await screen.findByRole("dialog", { name: identityPromptName });
     const usernameField = within(dialog).getByLabelText(/vgames username/i);
     await user.clear(usernameField);
     await user.type(usernameField, "vijay");
@@ -102,7 +103,7 @@ describe("VWiki Race app", () => {
     await user.type(within(dialog).getByLabelText(/confirm password/i), "secret-pass");
     await user.click(createAccountSubmitButton());
 
-    expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: identityPromptName })).toBeNull();
     const notice = await screen.findByText(/blocking storage/i);
     expect(notice).toBeVisible();
     // ONE notice, not one per failed write - getDeviceCredential's own
@@ -132,7 +133,7 @@ describe("VWiki Race app", () => {
     const claimCta = screen.getByRole("region", { name: /claim your stats/i });
     await user.click(within(claimCta).getByRole("button", { name: /^create account$/i }));
 
-    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const dialog = await screen.findByRole("dialog", { name: identityPromptName });
     const usernameField = within(dialog).getByLabelText(/vgames username/i);
     await user.clear(usernameField);
     await user.type(usernameField, "vijay");
@@ -140,7 +141,7 @@ describe("VWiki Race app", () => {
     await user.type(within(dialog).getByLabelText(/confirm password/i), "secret-pass");
     await user.click(createAccountSubmitButton());
 
-    expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: identityPromptName })).toBeNull();
     expect(screen.queryByText(/blocking storage/i)).toBeNull();
   });
 
@@ -864,7 +865,7 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
 
-    const identityDialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const identityDialog = await screen.findByRole("dialog", { name: identityPromptName });
     expect(identityDialog).toBeVisible();
     expect(within(identityDialog).getByRole("group", { name: /identity options/i })).toBeVisible();
     await user.click(within(identityDialog).getByRole("button", { name: /^guest$/i }));
@@ -897,9 +898,10 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: /start race/i }));
 
     expect(
-      await screen.findByRole("dialog", { name: /save your stats/i }),
+      await screen.findByRole("dialog", { name: identityPromptName }),
     ).toBeVisible();
     await user.click(screen.getByRole("button", { name: /^guest$/i }));
+    expect(screen.getByRole("heading", { name: /play as guest/i })).toBeVisible();
     expect(screen.getByLabelText(/display name/i)).toHaveAttribute(
       "placeholder",
       "e.g. a nickname",
@@ -915,28 +917,33 @@ describe("VWiki Race app", () => {
     expect(screen.queryByText(/one account works across every vgames title/i)).toBeNull();
   });
 
-  it("defaults the start gate to a VGames Guest flow (owner decision 1b: guest-first for everyone)", async () => {
+  it("defaults the ordinary start gate to Log in, with account creation next and Guest still available", async () => {
     const user = userEvent.setup();
     render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={memoryStorage()} />);
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
 
-    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const dialog = await screen.findByRole("dialog", { name: /welcome back/i });
     const options = within(dialog).getByRole("group", { name: /identity options/i });
     expect(within(options).getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "Guest",
-      "Create account",
       "Log in",
+      "Create account",
+      "Guest",
     ]);
-    expect(within(options).getByRole("button", { name: /^guest$/i })).toHaveAttribute(
+    expect(within(options).getByRole("button", { name: /^log in$/i })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    expect(within(dialog).getByLabelText(/display name/i)).toBeVisible();
-    expect(within(dialog).getByRole("button", { name: /continue as guest/i })).toBeVisible();
+    expect(within(dialog).getByText(/return to your vgames name and history/i)).toBeVisible();
+    expect(within(dialog).queryByText(/create a vgames account before the timer starts/i)).toBeNull();
+    expect(within(dialog).getByLabelText(/^username$/i)).toBeVisible();
+    expect(within(dialog).getByLabelText(/^password$/i)).toHaveAttribute(
+      "autocomplete",
+      "current-password",
+    );
+    expect(within(dialog).queryByLabelText(/display name/i)).toBeNull();
     expect(within(dialog).queryByLabelText(/vgames username/i)).toBeNull();
-    expect(within(dialog).queryByLabelText(/^password$/i)).toBeNull();
     expect(within(dialog).queryByLabelText(/confirm password/i)).toBeNull();
   });
 
@@ -948,9 +955,10 @@ describe("VWiki Race app", () => {
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    // FB-2: fresh visitor now defaults to the Guest tab, so Create is one
-    // explicit tap away.
+    // Login-first keeps account creation one explicit tap away.
     await user.click(screen.getByRole("button", { name: /^create account$/i }));
+    expect(screen.getByRole("heading", { name: /create your account/i })).toBeVisible();
+    expect(screen.getByText(/create a vgames account to keep your name and race history/i)).toBeVisible();
     await user.type(screen.getByLabelText(/vgames username/i), "vijay");
     await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
     await user.type(screen.getByLabelText(/confirm password/i), "secret-pass");
@@ -1103,7 +1111,7 @@ describe("VWiki Race app", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={memoryStorage()} />);
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    await user.click(screen.getByRole("button", { name: /^log in$/i }));
+    await user.click(within(screen.getByRole("group", { name: /identity options/i })).getByRole("button", { name: /^log in$/i }));
     await user.click(screen.getByText("Forgot password?"));
     expect(screen.getByText(/ask vijay for a one-use reset link/i)).toBeVisible();
     expect(screen.getByRole("link", { name: "Contact Vijay" })).toHaveAttribute("href", "https://theonenonlyvj.github.io/personal-site/contact");
@@ -1117,7 +1125,7 @@ describe("VWiki Race app", () => {
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    await user.click(screen.getByRole("button", { name: /^log in$/i }));
+    await user.click(within(screen.getByRole("group", { name: /identity options/i })).getByRole("button", { name: /^log in$/i }));
     const username = screen.getByLabelText(/^username$/i) as HTMLInputElement;
     const password = screen.getByLabelText(/^password$/i) as HTMLInputElement;
     const valueSetter = Object.getOwnPropertyDescriptor(
@@ -1159,7 +1167,7 @@ describe("VWiki Race app", () => {
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    await user.click(screen.getByRole("button", { name: /^log in$/i }));
+    await user.click(within(screen.getByRole("group", { name: /identity options/i })).getByRole("button", { name: /^log in$/i }));
     await user.type(screen.getByLabelText(/^username$/i), "vijay");
     await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
     const form = screen.getByLabelText(/^password$/i).closest("form") as HTMLFormElement;
@@ -1208,7 +1216,7 @@ describe("VWiki Race app", () => {
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    await user.click(screen.getByRole("button", { name: /^log in$/i }));
+    await user.click(within(screen.getByRole("group", { name: /identity options/i })).getByRole("button", { name: /^log in$/i }));
     await user.type(screen.getByLabelText(/^username$/i), "vijay");
     await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
     fireEvent.submit(
@@ -1268,7 +1276,7 @@ describe("VWiki Race app", () => {
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    await user.click(screen.getByRole("button", { name: /^log in$/i }));
+    await user.click(within(screen.getByRole("group", { name: /identity options/i })).getByRole("button", { name: /^log in$/i }));
     await user.type(screen.getByLabelText(/^username$/i), "vijay");
     await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
     fireEvent.submit(
@@ -1321,7 +1329,7 @@ describe("VWiki Race app", () => {
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    await user.click(screen.getByRole("button", { name: /^log in$/i }));
+    await user.click(within(screen.getByRole("group", { name: /identity options/i })).getByRole("button", { name: /^log in$/i }));
     await user.type(screen.getByLabelText(/^username$/i), "vijay");
     await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
     fireEvent.submit(
@@ -1369,7 +1377,7 @@ describe("VWiki Race app", () => {
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    await user.click(screen.getByRole("button", { name: /^log in$/i }));
+    await user.click(within(screen.getByRole("group", { name: /identity options/i })).getByRole("button", { name: /^log in$/i }));
     await user.type(screen.getByLabelText(/^username$/i), "vijay");
     await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
     fireEvent.submit(
@@ -1699,7 +1707,7 @@ describe("VWiki Race app", () => {
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    await user.click(screen.getByRole("button", { name: /^log in$/i }));
+    await user.click(within(screen.getByRole("group", { name: /identity options/i })).getByRole("button", { name: /^log in$/i }));
     await user.type(screen.getByLabelText(/^username$/i), "vijay");
     await user.type(screen.getByLabelText(/^password$/i), "secret-pass");
     // Scoped to the login form itself: the mode-switcher tab is ALSO named
@@ -1709,7 +1717,7 @@ describe("VWiki Race app", () => {
     await user.click(within(loginForm as HTMLFormElement).getByRole("button", { name: /^log in$/i }));
 
     expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
-    expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: identityPromptName })).toBeNull();
   });
 
   it("starts immediately for claimed sessions", async () => {
@@ -1730,7 +1738,7 @@ describe("VWiki Race app", () => {
     await userEvent.click(await screen.findByRole("button", { name: /start race/i }));
 
     expect(await screen.findByRole("heading", { name: "Apple" })).toBeVisible();
-    expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: identityPromptName })).toBeNull();
     expect(screen.getByRole("link", { name: /source revision/i })).toHaveAttribute(
       "href",
       expect.stringContaining("oldid="),
@@ -1767,13 +1775,7 @@ describe("VWiki Race app", () => {
     });
   });
 
-  it("defaults a returning ghost to the one-tap guest continue path before each challenge start, with Create still one tap away", async () => {
-    // QF-01 (owner-proxy ruling, 2026-07-19) + FB-2 (owner decision 1b):
-    // a returning ghost already has a name to play under, so the identity
-    // gate defaults to the Guest tab - "Continue as guest" with zero
-    // typing - instead of the Create-account tab. FB-2 extended this
-    // guest-first default to brand-new visitors too; see "defaults the
-    // start gate to a VGames Guest flow" above.
+  it("lets a returning ghost explicitly choose the one-tap guest path, with account creation preserving its history", async () => {
     const storage = memoryStorage();
     storage.setItem(
       "vwiki-race:vgames-session",
@@ -1792,8 +1794,18 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
 
-    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const dialog = await screen.findByRole("dialog", { name: identityPromptName });
     const options = within(dialog).getByRole("group", { name: /identity options/i });
+    expect(within(options).getByRole("button", { name: /^log in$/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(dialog).getByText(/return to your vgames name and history/i)).toBeVisible();
+    expect(within(dialog).queryByText(/keep this guest/i)).toBeNull();
+
+    // The former default is still a single explicit choice and retains the
+    // exact one-tap continuation behavior this test protects.
+    await user.click(within(options).getByRole("button", { name: /^guest$/i }));
     expect(within(options).getByRole("button", { name: /^guest$/i })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -1803,9 +1815,11 @@ describe("VWiki Race app", () => {
     expect(within(dialog).getByText("Vijay")).toBeVisible();
 
     // Create account is still one tap away, prefilled with a suggested
-    // username derived from the ghost's display name.
+    // username derived from the ghost's display name, and its copy states
+    // the actual claim behavior (unlike logging into an unrelated account).
     await user.click(within(options).getByRole("button", { name: /create account/i }));
     expect(screen.getByLabelText(/vgames username/i)).toHaveValue("vijay");
+    expect(within(dialog).getByText(/keep this guest's name and race history/i)).toBeVisible();
     await user.click(within(options).getByRole("button", { name: /^guest$/i }));
 
     await user.click(within(dialog).getByRole("button", { name: /continue as guest/i }));
@@ -1897,13 +1911,10 @@ describe("VWiki Race app", () => {
       within(screen.getByRole("banner")).getByText(/opening fruit/i),
     ).toBeVisible();
     fruitArticle.resolve();
-    // Fruit is this challenge's target, so this click completes the run and
-    // Results' own frozen WikipediaArticlePanel takes over from RaceMode's -
-    // same component either way. Results' own headline also reads "Fruit"
-    // (the target title), so scope to the article panel's own heading.
+    // Completion lands on the outcome summary before the frozen article.
     await screen.findByText(/you reached it/i);
     expect(
-      await within(screen.getByRole("article")).findByRole("heading", { name: "Fruit" }),
+      await within(screen.getByRole("complementary")).findByRole("heading", { name: "Fruit" }),
     ).toHaveFocus();
   });
 
@@ -2219,6 +2230,92 @@ describe("VWiki Race app", () => {
     // now-cached value rather than firing a third request.
     await waitFor(() => expect(boardCalls(fetchImpl, "challenge-0001")).toBe(2));
     expect(completeRunCalls(fetchImpl)).toBe(0);
+  });
+
+  it("refreshes stats after a completed run even when the post-run leaderboard refresh fails", async () => {
+    const stuckStatsRefresh = new Promise<Response>(() => {});
+    const fetchImpl = failPostRunLeaderboardRefresh(createFetchMock({
+      delayedStatsAfterFirst: stuckStatsRefresh,
+    }));
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await waitFor(() => expect(accountStatsCalls(fetchImpl)).toBe(1));
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(await screen.findByRole("link", { name: /fruit/i }));
+
+    expect(await screen.findByText(/you reached it/i)).toBeVisible();
+    await waitFor(() => expect(accountStatsCalls(fetchImpl)).toBe(2));
+    expect(screen.getByText("Updating your stats…")).toBeVisible();
+    expect(screen.getByText("Updating your stats…")).not.toHaveClass("visually-hidden");
+
+    await user.click(screen.getByRole("button", { name: /your stats/i }));
+    expect(screen.getByText("of 0 finished")).toBeVisible();
+    expect(screen.getByText("Updating your stats…")).toBeVisible();
+  });
+
+  it("refreshes stats after a counted DNF even when the post-run leaderboard refresh fails", async () => {
+    const stuckStatsRefresh = new Promise<Response>(() => {});
+    const baseFetch = createFetchMock({ delayedStatsAfterFirst: stuckStatsRefresh });
+    let clickCount = 0;
+    const postRunFailureFetch = failPostRunLeaderboardRefresh(baseFetch);
+    const fetchImpl = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === apiUrl("/api/v2/runs/run-1/click")) {
+        clickCount += 1;
+        return Promise.resolve(
+          jsonResponse({ transition: { runId: "run-1", clickCount, runStatus: "active" } }),
+        );
+      }
+      return postRunFailureFetch(input, init);
+    }) as ReturnType<typeof createFetchMock>;
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await waitFor(() => expect(accountStatsCalls(fetchImpl)).toBe(1));
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(await screen.findByRole("link", { name: /apple tree/i }));
+    const metrics = screen.getByLabelText(/current run/i);
+    const runMetric = within(metrics).getByText("Run").nextElementSibling;
+    await waitFor(() => expect(runMetric).toHaveTextContent(/1 clk/));
+    await user.click(await screen.findByRole("link", { name: /^fruit$/i }));
+    await waitFor(() => expect(runMetric).toHaveTextContent(/2 clk/));
+    await user.click(screen.getByRole("button", { name: /^end run$/i }));
+    await user.click(screen.getByRole("button", { name: /confirm end run/i }));
+
+    expect(await screen.findByText(/that one got away/i)).toBeVisible();
+    await waitFor(() => expect(accountStatsCalls(fetchImpl)).toBe(2));
+    expect(screen.getByText("Updating your stats…")).toBeVisible();
+  });
+
+  it("refreshes stats after a retry-pending click completes even when the leaderboard refresh fails", async () => {
+    const stuckStatsRefresh = new Promise<Response>(() => {});
+    const postRunFailureFetch = failPostRunLeaderboardRefresh(createFetchMock({
+      delayedStatsAfterFirst: stuckStatsRefresh,
+    }));
+    let clickAttempts = 0;
+    const fetchImpl = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === apiUrl("/api/v2/runs/run-1/click")) {
+        clickAttempts += 1;
+        if (clickAttempts === 1) {
+          return Promise.resolve(jsonError("network_error", "Offline while syncing click.", 503));
+        }
+      }
+      return postRunFailureFetch(input, init);
+    }) as ReturnType<typeof createFetchMock>;
+    const user = userEvent.setup();
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+
+    await waitFor(() => expect(accountStatsCalls(fetchImpl)).toBe(1));
+    await user.click(await screen.findByRole("button", { name: /▶ race/i }));
+    await user.click(await screen.findByRole("button", { name: /start race/i }));
+    await user.click(await screen.findByRole("link", { name: /fruit/i }));
+    await user.click(await screen.findByRole("button", { name: /retry click/i }));
+
+    expect(await screen.findByText(/you reached it/i)).toBeVisible();
+    await waitFor(() => expect(accountStatsCalls(fetchImpl)).toBe(2));
+    expect(screen.getByText("Updating your stats…")).toBeVisible();
   });
 
   it("routes 'View leaderboard' to Boards' Today segment when the raced challenge really is today's actual daily (PKG-05)", async () => {
@@ -2551,7 +2648,7 @@ describe("VWiki Race app", () => {
     const startButton = await screen.findByRole("button", { name: /▶ race/i });
     await user.click(startButton);
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const dialog = await screen.findByRole("dialog", { name: identityPromptName });
     expect(dialog).toBeVisible();
     expect(storage.getItem("vwiki-race:vgames-session")).toBeNull();
 
@@ -2575,7 +2672,7 @@ describe("VWiki Race app", () => {
     const fruitCallsBeforeClick = wikipediaArticleCalls(fetchImpl, "Fruit");
     await user.click(await screen.findByRole("link", { name: /fruit/i }));
 
-    expect(await screen.findByRole("dialog", { name: /save your stats/i })).toBeVisible();
+    expect(await screen.findByRole("dialog", { name: identityPromptName })).toBeVisible();
     expect(screen.getByRole("button", { name: /retry click/i })).toBeVisible();
     expect(storage.getItem("vwiki-race:vgames-session")).toBeNull();
     const firstBody = clickRequestBodies(fetchImpl)[0];
@@ -2601,7 +2698,7 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     const trigger = await screen.findByRole("button", { name: /start race/i });
     await user.click(trigger);
-    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const dialog = await screen.findByRole("dialog", { name: identityPromptName });
     expect(document.body.style.overflow).toBe("hidden");
     // PKG-12 (council 2026-07-19, Judge B): this dialog opens from
     // PreRacePreview, i.e. while RaceFlow's `.race-takeover` - not
@@ -2625,7 +2722,7 @@ describe("VWiki Race app", () => {
     expect(dialog).toContainElement(document.activeElement as HTMLElement);
 
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: identityPromptName })).toBeNull();
     expect(document.body.style.overflow).toBe("");
     expect(document.activeElement).toBe(trigger);
     expect(raceTakeover).not.toHaveAttribute("inert");
@@ -2653,19 +2750,19 @@ describe("VWiki Race app", () => {
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const dialog = await screen.findByRole("dialog", { name: identityPromptName });
     const tabGroup = within(dialog).getByRole("group", { name: /identity options/i });
 
-    // Guest (the sheet's default landing mode) - one input, already focused
-    // on mount (IdentityPrompt's own first-open-only focus effect). Every
-    // label lookup below is ANCHORED (`^...$`) - the Create form's own
+    // Login is the sheet's default landing mode: two inputs, with its first
+    // input focused on mount (IdentityPrompt's first-open-only effect).
+    // Every label lookup below is ANCHORED (`^...$`) - the Create form's own
     // "This is also your public display name." hint text otherwise makes an
     // unanchored /display name/i false-positive-match its wrapping <label>,
     // since testing-library's label association considers the whole
     // wrapping element's text, not just the input's own aria-label.
-    const displayNameField = within(dialog).getByLabelText(/^display name$/i);
-    expect(dialog.querySelectorAll("input")).toHaveLength(1);
-    expect(document.activeElement).toBe(displayNameField);
+    const usernameField = within(dialog).getByLabelText(/^username$/i);
+    expect(dialog.querySelectorAll("input")).toHaveLength(2);
+    expect(document.activeElement).toBe(usernameField);
 
     const createTab = within(tabGroup).getByRole("button", { name: /^create account$/i });
     await user.click(createTab);
@@ -2679,19 +2776,20 @@ describe("VWiki Race app", () => {
     // keyboard on mobile for a switch the player didn't ask to type into).
     expect(document.activeElement).toBe(createTab);
 
+    const guestTab = within(tabGroup).getByRole("button", { name: /^guest$/i });
+    await user.click(guestTab);
+    expect(within(dialog).queryByLabelText(/^username$/i)).toBeNull();
+    expect(within(dialog).getByLabelText(/^display name$/i)).toBeVisible();
+    expect(dialog.querySelectorAll("input")).toHaveLength(1);
+    expect(document.activeElement).toBe(guestTab);
+
     const loginTab = within(tabGroup).getByRole("button", { name: /^log in$/i });
     await user.click(loginTab);
-    expect(within(dialog).queryByLabelText(/^vgames username$/i)).toBeNull();
+    expect(within(dialog).queryByLabelText(/^display name$/i)).toBeNull();
     expect(within(dialog).queryByLabelText(/^confirm password$/i)).toBeNull();
     expect(within(dialog).getByLabelText(/^username$/i)).toBeVisible();
     expect(dialog.querySelectorAll("input")).toHaveLength(2);
     expect(document.activeElement).toBe(loginTab);
-
-    const guestTab = within(tabGroup).getByRole("button", { name: /^guest$/i });
-    await user.click(guestTab);
-    expect(within(dialog).queryByLabelText(/^username$/i)).toBeNull();
-    expect(dialog.querySelectorAll("input")).toHaveLength(1);
-    expect(document.activeElement).toBe(guestTab);
   });
 
   it("offers End Old Run for protocol-1 recovery and sends the recovery abandon", async () => {
@@ -3244,7 +3342,7 @@ describe("VWiki Race app", () => {
     // stable ("Log In") before the click is ever dispatched - same
     // coverage, one fewer cross-chain race.
     await waitFor(() => expect(storage.getItem("vwiki-race:vgames-session")).toBeNull());
-    await user.click(await screen.findByRole("button", { name: /^(you|log in)$/i }));
+    await user.click(await within(await screen.findByRole("navigation", { name: "VWiki Race views" })).findByRole("button", { name: /^(you|log in)$/i }));
     // "Honest You": a cleared identity lands in State A - NV-1's explicit
     // status line + Log in/Create account pair, not a static "Current
     // player" status readout (and no more bare "Guest" chip either).
@@ -3280,7 +3378,7 @@ describe("VWiki Race app", () => {
     expect(JSON.parse(storage.getItem("vwiki-race:vgames-session") ?? "{}")).toMatchObject({
       token: "jwt-claimed",
     });
-    expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: identityPromptName })).toBeNull();
     expect(screen.queryByText("Not logged in.")).toBeNull();
   });
 
@@ -3310,7 +3408,7 @@ describe("VWiki Race app", () => {
     render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={storage} />);
 
     await waitFor(() => expect(storage.getItem("vwiki-race:vgames-session")).toBeNull());
-    await user.click(await screen.findByRole("button", { name: /^(you|log in)$/i }));
+    await user.click(await within(await screen.findByRole("navigation", { name: "VWiki Race views" })).findByRole("button", { name: /^(you|log in)$/i }));
     expect(screen.getByText("Not logged in.")).toBeVisible();
     // The wipe is scoped to the SESSION: the device identity survives - the
     // last-known display name is captured for the next guest prefill.
@@ -3335,10 +3433,11 @@ describe("VWiki Race app", () => {
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
 
-    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const dialog = await screen.findByRole("dialog", { name: identityPromptName });
     // The name input comes back PREFILLED with the wiped session's name -
     // the device credential still maps to the same ghost server-side, so
-    // resuming is one tap, not a retype.
+    // after explicitly choosing Guest, resuming is one tap, not a retype.
+    await user.click(within(dialog).getByRole("button", { name: /^guest$/i }));
     expect(within(dialog).getByLabelText(/display name/i)).toHaveValue("Nimbus");
     await user.click(within(dialog).getByRole("button", { name: /continue as guest/i }));
 
@@ -3355,11 +3454,12 @@ describe("VWiki Race app", () => {
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const dialog = await screen.findByRole("dialog", { name: identityPromptName });
     const tabs = within(dialog).getByRole("group", { name: /identity options/i });
 
-    // Guest (default tab): the chosen name advertises itself as a nickname
-    // so browser autofill can offer it back on any device.
+    // Guest remains available as the secondary path: the chosen name
+    // advertises itself as a nickname so browser autofill can offer it back.
+    await user.click(within(tabs).getByRole("button", { name: /^guest$/i }));
     const guestName = within(dialog).getByLabelText(/display name/i);
     expect(guestName).toHaveAttribute("autocomplete", "nickname");
     expect(guestName).toHaveAttribute("name", "nickname");
@@ -3409,7 +3509,7 @@ describe("VWiki Race app", () => {
     await user.click(screen.getByRole("checkbox", { name: /nominate for a future daily/i }));
     await user.click(screen.getByRole("button", { name: /create challenge/i }));
 
-    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const dialog = await screen.findByRole("dialog", { name: identityPromptName });
     expect(dialog).toBeVisible();
     expect(storage.getItem("vwiki-race:vgames-session")).toBeNull();
     await user.type(screen.getByLabelText(/username/i), "vijay");
@@ -3494,7 +3594,7 @@ describe("VWiki Race app", () => {
     await user.click(screen.getByRole("button", { name: /^end run$/i }));
     await user.click(screen.getByRole("button", { name: /confirm end run/i }));
 
-    const identityDialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const identityDialog = await screen.findByRole("dialog", { name: identityPromptName });
     expect(identityDialog).toBeVisible();
     expect(storage.getItem("vwiki-race:vgames-session")).toBeNull();
     await user.type(screen.getByLabelText(/username/i), "vijay");
@@ -3862,7 +3962,7 @@ describe("VWiki Race app", () => {
     expect(createChallengeBodies(fetchImpl)).toEqual([
       { startTitle: "Mars", targetTitle: "Water", nominateForDaily: false },
     ]);
-    expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: identityPromptName })).toBeNull();
   });
 
   it("clears nomination intent when a claimed session becomes a ghost", async () => {
@@ -4666,7 +4766,7 @@ describe("VWiki Race app", () => {
       // itself keeps that framing as its aria-label only.
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^create account$/i }));
-      expect(await screen.findByRole("dialog", { name: /save your stats/i })).toBeVisible();
+      expect(await screen.findByRole("dialog", { name: identityPromptName })).toBeVisible();
 
       // PKG-12 (council 2026-07-19): here AppShell (not RaceFlow) is the
       // sibling behind the dialog - covers the other real mount point the
@@ -4698,7 +4798,7 @@ describe("VWiki Race app", () => {
       // username"/confirm-password create fields) - not the create tab
       // "Log in" would have defaulted to before this fix widened
       // `onClaimIdentity` to carry a mode.
-      const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+      const dialog = await screen.findByRole("dialog", { name: identityPromptName });
       expect(within(dialog).getByLabelText(/password/i)).toBeVisible();
       expect(within(dialog).queryByLabelText(/vgames username/i)).toBeNull();
     });
@@ -4744,6 +4844,8 @@ describe("VWiki Race app", () => {
     it("QF-09 (layout B): a played account's You tab features Average speed/Average clicks", async () => {
       const fetchImpl = createFetchMock({
         accountAttempts: 9,
+        accountCompleted: 9,
+        accountTimedCompleted: 9,
         accountAverages: { averageClicks: 4.5, averageElapsedMs: 12300 },
       });
       const user = userEvent.setup();
@@ -4761,7 +4863,7 @@ describe("VWiki Race app", () => {
       const grouped = (label: string) =>
         within(panel).getByText(label).previousElementSibling?.textContent;
 
-      await waitFor(() => expect(grouped("of 9 finished")).toBe("0"));
+      await waitFor(() => expect(grouped("of 9 finished")).toBe("9"));
       expect(featured("Average speed")).toBe("12.3s");
       expect(featured("Average clicks")).toBe("4.5");
     });
@@ -4856,14 +4958,14 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       const createAccount = within(accountBlock).getByRole("button", { name: /^create account$/i });
       expect(createAccount).toHaveClass("link-button");
       await user.click(createAccount);
-      const createDialog = await screen.findByRole("dialog", { name: /save your stats/i });
+      const createDialog = await screen.findByRole("dialog", { name: identityPromptName });
       expect(within(createDialog).getByLabelText(/vgames username/i)).toBeVisible();
       await user.click(within(createDialog).getByRole("button", { name: /close identity prompt/i }));
       expect(screen.queryByRole("dialog")).toBeNull();
 
       const logIn = within(accountBlock).getByRole("button", { name: /^log in$/i });
       await user.click(logIn);
-      const loginDialog = await screen.findByRole("dialog", { name: /save your stats/i });
+      const loginDialog = await screen.findByRole("dialog", { name: identityPromptName });
       expect(within(loginDialog).getByLabelText(/^password$/i)).toBeVisible();
       expect(within(loginDialog).queryByLabelText(/vgames username/i)).toBeNull();
     });
@@ -4937,6 +5039,92 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
   });
 
   describe("Remembered sessions", () => {
+    it("waits for cookie-only restoration before offering a new identity or race", async () => {
+      const storage = memoryStorage();
+      const refresh = deferredValue<Response>();
+      let requested = false;
+      const fetchImpl = createSameOriginSessionFetch(createFetchMock(), (path) => {
+        if (path === "/api/v2/identity/session/refresh") {
+          requested = true;
+          return refresh.promise;
+        }
+        return undefined;
+      });
+      render(<App apiOrigin={window.location.origin} fetchImpl={fetchImpl} storage={storage} />);
+      await waitFor(() => expect(requested).toBe(true));
+      expect(screen.queryByRole("button", { name: /^log in$/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /▶ race/i })).toBeNull();
+      refresh.resolve(jsonResponse({
+        accountId: "acc-1", displayName: "Casey", token: "jwt-claimed", status: "claimed",
+      }));
+      expect(await screen.findByText("Playing as Casey")).toBeVisible();
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
+    });
+
+    it("keeps cookie-only visitors behind an honest unavailable gate after a 503 and retries session restoration", async () => {
+      const storage = memoryStorage();
+      const baseFetch = createFetchMock();
+      let refreshCalls = 0;
+      const fetchImpl = createSameOriginSessionFetch(baseFetch, (path) => {
+        if (path !== "/api/v2/identity/session/refresh") return undefined;
+        refreshCalls += 1;
+        return refreshCalls === 1
+          ? jsonError("session_unavailable", "Try again shortly.", 503)
+          : jsonResponse({
+              accountId: "acc-1",
+              displayName: "Casey",
+              token: "jwt-claimed",
+              status: "claimed",
+            });
+      });
+      render(<App apiOrigin={window.location.origin} fetchImpl={fetchImpl} storage={storage} />);
+
+      expect(await screen.findByText("Couldn’t restore your account.")).toBeVisible();
+      expect(screen.queryByRole("button", { name: /^log in$/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /▶ race/i })).toBeNull();
+      const catalogCallsBeforeRetry = fetchImpl.mock.calls.filter(([input]) =>
+        new URL(String(input)).pathname === "/api/v2/challenges"
+      ).length;
+
+      await userEvent.click(screen.getByRole("button", { name: /^retry$/i }));
+
+      expect(await screen.findByText("Playing as Casey")).toBeVisible();
+      expect(refreshCalls).toBe(2);
+      expect(fetchImpl.mock.calls.filter(([input]) =>
+        new URL(String(input)).pathname === "/api/v2/challenges"
+      )).toHaveLength(catalogCallsBeforeRetry);
+    });
+
+    it("does not expose signed-out controls when cookie-only restoration rejects, and Retry rechecks the session rather than the catalog", async () => {
+      const storage = memoryStorage();
+      const baseFetch = createFetchMock();
+      let refreshCalls = 0;
+      const fetchImpl = createSameOriginSessionFetch(baseFetch, (path) => {
+        if (path !== "/api/v2/identity/session/refresh") return undefined;
+        refreshCalls += 1;
+        return refreshCalls === 1
+          ? Promise.reject(new TypeError("Network unavailable"))
+          : jsonError("unauthorized", "No remembered session.", 401);
+      });
+      render(<App apiOrigin={window.location.origin} fetchImpl={fetchImpl} storage={storage} />);
+
+      expect(await screen.findByText("Couldn’t restore your account.")).toBeVisible();
+      expect(screen.queryByRole("button", { name: /^log in$/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /▶ race/i })).toBeNull();
+      const catalogCallsBeforeRetry = fetchImpl.mock.calls.filter(([input]) =>
+        new URL(String(input)).pathname === "/api/v2/challenges"
+      ).length;
+
+      await userEvent.click(screen.getByRole("button", { name: /^retry$/i }));
+
+      expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
+      expect(refreshCalls).toBe(2);
+      expect(fetchImpl.mock.calls.filter(([input]) =>
+        new URL(String(input)).pathname === "/api/v2/challenges"
+      )).toHaveLength(catalogCallsBeforeRetry);
+    });
+
     it("renews an expired cached session and transparently retries a protected request with the new token", async () => {
       const storage = claimedStorage();
       const baseFetch = createFetchMock({ accountAttempts: 5 });
@@ -5078,7 +5266,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
 
       expect(storage.getItem("vwiki-race:remembered-logged-out")).toBe("true");
       expect(refreshCalls).toBe(1);
-      expect(await screen.findByText("Ready when you are. No account needed to start.")).toBeVisible();
+      await waitFor(() => expect(screen.getByText("Log in to keep your name and your progress.")).toBeVisible());
       expect(storage.getItem("vwiki-race:vgames-session")).toBeNull();
     });
 
@@ -5137,7 +5325,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       await screen.findByText("of 3 finished");
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^log in$/i }));
-      const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet = await screen.findByRole("dialog", { name: identityPromptName });
       await submitLoginForm(user, sheet);
 
       const guard = await screen.findByRole("dialog", { name: /leave nimbus behind\?/i });
@@ -5160,21 +5348,21 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       await screen.findByText("of 3 finished");
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^log in$/i }));
-      let sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      let sheet = await screen.findByRole("dialog", { name: identityPromptName });
       await submitLoginForm(user, sheet);
 
       const guard = await screen.findByRole("dialog", { name: /leave nimbus behind\?/i });
       await user.click(within(guard).getByRole("button", { name: /^log in anyway$/i }));
 
       // Failure: sheet re-opens on Log in with the error, no guard.
-      sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      sheet = await screen.findByRole("dialog", { name: identityPromptName });
       expect(within(sheet).getByText(/incorrect/i)).toBeVisible();
 
       // Resubmit in the SAME sheet-opening - guard stays waived.
       await submitLoginForm(user, sheet);
 
       expect(screen.queryByRole("dialog", { name: /leave nimbus behind\?/i })).toBeNull();
-      await waitFor(() => expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull());
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: identityPromptName })).toBeNull());
       expect(await screen.findByRole("status", { name: /vijay, logged in/i })).toBeVisible();
     });
 
@@ -5187,12 +5375,12 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       await screen.findByText("of 3 finished");
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^log in$/i }));
-      let sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      let sheet = await screen.findByRole("dialog", { name: identityPromptName });
       await submitLoginForm(user, sheet);
       const guard = await screen.findByRole("dialog", { name: /leave nimbus behind\?/i });
       await user.click(within(guard).getByRole("button", { name: /^log in anyway$/i }));
 
-      sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      sheet = await screen.findByRole("dialog", { name: identityPromptName });
       await screen.findByText(/incorrect/i);
       await user.click(within(sheet).getByRole("button", { name: /close identity prompt/i }));
       expect(screen.queryByRole("dialog")).toBeNull();
@@ -5201,7 +5389,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       // credentials must guard again, even though "Log in anyway" was
       // already chosen once before this close.
       await user.click(within(screen.getByRole("region", { name: /claim your stats/i })).getByRole("button", { name: /^log in$/i }));
-      sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      sheet = await screen.findByRole("dialog", { name: identityPromptName });
       await submitLoginForm(user, sheet);
       expect(await screen.findByRole("dialog", { name: /leave nimbus behind\?/i })).toBeVisible();
     });
@@ -5213,7 +5401,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
 
       await user.click(await screen.findByRole("button", { name: /▶ race/i }));
       await user.click(await screen.findByRole("button", { name: /start race/i }));
-      let sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      let sheet = await screen.findByRole("dialog", { name: identityPromptName });
       const tabGroup = within(sheet).getByRole("group", { name: /identity options/i });
       await user.click(within(tabGroup).getByRole("button", { name: /^log in$/i }));
       await submitLoginForm(user, sheet);
@@ -5221,7 +5409,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       const guard = await screen.findByRole("dialog", { name: /leave nimbus behind\?/i });
       await user.click(within(guard).getByRole("button", { name: /^claim nimbus first$/i }));
 
-      sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      sheet = await screen.findByRole("dialog", { name: identityPromptName });
       expect(within(sheet).getByLabelText(/vgames username/i)).toHaveValue("vijay");
       expect(within(sheet).getByLabelText(/^password$/i)).toHaveValue("");
       expect(within(sheet).getByLabelText(/confirm password/i)).toHaveValue("");
@@ -5248,14 +5436,14 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       await screen.findByText("of 3 finished");
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^log in$/i }));
-      const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet = await screen.findByRole("dialog", { name: identityPromptName });
       await submitLoginForm(user, sheet);
 
       const guard = await screen.findByRole("dialog", { name: /leave nimbus behind\?/i });
       await user.click(within(guard).getByRole("button", { name: /^cancel$/i }));
 
       expect(screen.queryByRole("dialog", { name: /leave nimbus behind\?/i })).toBeNull();
-      const reopened = await screen.findByRole("dialog", { name: /save your stats/i });
+      const reopened = await screen.findByRole("dialog", { name: identityPromptName });
       expect(within(reopened).getByLabelText(/username/i)).toHaveValue("vijay");
       expect(within(reopened).getByLabelText(/^password$/i)).toHaveValue("secret-pass");
     });
@@ -5274,7 +5462,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
 
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^log in$/i }));
-      const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet = await screen.findByRole("dialog", { name: identityPromptName });
       await submitLoginForm(user, sheet);
 
       expect(screen.queryByRole("dialog", { name: /leave nimbus behind\?/i })).toBeNull();
@@ -5292,7 +5480,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       await user.click(await screen.findByRole("button", { name: "You" }));
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^log in$/i }));
-      const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet = await screen.findByRole("dialog", { name: identityPromptName });
       await submitLoginForm(user, sheet);
 
       expect(await screen.findByRole("dialog", { name: /leave nimbus behind\?/i })).toBeVisible();
@@ -5322,7 +5510,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
 
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^log in$/i }));
-      const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet = await screen.findByRole("dialog", { name: identityPromptName });
       await submitLoginForm(user, sheet);
 
       // The guard still fires - accountStats reads null (RC-06 deliberately
@@ -5344,7 +5532,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
 
       // The 401 from /runs/start clears the stale ghost and reopens
       // straight on Log in - session is already gone, nothing to guard.
-      const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet = await screen.findByRole("dialog", { name: identityPromptName });
       expect(within(sheet).getByLabelText(/^password$/i)).toBeVisible();
       expect(screen.queryByRole("dialog", { name: /leave.*behind\?/i })).toBeNull();
 
@@ -5373,7 +5561,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       expect(proceed).toHaveClass("end-run-button");
       await user.click(proceed);
 
-      const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet = await screen.findByRole("dialog", { name: identityPromptName });
       const nameField = within(sheet).getByLabelText(/display name/i);
       expect(nameField).toHaveValue("");
       expect(within(sheet).queryByText(/playing as nimbus/i)).toBeNull();
@@ -5391,7 +5579,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       // Try again, this time complete it.
       await user.click(within(screen.getByRole("region", { name: /claim your stats/i })).getByRole("button", { name: /^play as someone else$/i }));
       await user.click(within(await screen.findByRole("dialog", { name: /leave nimbus behind\?/i })).getByRole("button", { name: /^start fresh anyway$/i }));
-      const sheet2 = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet2 = await screen.findByRole("dialog", { name: identityPromptName });
       await user.type(within(sheet2).getByLabelText(/display name/i), "Fresh Name");
       await user.click(within(sheet2).getByRole("button", { name: /continue as guest/i }));
 
@@ -5426,7 +5614,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       await user.click(within(guard).getByRole("button", { name: /^cancel$/i }));
       expect(screen.queryByRole("dialog", { name: /leave nimbus behind\?/i })).toBeNull();
 
-      const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet = await screen.findByRole("dialog", { name: identityPromptName });
       await user.type(within(sheet).getByLabelText(/display name/i), "Fresh Name");
       await user.click(within(sheet).getByRole("button", { name: /continue as guest/i }));
 
@@ -5438,7 +5626,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
 
       // And "Start fresh anyway" from here still completes the swap.
       await user.click(within(screen.getByRole("dialog", { name: /leave nimbus behind\?/i })).getByRole("button", { name: /^start fresh anyway$/i }));
-      const sheet2 = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet2 = await screen.findByRole("dialog", { name: identityPromptName });
       await user.click(within(sheet2).getByRole("button", { name: /continue as guest/i }));
       expect(await screen.findByRole("button", { name: "Fresh Name, guest - tap to manage" })).toBeVisible();
     });
@@ -5453,7 +5641,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       await user.click(await screen.findByRole("button", { name: "You" }));
       await user.click(screen.getByRole("button", { name: /^switch account$/i }));
 
-      const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet = await screen.findByRole("dialog", { name: identityPromptName });
       expect(within(sheet).getByLabelText(/^password$/i)).toBeVisible();
       expect(within(sheet).queryByLabelText(/vgames username/i)).toBeNull();
       expect(JSON.parse(storage.getItem("vwiki-race:vgames-session") ?? "{}").status).toBe("claimed");
@@ -5463,11 +5651,11 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       expect(JSON.parse(storage.getItem("vwiki-race:vgames-session") ?? "{}").status).toBe("claimed");
 
       await user.click(screen.getByRole("button", { name: /^switch account$/i }));
-      const sheet2 = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet2 = await screen.findByRole("dialog", { name: identityPromptName });
       await submitLoginForm(user, sheet2);
 
       expect(screen.queryByRole("dialog", { name: /leave.*behind\?/i })).toBeNull();
-      await waitFor(() => expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull());
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: identityPromptName })).toBeNull());
       expect(await screen.findByRole("status", { name: /vijay, logged in/i })).toBeVisible();
     });
   });
@@ -5479,7 +5667,8 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
 
       await user.click(await screen.findByRole("button", { name: /▶ race/i }));
       await user.click(await screen.findByRole("button", { name: /start race/i }));
-      const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet = await screen.findByRole("dialog", { name: identityPromptName });
+      await user.click(within(sheet).getByRole("button", { name: /^guest$/i }));
       const link = within(sheet).getByRole("button", { name: /^log in instead\.$/i });
       expect(link).toBeVisible();
 
@@ -5509,7 +5698,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       const freshGuard = await screen.findByRole("dialog", { name: /leave nimbus behind\?/i });
       await user.click(within(freshGuard).getByRole("button", { name: /^start fresh anyway$/i }));
 
-      const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet = await screen.findByRole("dialog", { name: identityPromptName });
       await user.click(within(sheet).getByRole("button", { name: /^log in instead\.$/i }));
       await submitLoginForm(user, sheet);
 
@@ -5531,7 +5720,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       await user.click(youButton);
       const claimCta = screen.getByRole("region", { name: /claim your stats/i });
       await user.click(within(claimCta).getByRole("button", { name: /^create account$/i }));
-      const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet = await screen.findByRole("dialog", { name: identityPromptName });
       const usernameField = within(sheet).getByLabelText(/vgames username/i);
       await user.clear(usernameField);
       await user.type(usernameField, "vijay");
@@ -5541,7 +5730,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       // button (PKG-11 precedent).
       await user.click(createAccountSubmitButton());
 
-      await waitFor(() => expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull());
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: identityPromptName })).toBeNull());
       const youButtonAfter = screen.getByRole("button", { name: "You" });
       expect(youButtonAfter.querySelector(".nav-dot")).toBeNull();
     });
@@ -5633,7 +5822,7 @@ describe("Honest You: account UX (session states, logout, ghost guards)", () => 
       await user.click(within(claimCta).getByRole("button", { name: /^play as someone else$/i }));
       const guard = await screen.findByRole("dialog", { name: /leave nimbus behind\?/i });
       await user.click(within(guard).getByRole("button", { name: /^start fresh anyway$/i }));
-      const sheet = await screen.findByRole("dialog", { name: /save your stats/i });
+      const sheet = await screen.findByRole("dialog", { name: identityPromptName });
       await user.type(within(sheet).getByLabelText(/display name/i), "Fresh Name");
       await user.click(within(sheet).getByRole("button", { name: /continue as guest/i }));
 
@@ -5781,10 +5970,10 @@ describe("Race flow: full-screen takeover", () => {
 
     await user.click(await screen.findByRole("button", { name: /▶ race/i }));
     await user.click(await screen.findByRole("button", { name: /start race/i }));
-    const dialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const dialog = await screen.findByRole("dialog", { name: identityPromptName });
     await user.click(within(dialog).getByRole("button", { name: /close identity prompt/i }));
 
-    expect(screen.queryByRole("dialog", { name: /save your stats/i })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: identityPromptName })).toBeNull();
     expect(await screen.findByRole("region", { name: /pre-race preview/i })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Apple" })).toBeNull();
   });
@@ -6078,7 +6267,7 @@ describe("Race flow: full-screen takeover", () => {
     expect(claimCta.compareDocumentPosition(shareButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
     await user.click(within(claimCta).getByRole("button", { name: /create account/i }));
-    expect(await screen.findByRole("dialog", { name: /save your stats/i })).toBeVisible();
+    expect(await screen.findByRole("dialog", { name: identityPromptName })).toBeVisible();
   });
 
   it("shows the claim CTA and Share result for a guest's DNF too, not just a completed race (PKG-05)", async () => {
@@ -6109,6 +6298,7 @@ describe("Race flow: full-screen takeover", () => {
     await user.click(within(dialog).getByRole("button", { name: /confirm end run/i }));
 
     expect(await screen.findByText(/that one got away/i)).toBeVisible();
+    expect(screen.getByText(/run saved, but not counted as an attempt\./i)).toBeVisible();
     const claimCta = await screen.findByRole("region", { name: /keep your spot/i });
     expect(within(claimCta).getByText(/guest-42/i)).toBeVisible();
     const shareButton = screen.getByRole("button", { name: /share result/i });
@@ -6412,8 +6602,8 @@ describe("Race flow: full-screen takeover", () => {
     // MIN_COUNTED_DNF_CLICKS (= 2), FB-7's separate board-visibility
     // threshold - the confirm dialog used to say "It'll count as a DNF...
     // with 1 click." here, promising a consequence (board/session
-    // visibility) that never happens at this click count. It must show the
-    // same honest "won't count" line a 0-click end gets.
+    // visibility) that never happens at this click count. It must say both
+    // that the run is uncounted and that an uncounted summary comes next.
     let now = 1_000;
     const fetchImpl = createFetchMock({ clickStaysActive: true });
     const user = userEvent.setup();
@@ -6435,12 +6625,13 @@ describe("Race flow: full-screen takeover", () => {
     await user.click(screen.getByRole("button", { name: /^end run$/i }));
     const dialog = await screen.findByRole("dialog", { name: /end this run/i });
     expect(
-      within(dialog).getByText(/ending now won.t count as an attempt.*you.ll go back to home\./i),
+      within(dialog).getByText(/ending now won.t count as an attempt.*you.ll see an uncounted run summary\./i),
     ).toBeVisible();
     expect(within(dialog).queryByText(/counts as an attempt/i)).toBeNull();
     await user.click(within(dialog).getByRole("button", { name: /confirm end run/i }));
 
     expect(await screen.findByText(/that one got away/i)).toBeVisible();
+    expect(screen.getByText(/run saved, but not counted as an attempt\./i)).toBeVisible();
     // PKG-12 (council 2026-07-19): unlike a completed run (which has an
     // article panel whose own heading takes focus), a DNF had nothing to
     // receive focus at all - the result heading is now the landing spot.
@@ -6533,7 +6724,7 @@ describe("Race flow: full-screen takeover", () => {
     await user.click(await screen.findByRole("button", { name: /^end run$/i }));
     const dialog = await screen.findByRole("dialog", { name: /end this run/i });
     expect(
-      within(dialog).getByText(/this will end your run — it counts as an attempt \(dnf\)\. you.ll go back to home\./i),
+      within(dialog).getByText(/this will end your run — it counts as an attempt \(dnf\)\. you.ll see your result\./i),
     ).toBeVisible();
     expect(within(dialog).queryByText(/won.t count as an attempt/i)).toBeNull();
 
@@ -8436,7 +8627,7 @@ describe("Increment 5: Play-another suggestion + create-random (Browse full card
     await user.click(screen.getByRole("button", { name: "Create a challenge" }));
     await user.click(await screen.findByRole("button", { name: /create a random new one/i }));
 
-    const identityDialog = await screen.findByRole("dialog", { name: /save your stats/i });
+    const identityDialog = await screen.findByRole("dialog", { name: identityPromptName });
     await user.click(within(identityDialog).getByRole("button", { name: /^guest$/i }));
     await user.type(screen.getByLabelText(/display name/i), "Vijay");
     await user.click(screen.getByRole("button", { name: /continue as guest/i }));
@@ -9208,6 +9399,7 @@ function createFetchMock(options?: {
   runOldPath?: ServerPathStep[];
   accountAttempts?: number;
   accountCompleted?: number;
+  accountTimedCompleted?: number;
   // QF-09: totals.averageClicks/averageElapsedMs, for the You tab's "Avg
   // clicks"/"Avg speed" tiles - defaults to {0, 0} like the rest of
   // totals' zeroed fixture fields.
@@ -9482,7 +9674,7 @@ function createFetchMock(options?: {
             attempts: options?.accountAttempts ?? 0,
             completed,
             abandoned: 0,
-            timedCompleted: 0,
+            timedCompleted: options?.accountTimedCompleted ?? 0,
             totalClicks: 0,
             bestClicks: null,
             bestElapsedMs: null,
@@ -9763,6 +9955,21 @@ function createSameOriginSessionFetch(
       const intercepted = intercept(url.pathname, init);
       if (intercepted !== undefined) return intercepted;
       return baseFetch(`${apiOrigin}${url.pathname}${url.search}`, init);
+    }
+    return baseFetch(input, init);
+  }) as ReturnType<typeof createFetchMock>;
+}
+
+function failPostRunLeaderboardRefresh(
+  baseFetch: ReturnType<typeof createFetchMock>,
+): ReturnType<typeof createFetchMock> {
+  let leaderboardReads = 0;
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith("/leaderboard")) {
+      leaderboardReads += 1;
+      if (leaderboardReads > 1) {
+        return jsonError("leaderboard_unavailable", "Leaderboard unavailable.", 503);
+      }
     }
     return baseFetch(input, init);
   }) as ReturnType<typeof createFetchMock>;

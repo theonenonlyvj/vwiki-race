@@ -1,283 +1,72 @@
-.home-layout {
-  --home-route-line: rgba(24, 227, 207, 0.42);
-  grid-template-columns: minmax(0, 1fr);
-  min-width: 0;
-}
-
-.home-layout > *,
-.home-layout .daily-hero-copy,
-.home-layout .daily-hero .player-gate {
-  min-width: 0;
-}
-
-.home-layout > .daily-hero {
-  position: relative;
-  overflow: hidden;
-  gap: clamp(16px, 3vw, 28px);
-  padding: clamp(18px, 4vw, 28px);
-  background:
-    radial-gradient(circle at 88% 12%, rgba(24, 227, 207, 0.1), transparent 32%),
-    linear-gradient(145deg, rgba(74, 138, 145, 0.08), transparent 38%),
-    var(--ink-raised);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
-}
-
-.home-layout > .daily-hero::after {
-  position: absolute;
-  inset: auto -64px -84px auto;
-  width: 190px;
-  height: 190px;
-  border: 1px solid rgba(24, 227, 207, 0.12);
-  border-radius: 50%;
-  box-shadow:
-    0 0 0 24px rgba(24, 227, 207, 0.025),
-    0 0 0 48px rgba(24, 227, 207, 0.018);
-  content: "";
-  pointer-events: none;
-}
-
-.home-layout .daily-hero-copy,
-.home-layout .daily-hero .player-gate {
-  position: relative;
-  z-index: 1;
-}
-
-.home-layout .daily-hero-copy {
-  gap: 10px;
-}
-
-.home-layout .daily-hero .challenge-meta {
-  margin-bottom: 2px;
-}
-
-.home-layout .daily-hero .daily-badge {
-  border-color: var(--line-strong);
-  background: rgba(74, 138, 145, 0.1);
-  color: var(--text-dim);
-  padding: 5px 7px;
-}
-
-.home-layout .daily-route {
-  position: relative;
-  grid-template-columns: minmax(0, 1fr) 42px minmax(0, 1fr);
-  gap: 12px;
-  margin-top: 0;
-}
-
-.home-layout .daily-route::before {
-  position: absolute;
-  top: 50%;
-  right: 25%;
-  left: 25%;
-  height: 1px;
-  background: linear-gradient(90deg, var(--home-route-line), rgba(24, 227, 207, 0.78));
-  content: "";
-  pointer-events: none;
-}
-
-.home-layout .daily-route .daily-route-endpoint {
-  position: relative;
-  z-index: 1;
-  min-height: 84px;
-  align-content: center;
-  gap: 6px;
-  border: 1px solid var(--line-strong);
-  background: rgba(6, 16, 20, 0.88);
-  padding: 13px 14px;
-}
-
-.home-layout .daily-route .daily-route-endpoint:first-child {
-  border-left: 3px solid var(--line-strong);
-}
-
-.home-layout .daily-route .daily-route-endpoint:last-child {
-  border-left: 3px solid var(--cyan);
-}
-
-.home-layout .daily-route .daily-route-label {
-  color: var(--muted);
-  font-size: 0.66rem;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-}
-
-.home-layout .daily-route strong {
-  color: var(--text-bright);
-  font-size: clamp(1rem, 2.5vw, 1.42rem);
-  line-height: 1.25;
-}
-
-.home-layout .daily-route .route-arrow {
-  position: relative;
-  z-index: 2;
-  display: grid;
-  width: 42px;
-  height: 42px;
-  place-items: center;
-  justify-self: center;
-  border: 1px solid rgba(24, 227, 207, 0.55);
-  border-radius: 50%;
-  background: var(--ink);
-  box-shadow: 0 0 18px rgba(24, 227, 207, 0.16);
-  transform: none;
-}
-
-.home-layout .daily-route .route-arrow::before {
-  color: var(--cyan);
-  content: "→";
-  font-size: 1.2rem;
-  line-height: 1;
-}
-
-.home-layout .daily-hero-invitation {
-  margin: 2px 0 0;
-  color: var(--text);
-}
-
-.home-layout .daily-race-steps {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.home-layout .daily-race-steps li {
-  position: relative;
-  min-width: 0;
-  border-top: 1px solid var(--line);
-  color: var(--text-dim);
-  font-size: 0.72rem;
-  line-height: 1.4;
-  padding: 8px 4px 0 25px;
-}
-
-.home-layout .daily-race-steps li::before {
-  position: absolute;
-  top: 7px;
-  left: 0;
-  width: 7px;
-  height: 7px;
-  border: 1px solid var(--cyan);
-  border-radius: 50%;
-  background: rgba(24, 227, 207, 0.14);
-  content: "";
-}
-
-.home-layout .daily-hero .ritual-line {
-  width: max-content;
-  max-width: 100%;
-  border-left: 2px solid var(--line-strong);
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 0.78rem;
-  padding-left: 8px;
-}
-
-.home-layout .daily-hero .player-gate {
-  align-self: stretch;
-}
-
-.home-layout .daily-hero .player-gate .race-preview-button {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  min-height: 52px;
-  margin-top: 0;
-  padding-inline: 20px;
-  box-shadow: 0 10px 24px rgba(24, 227, 207, 0.12);
-  overflow-wrap: anywhere;
-  white-space: normal;
-}
-
+.home-layout { grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 22px; }
+.home-layout > *, .home-layout .daily-hero-copy, .home-layout .player-gate { min-width: 0; }
+.atlas-introduction { display: grid; grid-template-columns: 1.05fr 1fr; align-items: center; gap: 24px; padding: 16px 0 10px; }
+.atlas-introduction-copy { min-width: 0; }
+.atlas-introduction h2 { max-width: 11ch; color: var(--text); font-family: var(--viota-ui-font); font-size: clamp(2.5rem, 4.8vw, 4.3rem); font-weight: 650; letter-spacing: -.04em; line-height: 1.06; text-wrap: balance; }
+.atlas-introduction-copy > p:not(.home-player-status) { max-width: 39ch; color: var(--muted); font-size: .98rem; line-height: 1.8; margin-top: 20px; }
+.home-layout .home-player-status { border: none; background: transparent; padding: 0; margin-top: 18px; color: var(--cyan); font-size: .8rem; line-height: 1.6; }
+.home-layout .home-player-status::before { display: none; }
+.connection-atlas { display: block; width: 100%; height: auto; overflow: visible; }
+.atlas-grid { color: #819ac6; opacity: .35; }
+.atlas-trails { color: #c6cfff; opacity: .5; }
+.atlas-route { stroke: #79e6d0; }
+.atlas-route-shadow { stroke: #79e6d0; opacity: .07; }
+.atlas-stations { stroke: #79e6d0; fill: #101b36; }
+.atlas-orbits { color: #79e6d0; opacity: .6; }
+.atlas-page rect { fill: #243959; stroke: #a2b7dd; stroke-width: 1.2; }
+.atlas-page path { stroke: #c6cfff; stroke-width: 2; stroke-linecap: round; }
+.atlas-page-secondary rect { fill: #1b444e; stroke: #79e6d0; }
+.atlas-page-secondary path { stroke: #79e6d0; }
+.atlas-sparks { color: #efd087; }
+.home-layout > .daily-hero { position: relative; border: 1px solid var(--line-strong); border-radius: 22px; background: var(--ink-raised); padding: clamp(20px, 3vw, 32px); gap: 24px; box-shadow: none; }
+.home-layout .daily-hero-copy { gap: 16px; }
+.home-layout .daily-hero .daily-badge { border: 0; color: var(--text-dim); background: #263957; padding: 7px 10px; border-radius: 6px; font-size: .7rem; }
+.home-layout .daily-route { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 38px minmax(0, 1fr); align-items: center; gap: 16px; }
+.home-layout .daily-route .daily-route-endpoint { min-width: 0; display: grid; gap: 9px; padding: 0; border: 0; background: transparent; }
+.home-layout .daily-route .daily-route-label { font-size: .75rem; text-transform: none; letter-spacing: .015em; color: var(--muted); }
+.home-layout .daily-route strong { color: var(--text); font-family: var(--viota-ui-font); font-size: clamp(1.25rem, 2.3vw, 1.8rem); font-weight: 600; letter-spacing: -.04em; line-height: 1.25; overflow-wrap: anywhere; }
+.home-layout .daily-route .route-arrow { display: grid; place-items: center; justify-self: center; width: 36px; height: 36px; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--ink); transform: none; }
+.home-layout .daily-route .route-arrow::before { content: "→"; color: var(--cyan); font-size: 1.2rem; line-height: 1; }
+.home-layout .daily-hero-invitation { color: var(--muted); font-size: .82rem; margin: 0; }
+.home-layout .daily-race-steps { display: flex; flex-wrap: wrap; gap: 7px 18px; list-style: none; margin: 0; padding: 0; }
+.home-layout .daily-race-steps li { color: var(--muted); font-size: .8rem; line-height: 1.5; padding: 0; }
+.home-layout .daily-race-steps li::before { content: ""; display: inline-block; width: 4px; height: 4px; border-radius: 50%; margin: 0 7px 2px 0; background: var(--cyan); }
+.home-layout .daily-hero .ritual-line { font-size: .78rem; color: var(--muted); margin: 0; padding: 0; }
+.home-layout .daily-hero .player-gate { display: flex; align-items: center; }
+.home-layout .daily-hero .race-preview-button { min-height: 54px; width: 100%; margin: 0; padding: 14px 20px; border-radius: 12px; font-size: .9rem; white-space: normal; overflow-wrap: anywhere; box-shadow: none; }
+.home-layout .home-streak-trend-row { font-size: .78rem; color: var(--muted); margin: 0; }
+.home-layout .board-snippet { background: var(--ink-raised); border-radius: 18px; }
+.home-layout .board-snippet h2 { font-family: var(--viota-ui-font); font-size: 1.05rem; font-weight: 600; }
+.home-yesterday-summary { font-size: .8rem; }
 @media (min-width: 880px) {
-  .home-layout .daily-hero .player-gate {
-    display: flex;
-    min-width: 250px;
-    align-items: center;
-  }
+  .home-layout .daily-hero { grid-template-columns: minmax(0, 1fr) minmax(190px, .4fr); }
+  .home-layout .daily-hero .player-gate { grid-column: auto; }
 }
-
-@media (max-width: 540px) {
-  .home-layout > .daily-hero {
-    gap: 11px;
-    padding: 14px;
-  }
-
-  .home-layout .daily-route {
-    grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr);
-    gap: 6px;
-  }
-
-  .home-layout .daily-route .daily-route-endpoint {
-    min-height: 62px;
-    padding: 9px 10px;
-  }
-
-  .home-layout .daily-route .route-arrow {
-    width: 32px;
-    height: 32px;
-  }
-
-  .home-layout .daily-race-steps {
-    gap: 4px;
-  }
-
-  .home-layout .daily-race-steps li {
-    padding: 6px 2px 0 14px;
-    font-size: 0.72rem;
-    line-height: 1.3;
-  }
-
-  .home-layout .daily-race-steps li::before {
-    top: 8px;
-  }
-
-  .home-layout .daily-hero-invitation {
-    display: none;
-  }
-
-  .home-layout .daily-hero .ritual-line {
-    font-size: 0.72rem;
-  }
+@media (max-width: 700px) {
+  .atlas-introduction { grid-template-columns: 1.2fr 1fr; gap: 0; padding-top: 6px; }
+  .atlas-introduction h2 { font-size: clamp(2rem, 6.5vw, 3rem); }
+  .atlas-introduction-copy > p:not(.home-player-status) { font-size: .85rem; margin-top: 14px; line-height: 1.65; }
+  .home-layout .home-player-status { font-size: .8rem; margin-top: 12px; }
+  .home-layout > .daily-hero { gap: 18px; padding: 22px; }
 }
-
+@media (max-width: 480px) {
+  .atlas-introduction { grid-template-columns: minmax(0, 1fr); position: relative; padding-top: 4px; }
+  .atlas-introduction-copy { position: relative; z-index: 1; }
+  .atlas-introduction h2 { max-width: 10ch; font-size: 2.8rem; }
+  .atlas-introduction-copy > p:not(.home-player-status) { max-width: 31ch; }
+  .connection-atlas { width: 145px; position: absolute; top: -4px; right: -7px; opacity: .65; pointer-events: none; }
+  .home-layout { gap: 20px; }
+  .home-layout > .daily-hero { padding: 20px; }
+  .home-layout .daily-route { grid-template-columns: minmax(0, 1fr) 26px minmax(0, 1fr); gap: 9px; }
+  .home-layout .daily-route strong { font-size: 1.15rem; }
+  .home-layout .daily-route .route-arrow { width: 26px; height: 26px; }
+  .home-layout .daily-race-steps { display: grid; gap: 3px; }
+}
 @media (max-width: 350px) {
-  .home-layout .daily-route {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 5px;
-  }
-
-  .home-layout .daily-route::before {
-    top: 25%;
-    right: auto;
-    bottom: 25%;
-    left: 17px;
-    width: 1px;
-    height: auto;
-    background: linear-gradient(180deg, var(--home-route-line), rgba(24, 227, 207, 0.78));
-  }
-
-  .home-layout .daily-route .daily-route-endpoint {
-    min-height: 58px;
-    padding: 8px 10px 8px 32px;
-  }
-
-  .home-layout .daily-route .route-arrow {
-    width: 28px;
-    height: 28px;
-    margin-block: -3px;
-    margin-left: 3px;
-    justify-self: start;
-    transform: none;
-  }
-
-  .home-layout .daily-route .route-arrow::before {
-    transform: rotate(90deg);
-  }
-
-  .home-layout .daily-hero .player-gate .race-preview-button {
-    padding-inline: 10px;
-  }
+  .atlas-introduction h2 { font-size: 2.35rem; }
+  .connection-atlas { width: 115px; top: 2px; right: -8px; opacity: .4; }
+  .home-layout .daily-route { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .home-layout .daily-route .route-arrow { justify-self: start; }
+  .home-layout .daily-route .route-arrow::before { transform: rotate(90deg); }
+  .home-layout .daily-route strong { font-size: 1.25rem; }
 }

@@ -298,14 +298,14 @@ function StatsPanel({
       <dl className="you-featured">
         <div>
           <dt>Average speed</dt>
-          <dd>{totals ? formatStatDuration(totals.averageElapsedMs) : NO_DATA_YET}</dd>
+          <dd className={totals && totals.timedCompleted > 0 ? undefined : "you-average-empty"}>{totals && totals.timedCompleted > 0 ? formatStatDuration(totals.averageElapsedMs) : NO_DATA_YET}</dd>
           <dd className="you-featured-sub">per finished race</dd>
         </div>
         <div>
           <dt>Average clicks</dt>
           {/* One decimal, the precision every other avgClicks field in this
               app uses (e.g. listDailyTrends' ranked rows). */}
-          <dd>{totals ? totals.averageClicks.toFixed(1) : NO_DATA_YET}</dd>
+          <dd className={totals && totals.completed > 0 ? undefined : "you-average-empty"}>{totals && totals.completed > 0 ? totals.averageClicks.toFixed(1) : NO_DATA_YET}</dd>
           <dd className="you-featured-sub">per finished race</dd>
         </div>
       </dl>

@@ -1,0 +1,32 @@
+.board-snippet--compact .board-snippet-player {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35ch;
+  min-width: 0;
+}
+
+.board-snippet--compact .board-snippet-player-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-snippet--compact .board-snippet-you-marker {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 400px) {
+  .board-snippet--compact li:not(.is-dnf) > .board-snippet-player {
+    grid-column: 2 / -1;
+    grid-row: 1;
+  }
+
+  .board-snippet--compact li:not(.is-dnf) > .board-snippet-metric {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    justify-self: start;
+  }
+}

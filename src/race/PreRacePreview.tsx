@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { dailyFlavorBadgeText } from "../domain/dailyEditorial";
 import type { Challenge } from "../domain/types";
 import type { TargetPreviewState } from "../hooks/useTargetPreview";
@@ -23,6 +24,8 @@ export default function PreRacePreview({
   onSeeOtherChallenges: () => void;
   onStart: () => void;
 }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { headingRef.current?.focus({ preventScroll: true }); }, [challenge.id]);
   const readyPreview =
     targetPreview.status === "ready" && targetPreview.challengeId === challenge.id
       ? targetPreview
@@ -61,7 +64,7 @@ export default function PreRacePreview({
           </div>
         ) : null}
         <span className="target-preview-kicker">Your target</span>
-        <h2>{title}</h2>
+        <h2 ref={headingRef} tabIndex={-1}>{title}</h2>
         {readyPreview ? (
           <p className="target-preview-blurb">
             {readyPreview.preview.blurb ?? "Wikipedia does not provide a short lead for this target."}

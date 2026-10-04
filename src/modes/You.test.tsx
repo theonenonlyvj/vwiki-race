@@ -57,6 +57,13 @@ function renderYou(overrides: Partial<Parameters<typeof You>[0]> = {}) {
 }
 
 describe("You: RC-06 (one honest loading/error system) - three visually distinct stats states", () => {
+  it("does not describe an account without finishes as having zero-speed averages", () => {
+    renderYou({ stats: zeroStats });
+    for (const label of ["Average speed", "Average clicks"]) {
+      expect(screen.getByText(label).closest("div")).toHaveTextContent(NO_DATA);
+    }
+  });
+
   it("loading: stages honestly - nothing before 300ms, then a muted loading treatment distinct from 'No data yet.'", () => {
     vi.useFakeTimers();
     try {

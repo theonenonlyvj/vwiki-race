@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import BoardSnippet from "./BoardSnippet";
@@ -318,6 +320,50 @@ describe("BoardSnippet: pre-finish spoiler mask (unlocked)", () => {
     const yourRow = screen.getByText("FranTheGreat").closest("li")!;
     expect(yourRow).toHaveClass("is-you");
     expect(within(yourRow).getByText("(you)")).toBeVisible();
+  });
+});
+
+describe("BoardSnippet: narrow current-player identity", () => {
+  const css = readFileSync(join(__dirname, "BoardSnippet.css"), "utf-8");
+
+  it.each([320, 390])(
+    "keeps the (you) marker separate from the ellipsized name at %ipx",
+    (viewportWidth) => {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: viewportWidth,
+      });
+      const longName = "AtlasTesterWithAnExtremelyLongDisplayName";
+
+      render(
+        <BoardSnippet
+          title="Today's board"
+          rows={[row({ displayName: longName, isYou: true })]}
+        />,
+      );
+
+      const yourRow = screen.getByText(longName).closest("li")!;
+      const name = within(yourRow).getByText(longName);
+      const marker = within(yourRow).getByText("(you)");
+
+      expect(name).toHaveClass("board-snippet-player-name");
+      expect(marker).toHaveClass("board-snippet-you-marker");
+      expect(marker).toBeVisible();
+      expect(marker.parentElement).toBe(name.parentElement);
+      expect(name.nextElementSibling).toBe(marker);
+    },
+  );
+
+  it("ellipsizes only the name and reserves nonshrinking space for the marker", () => {
+    expect(css).toMatch(
+      /\.board-snippet--compact \.board-snippet-player-name\s*\{[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;/s,
+    );
+    expect(css).toMatch(
+      /\.board-snippet--compact \.board-snippet-you-marker\s*\{[^}]*flex:\s*0 0 auto;[^}]*white-space:\s*nowrap;/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width:\s*400px\)[\s\S]*\.board-snippet--compact li:not\(\.is-dnf\) > \.board-snippet-metric\s*\{[^}]*grid-row:\s*2;/,
+    );
   });
 });
 

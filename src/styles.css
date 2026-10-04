@@ -1,13 +1,6 @@
 :root {
-  /* Body face swapped Fredoka -> Merriweather, 2026-08-15 (owner: Fredoka's
-     rounded terminals read "almost like comic sans, which feels cheap for a
-     wikipedia race"). The `--viota-*` token names are vestigial, NOT a
-     shared VGames contract - viota ships no font at all and vjaipur uses
-     Iosevka - so this change is local to VWiki Race. Fallbacks are serif
-     now, so a failed webfont load degrades to something in the same family
-     rather than snapping to a sans. Luckiest Guy (display) unchanged. */
-  --viota-display-font: "Luckiest Guy", "Merriweather", ui-serif, Georgia, serif;
-  --viota-ui-font: "Merriweather", ui-serif, Georgia, serif;
+  --viota-display-font: "Luckiest Guy", "Manrope Variable", sans-serif;
+  --viota-ui-font: "Manrope Variable", ui-sans-serif, system-ui, sans-serif;
   --ink: #061014;
   --ink-raised: #0b181d;
   --ink-soft: #102329;
@@ -121,7 +114,7 @@ button {
     transform 140ms ease,
     color 140ms ease,
     background-color 140ms ease;
-  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  border-radius: 16px;
 }
 
 button:disabled {
@@ -215,7 +208,7 @@ ol {
   background: rgba(8, 19, 24, 0.92);
   padding: 26px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.32);
-  clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+  border-radius: 16px;
 }
 
 .entry-gate p {
@@ -282,7 +275,7 @@ ol {
   color: var(--text);
   padding: 18px;
   box-shadow: 0 26px 80px rgba(0, 0, 0, 0.42);
-  clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+  border-radius: 16px;
   font-family: var(--viota-ui-font);
 }
 
@@ -296,7 +289,7 @@ ol {
   color: var(--text);
   padding: 20px;
   box-shadow: 0 26px 80px rgba(0, 0, 0, 0.46);
-  clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+  border-radius: 16px;
   font-family: var(--viota-ui-font);
 }
 
@@ -334,7 +327,7 @@ ol {
   color: var(--text);
   padding: 20px;
   box-shadow: 0 26px 80px rgba(0, 0, 0, 0.46);
-  clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+  border-radius: 16px;
   font-family: var(--viota-ui-font);
 }
 
@@ -383,7 +376,7 @@ ol {
   background: var(--ink-raised);
   color: var(--text);
   padding: 18px;
-  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  border-radius: 16px;
   font-family: var(--viota-ui-font);
 }
 
@@ -422,7 +415,7 @@ ol {
   color: var(--text);
   padding: 18px;
   box-shadow: 0 26px 80px rgba(0, 0, 0, 0.42);
-  clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+  border-radius: 16px;
   font-family: var(--viota-ui-font);
 }
 
@@ -717,7 +710,7 @@ h1 {
   background: var(--ink-soft);
   min-width: 82px;
   padding: 8px 10px;
-  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+  border-radius: 16px;
 }
 
 .run-metrics dd,
@@ -940,7 +933,7 @@ h1 {
   background: var(--ink-soft);
   color: var(--text);
   padding: 8px 10px;
-  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+  border-radius: 16px;
   font-family: inherit;
   text-align: left;
 }
@@ -1220,7 +1213,7 @@ h1 {
   border: 1px solid var(--line);
   background: var(--ink-raised);
   padding: 16px;
-  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  border-radius: 16px;
 }
 
 .daily-update-notice {
@@ -1900,7 +1893,7 @@ h1 {
   border: 1px solid var(--line);
   background: rgba(6, 16, 20, 0.96);
   backdrop-filter: blur(16px);
-  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  border-radius: 16px;
 }
 
 /* HD-1: no min-height source left in this row (End Run - the old grid's
@@ -2020,7 +2013,7 @@ h1 {
   background: var(--ink-raised);
   color: var(--text);
   padding: clamp(20px, 4vw, 42px);
-  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  border-radius: 16px;
   font-family: var(--viota-ui-font);
 }
 
@@ -2107,7 +2100,7 @@ h1 {
   background: var(--ink-raised);
   color: var(--text);
   padding: 20px;
-  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  border-radius: 16px;
   font-family: var(--viota-ui-font);
 }
 
@@ -2488,7 +2481,7 @@ h1 {
   background: var(--ink-raised);
   color: var(--text);
   padding: 16px;
-  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  border-radius: 16px;
 }
 
 /* PKG-05 (council 2026-07-19): `.result-panel` used to override its
@@ -2858,7 +2851,7 @@ h1 {
   display: grid;
   gap: 10px;
   padding: 16px;
-  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  border-radius: 16px;
 }
 
 .sync-retry-panel button {

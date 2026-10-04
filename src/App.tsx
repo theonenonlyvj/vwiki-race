@@ -392,7 +392,7 @@ export default function App({
   const [raceStage, setRaceStage] = useState<"preview" | null>(null);
   const [canManageDailies, setCanManageDailies] = useState<boolean | null>(null);
   const [authPrompt, setAuthPrompt] = useState<AuthPromptIntent | null>(null);
-  const [authMode, setAuthMode] = useState<AuthMode>("create");
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authBusy, setAuthBusy] = useState(false);
   // LR-2: which rung of the login retry ladder is in flight (0 = none) -
   // drives the honest "Still connecting..."/"Almost there - retrying..."
@@ -450,6 +450,7 @@ export default function App({
   // fetch effect below most recently observed for a null result.
   const [accountStatsFetchStatus, setAccountStatsFetchStatus] =
     useState<"loading" | "error">("loading");
+  const [accountStatsUpdating, setAccountStatsUpdating] = useState(false);
   const [runPaths, setRunPaths] = useState<Record<string, ServerPathStep[]>>({});
   // Boards v1 (Increment 3) owns its own [Today][Yesterday] segment state
   // internally, but the *initial* segment on mount depends on how you got
@@ -613,6 +614,11 @@ export default function App({
       },
     });
   }, [apiOrigin, fetchImpl, identityRepository, identityStorage]);
+  const [sessionBootstrap, setSessionBootstrap] = useState<{
+    manager: typeof rememberedSession;
+    status: "pending" | "ready" | "unavailable";
+  }>({ manager: null, status: "pending" });
+  const [sessionBootstrapRetryVersion, setSessionBootstrapRetryVersion] = useState(0);
   const apiClient = useMemo(
     () => injectedApiClient ?? createVWikiRaceApiClient(rememberedSession?.fetch ?? fetchImpl, { apiOrigin }),
     [apiOrigin, fetchImpl, injectedApiClient, rememberedSession],
@@ -631,8 +637,27 @@ export default function App({
     // renewal when needed. No password or cookie value enters browser storage.
     let deliberatelyLoggedOut = false;
     try { deliberatelyLoggedOut = identityStorage.getItem("vwiki-race:remembered-logged-out") === "true"; } catch { /* cookie-only restore remains available */ }
-    if (!deliberatelyLoggedOut) void rememberedSession?.bootstrap().catch(() => {});
-  }, [rememberedSession, identityStorage]);
+    let current = true;
+    if (!rememberedSession || deliberatelyLoggedOut) {
+      setSessionBootstrap({ manager: rememberedSession, status: "ready" });
+      return () => { current = false; };
+    }
+    setSessionBootstrap({ manager: rememberedSession, status: "pending" });
+    void rememberedSession.bootstrap().then(
+      () => {
+        if (current) setSessionBootstrap({ manager: rememberedSession, status: "ready" });
+      },
+      () => {
+        if (!current) return;
+        // A cached identity remains usable during a temporary cookie-service
+        // outage. With no cache, however, signed-out controls would be a lie:
+        // a still-valid HttpOnly cookie may identify somebody once retry works.
+        const status = identityRepository.getSession() ? "ready" : "unavailable";
+        setSessionBootstrap({ manager: rememberedSession, status });
+      },
+    );
+    return () => { current = false; };
+  }, [rememberedSession, identityStorage, identityRepository, sessionBootstrapRetryVersion]);
   const wikipediaGateway = useMemo(
     () => createWikipediaGateway({ fetchImpl }),
     [fetchImpl],
@@ -699,9 +724,19 @@ export default function App({
   // identified user stuck here forever with no article to look at - release
   // the gate in that case and fall back to the shell, where the existing
   // error banner + focus-refetch affordances live.
-  const recoveryGatePending = identitySession !== null &&
+  // A cookie can restore an account even without a local cache. Do not offer
+  // login/start actions until that identity check settles, or a late restore
+  // could replace the identity underneath an open form or newly started run.
+  const cookieBootstrapPending = rememberedSession !== null && (
+    sessionBootstrap.manager !== rememberedSession || sessionBootstrap.status === "pending"
+  );
+  const cookieBootstrapUnavailable = rememberedSession !== null &&
+    sessionBootstrap.manager === rememberedSession &&
+    sessionBootstrap.status === "unavailable" &&
+    identitySession === null;
+  const recoveryGatePending = cookieBootstrapPending || (identitySession !== null &&
     recoveredToken.current !== identitySession.token &&
-    !catalogLoadFailed;
+    !catalogLoadFailed);
   // RC-07 Step 1: one precomputed screen selector replaces the old
   // `raceEngaged` boolean (full-screen, zero-chrome race-flow takeover -
   // spec: "Race flow" section) AND RaceFlow's own internal 7-branch
@@ -1219,7 +1254,10 @@ export default function App({
   // player to revisit "You" - see followArticleLink/retryPendingClick/
   // confirmEndRun below.
   useEffect(() => {
-    if (!identitySession) return;
+    if (!identitySession) {
+      setAccountStatsUpdating(false);
+      return;
+    }
     const token = identitySession.token;
     const request = ++statsRequest.current;
     // RC-04: only blank the on-screen stats when this fetch is for a
@@ -1231,6 +1269,11 @@ export default function App({
     // success, leaving the previous numbers on screen until then.
     const identityChanged = statsIdentityTokenRef.current !== token;
     statsIdentityTokenRef.current = token;
+    setAccountStatsUpdating(
+      !identityChanged &&
+      accountStatsProjection?.token === token &&
+      accountStatsProjection.stats !== null,
+    );
     if (identityChanged) {
       setAccountStatsProjection({ token, stats: null });
     }
@@ -1263,10 +1306,12 @@ export default function App({
       .then((stats) => {
         if (request === statsRequest.current) {
           setAccountStatsProjection({ token, stats });
+          setAccountStatsUpdating(false);
         }
       })
       .catch((caught) => {
         if (request !== statsRequest.current) return;
+        setAccountStatsUpdating(false);
         // Deliberately still nulled unconditionally (Judge B amendment 1) -
         // ghostGuardRequired's fail-closed contract requires a fetch error
         // to read exactly like "unresolved", the same as mid-flight. Only
@@ -1713,14 +1758,13 @@ export default function App({
     if (preferredMode) {
       setAuthMode(preferredMode);
     } else {
-      // FB-2 (owner decision 1b, 2026-07-19): guest-first for everyone,
-      // not just returning ghosts - QF-01 had already flipped the fallback
-      // to Guest for a returning ghost (a name to play under, one tap to
-      // keep racing under it); this finishes the job so a brand-new
-      // visitor also lands on Guest instead of the Create form. Still
-      // pre-fill the username draft for a returning ghost in case they
-      // tab over to Create/Log in.
-      setAuthMode("guest");
+      // Current owner direction supersedes the historical guest-first
+      // fallback: ordinary identity entry starts on Log in so returning
+      // players can recover their established VGames name and history.
+      // Explicit modes still win (including fresh-name switching, which
+      // must continue to open Guest), and Guest remains available in the
+      // mode switcher without forcing registration.
+      setAuthMode("login");
       if (identitySession) {
         setUsernameDraft(suggestUsername(identitySession.displayName));
       }
@@ -2248,8 +2292,7 @@ export default function App({
       return;
     }
     if (outcome.status === "completed") {
-      await refreshLeaderboard(outcome.challengeId);
-      bumpStatsRefresh();
+      refreshAfterAuthoritativeRun(outcome.challengeId);
     }
   }
 
@@ -2266,8 +2309,7 @@ export default function App({
       return;
     }
     if (outcome.status === "completed") {
-      await refreshLeaderboard(outcome.challengeId);
-      bumpStatsRefresh();
+      refreshAfterAuthoritativeRun(outcome.challengeId);
     }
   }
 
@@ -2275,6 +2317,18 @@ export default function App({
   // why this needs to reach further than just the "You" tab.
   function bumpStatsRefresh() {
     setStatsRefreshVersion((version) => version + 1);
+  }
+
+  function refreshAfterAuthoritativeRun(challengeId: string | null | undefined) {
+    // Stats describe the player and must revalidate as soon as the run
+    // mutation is authoritative. The challenge leaderboard is an independent
+    // projection: its outage must not strand the player's totals pre-race.
+    bumpStatsRefresh();
+    if (challengeId) {
+      void refreshLeaderboard(challengeId).catch(() => {
+        // refreshLeaderboard already records and exposes its own failure.
+      });
+    }
   }
 
   function markSessionDnf(challengeId: string) {
@@ -2376,17 +2430,11 @@ export default function App({
       if (endedChallengeId && !isRecoveryEnd && acceptedClickCount >= MIN_COUNTED_DNF_CLICKS) {
         markSessionDnf(endedChallengeId);
       }
-      if (endedChallengeId) {
-        await refreshLeaderboard(endedChallengeId);
-      }
-      bumpStatsRefresh();
+      refreshAfterAuthoritativeRun(endedChallengeId);
     } else if (outcome.status === "completed") {
       setEndConfirmationOpen(false);
       setRunNotice(null);
-      if (endedChallengeId) {
-        await refreshLeaderboard(endedChallengeId);
-      }
-      bumpStatsRefresh();
+      refreshAfterAuthoritativeRun(endedChallengeId);
     } else if (outcome.status === "unauthorized") {
       clearStaleIdentity({ type: "end-run" });
       setEndConfirmationOpen(false);
@@ -2447,10 +2495,9 @@ export default function App({
   // confirmEndRun's isRecoveryEnd, above) - it always lands on Home with a
   // notice, DNF Results or not, regardless of how many clicks the stale run
   // being cleared out had racked up. So the DNF-with-N-clicks framing is
-  // only ever true for the non-recovery, 1+-click, active-race path; every
-  // other case (zero clicks, or ANY recovery end) shares one honest
-  // Home-bound line - stating the destination up front instead of leaving
-  // it to be discovered after confirming.
+  // only ever true for the non-recovery, 1+-click, active-race path. Zero
+  // clicks and recovery ends return Home; a one-click active run opens its
+  // deliberately uncounted Results summary.
   const isRecoveryEnd = Boolean(race.recoveryRun);
   // QF-05: "DNF" spelled out here too, matching RaceResults' own kicker
   // ("DNF — Did not finish") - this dialog is often a first-time player's
@@ -2462,14 +2509,14 @@ export default function App({
   // (confirmEndRun's own `>= MIN_COUNTED_DNF_CLICKS` gate) nor ever shows up
   // on any board. The dialog must not promise (or threaten) a consequence
   // that won't actually happen - only a non-recovery end at/above the real
-  // threshold gets the "counts as an attempt" framing now; everything else
-  // (0/1 click, or any recovery end - see RC-08's own doc comment above on
-  // why recovery ends never count regardless of clicks) keeps the honest
-  // "won't count" line.
+  // threshold gets the "counts as an attempt" framing now. The uncounted
+  // cases retain their separate, accurate destinations below.
   const endRunCountsAsAttempt = !isRecoveryEnd && endRunClickCount >= MIN_COUNTED_DNF_CLICKS;
-  const endRunConfirmCopy = endRunCountsAsAttempt
-    ? "This will end your run — it counts as an attempt (DNF). You'll go back to Home."
-    : "Ending now won't count as an attempt — you'll go back to Home.";
+  const endRunConfirmCopy = isRecoveryEnd || endRunClickCount === 0
+    ? "Ending now won't count as an attempt — you'll go back to Home."
+    : endRunCountsAsAttempt
+      ? "This will end your run — it counts as an attempt (DNF). You'll see your result."
+      : "Ending now won't count as an attempt — you'll see an uncounted run summary.";
   const showBanners = !authPrompt && !endConfirmationOpen;
   const bannerError = showBanners ? visibleError : null;
   const bannerNotice = showBanners ? runNotice : null;
@@ -2479,7 +2526,29 @@ export default function App({
       className="app-shell"
       aria-busy={isBusy}
     >
-      {screen.kind !== "shell" ? (
+      {accountStatsUpdating ? (
+        <p aria-live="polite" className="loading-text stats-updating-notice" role="status">
+          Updating your stats…
+        </p>
+      ) : null}
+      {cookieBootstrapPending || cookieBootstrapUnavailable ? (
+        <div className="race-takeover">
+          {cookieBootstrapUnavailable ? (
+            <section aria-labelledby="session-restore-title">
+              <h1 id="session-restore-title">Couldn’t restore your account.</h1>
+              <p>We can’t confirm your saved session right now. Your account may still be signed in.</p>
+              <button
+                onClick={() => setSessionBootstrapRetryVersion((version) => version + 1)}
+                type="button"
+              >
+                Retry
+              </button>
+            </section>
+          ) : (
+            <p className="loading-text" role="status">Restoring your account…</p>
+          )}
+        </div>
+      ) : screen.kind !== "shell" ? (
         <RaceFlow
           screen={screen}
           apiClient={apiClient}
@@ -2540,6 +2609,7 @@ export default function App({
             }
             exitCompletedRaceTo("boards");
           }}
+          onShowStats={() => exitCompletedRaceTo("you")}
           onShowChallenges={() => exitCompletedRaceTo("challenges")}
           onClaimIdentity={(mode) => openAuthPrompt({ type: "claim" }, mode)}
           onGoHome={() => exitCompletedRaceTo("home")}
@@ -2737,6 +2807,11 @@ function IdentityPrompt({
   usernameDraft: string;
 }) {
   const isGhost = identitySession?.status === "ghost";
+  const promptTitle = authMode === "login"
+    ? "Welcome back"
+    : authMode === "create"
+      ? "Create your account"
+      : "Play as guest";
   // RC-09 (owner-proxy ruling, Judge A item 4 / Judge B amendment 2): the
   // three forms below stay exactly as they were - three separate,
   // mutually-exclusive `authMode === "..." ? <form> : null` expressions
@@ -2779,7 +2854,7 @@ function IdentityPrompt({
         <div className="identity-dialog-heading">
           <div>
             <span className="vwiki-mark">VWiki Race</span>
-            <h2 id="identity-prompt-title">Save your stats</h2>
+            <h2 id="identity-prompt-title">{promptTitle}</h2>
           </div>
           <button
             aria-label="Close identity prompt"
@@ -2793,17 +2868,13 @@ function IdentityPrompt({
         </div>
 
         <p className="identity-copy">
-          {authMode === "guest" ? (
-            "Pick a name and go - claim it later. No email, no password."
-          ) : (
-            <>
-              {isGhost
-                ? "Turn this guest into a VGames account without losing any runs. "
-                : "Create a VGames account before the timer starts. "}
-              Free, no email - keeps your name and stats on every device. One
-              account works across every VGames title.
-            </>
-          )}
+          {authMode === "login"
+            ? "Log in to return to your VGames name and history. One account works across every VGames title."
+            : authMode === "create"
+              ? isGhost
+                ? "Create an account to keep this guest's name and race history. Free, no email - one account works across every VGames title."
+                : "Create a VGames account to keep your name and race history. Free, no email - one account works across every VGames title."
+              : "Pick a name and go - claim it later. No email, no password."}
         </p>
 
         {error ? <p role="alert">{error}</p> : null}
@@ -2827,12 +2898,12 @@ function IdentityPrompt({
           aria-label="Identity options"
         >
           <button
-            aria-pressed={authMode === "guest"}
+            aria-pressed={authMode === "login"}
             disabled={authBusy}
-            onClick={() => onSetAuthMode("guest")}
+            onClick={() => onSetAuthMode("login")}
             type="button"
           >
-            Guest
+            Log in
           </button>
           <button
             aria-pressed={authMode === "create"}
@@ -2843,12 +2914,12 @@ function IdentityPrompt({
             Create account
           </button>
           <button
-            aria-pressed={authMode === "login"}
+            aria-pressed={authMode === "guest"}
             disabled={authBusy}
-            onClick={() => onSetAuthMode("login")}
+            onClick={() => onSetAuthMode("guest")}
             type="button"
           >
-            Log in
+            Guest
           </button>
         </div>
 

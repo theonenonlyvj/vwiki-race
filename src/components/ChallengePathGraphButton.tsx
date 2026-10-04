@@ -119,6 +119,7 @@ function ChallengePathGraphDialog({
 
   return (
     <ModalDialog
+      backdropClassName="graph-backdrop"
       className="graph-modal"
       onClose={onClose}
       // GX-1: every board surface mounts this button inside a clip-path'd

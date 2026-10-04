@@ -150,21 +150,20 @@ describe("ChallengePathGraph in portrait", () => {
 
     await user.click(await screen.findByRole("button", { name: /show 2 players/i }));
     expect(screen.getByRole("button", { name: /fast/i })).toBeVisible();
-    expect(screen.getByRole("button", { name: /hide names/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /hide 2 players/i })).toBeVisible();
   });
 
-  // Toggling unmounts the button that was just activated; without moving focus
-  // it lands on <body> and a keyboard user has to tab in from the top again.
-  it("keeps keyboard focus on the control that replaced the one it removed", async () => {
+  // The same disclosure stays mounted through both states.
+  it("keeps keyboard focus on the persistent disclosure control", async () => {
     const user = userEvent.setup();
     render(<ChallengePathGraph runs={runs} />);
 
     await user.click(await screen.findByRole("button", { name: /show 2 players/i }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /hide names/i })).toHaveFocus(),
+      expect(screen.getByRole("button", { name: /hide 2 players/i })).toHaveFocus(),
     );
 
-    await user.click(screen.getByRole("button", { name: /hide names/i }));
+    await user.click(screen.getByRole("button", { name: /hide 2 players/i }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /show 2 players/i })).toHaveFocus(),
     );

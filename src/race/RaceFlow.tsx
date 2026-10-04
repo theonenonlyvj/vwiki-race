@@ -86,6 +86,7 @@ export default function RaceFlow({
   onStartFromPreview,
   onPlayAgain,
   onShowLeaderboard,
+  onShowStats,
   onShowChallenges,
   onClaimIdentity,
   onGoHome,
@@ -159,6 +160,7 @@ export default function RaceFlow({
   onStartFromPreview: () => void;
   onPlayAgain: () => void;
   onShowLeaderboard: () => void;
+  onShowStats: () => void;
   onShowChallenges: () => void;
   onClaimIdentity: (mode: "create" | "login") => void;
   // PKG-05: Results' low-emphasis Home exit link (see RaceResults' own
@@ -236,6 +238,7 @@ export default function RaceFlow({
           onOpenChallenge={onOpenChallenge}
           onPlayAgain={onPlayAgain}
           onShowLeaderboard={onShowLeaderboard}
+          onShowStats={onShowStats}
           onShowChallenges={onShowChallenges}
           onClaimIdentity={onClaimIdentity}
           onGoHome={onGoHome}
@@ -274,6 +277,7 @@ export default function RaceFlow({
           onOpenChallenge={onOpenChallenge}
           onPlayAgain={onPlayAgain}
           onShowLeaderboard={onShowLeaderboard}
+          onShowStats={onShowStats}
           onShowChallenges={onShowChallenges}
           onClaimIdentity={onClaimIdentity}
           onGoHome={onGoHome}

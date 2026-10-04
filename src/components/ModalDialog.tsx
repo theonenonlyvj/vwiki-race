@@ -49,6 +49,7 @@ import { createPortal } from "react-dom";
  * touching that contract.
  */
 export default function ModalDialog({
+  backdropClassName,
   busy = false,
   children,
   className,
@@ -57,6 +58,7 @@ export default function ModalDialog({
   returnFocusRef,
   titleId,
 }: {
+  backdropClassName?: string;
   busy?: boolean;
   children: ReactNode;
   className: string;
@@ -173,7 +175,7 @@ export default function ModalDialog({
   }
 
   const dialog = (
-    <div className="modal-backdrop" ref={backdropRef} role="presentation">
+    <div className={backdropClassName ? `modal-backdrop ${backdropClassName}` : "modal-backdrop"} ref={backdropRef} role="presentation">
       <section
         aria-labelledby={titleId}
         aria-modal="true"

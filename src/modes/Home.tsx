@@ -1,3 +1,4 @@
+import ConnectionAtlas from "../components/ConnectionAtlas";
 import { useEffect, useMemo, useState } from "react";
 import BoardSnippet from "../components/BoardSnippet";
 import ChallengePathGraphButton from "../components/ChallengePathGraphButton";
@@ -75,6 +76,7 @@ export default function Home({
   identityAccountId,
   identitySession,
   identityToken,
+  onClaimIdentity,
   onGoToBoards,
   onGoToBoardsToday,
   onOpenChallenge,
@@ -112,6 +114,7 @@ export default function Home({
   identitySession: VGamesIdentitySession | null;
   // GR-1 ("View graph"): the bearer token `ChallengePathGraphButton` needs.
   identityToken: string | null;
+  onClaimIdentity?: (mode: "login" | "create") => void;
   onGoToBoards: () => void;
   // RC-05 (Judge B amendment 1): distinct from onGoToBoards (which lands on
   // Boards' Yesterday segment via goToBoardsFor) - the finished-state
@@ -143,7 +146,7 @@ export default function Home({
 }) {
   const playingAsLabel = identitySession
     ? `Playing as ${identitySession.displayName}${identitySession.status === "ghost" ? " · Guest" : ""}`
-    : "Ready when you are. No account needed to start.";
+    : "Log in to keep your name and your progress.";
   const dailyUpdateNotice = todayCentral >= "2026-09-19" && todayCentral < "2026-09-26" ? (
     <aside className="daily-update-notice" role="note" aria-label="Daily picks update">
       <p>Sorry about the tough Thursday and Friday races—we’ve fixed the daily picks.</p>
@@ -386,7 +389,22 @@ export default function Home({
   return (
     <section className="home-layout">
       {dailyUpdateNotice}
-      <p className="home-player-status" role="status">{playingAsLabel}</p>
+      <div className="atlas-introduction">
+        <div className="atlas-introduction-copy">
+          <h2>Every link leads somewhere.</h2>
+          <p>A race through the unexpected. Find your way between two Wikipedia articles, one link at a time.</p>
+          <p className="home-player-status" role="status">{playingAsLabel}</p>
+          {identitySession?.status !== "claimed" && onClaimIdentity ? (
+            <div className="home-account-actions" role="group" aria-label="Your VGames account">
+              <button className="link-button" type="button" onClick={() => onClaimIdentity("login")}>Log in</button>
+              <button className="link-button" type="button" onClick={() => onClaimIdentity("create")}>
+                {identitySession?.status === "ghost" ? "Keep this guest account" : "Create account"}
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <ConnectionAtlas />
+      </div>
       <div
         className="daily-hero challenge-route route-header"
         aria-label={heroIsYesterday ? "Yesterday's daily" : "Today's daily"}

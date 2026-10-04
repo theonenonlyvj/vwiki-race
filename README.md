@@ -34,8 +34,10 @@ current source, configuration, and operational handoffs above.
   challenge number.
 - The unique VGames name/handle is the canonical public identity.
 - Guests can play through a VGames ghost account and claim their stats later.
-- The identity prompt appears only before Start or Create. Returning ghosts are
-  encouraged to claim their name but can continue as the same guest.
+- Identity is required before Start or Create, and Home offers Log in/Create
+  account without starting a race. Log in is the default; Guest remains explicit.
+  Returning players restore their remembered account before identity actions
+  appear. Guests can keep their history by securing their existing guest account.
 - Runs, clicks, path steps, challenge creators, and leaderboard rows are written
   through the canonical Cloudflare Worker to D1, not localStorage.
 - The timer measures accepted player decision time. Wikipedia fetch and server

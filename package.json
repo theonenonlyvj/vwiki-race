@@ -13,8 +13,8 @@
     "report:health": "node scripts/product-health.mjs"
   },
   "dependencies": {
+    "@fontsource-variable/manrope": "^5.3.0",
     "@fontsource/luckiest-guy": "^5.2.8",
-    "@fontsource/merriweather": "^5.3.0",
     "@vitejs/plugin-react": "^4.3.4",
     "linkedom": "^0.18.13",
     "react": "^19.0.0",

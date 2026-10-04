@@ -3,6 +3,7 @@ import StagedLoadingNotice from "./StagedLoadingNotice";
 import { NO_ATTEMPTS_LABEL, windowBoardRows, type BoardSnippetRow } from "../domain/boardSnippet";
 import { formatTimeAndClicks } from "../domain/formatting";
 import "./BoardSnippet.clarity.css";
+import "./BoardSnippet.css";
 
 // BD-1 ("windowed board snippet: top 2 + your neighborhood + inline
 // expanders"): the fixed windowing shape shared by every compact snippet
@@ -53,8 +54,8 @@ function BoardSnippetRowItem({
         {isDnf ? "Did not finish" : row.rankLabel}
       </span>
       <span className="board-snippet-player">
-        {row.displayName}
-        {row.isYou ? <span className="muted"> (you)</span> : null}
+        <span className="board-snippet-player-name">{row.displayName}</span>
+        {row.isYou ? <span className="muted board-snippet-you-marker">(you)</span> : null}
       </span>
       {unlocked ? (
         <span className="board-snippet-metric">
@@ -144,7 +145,7 @@ export default function BoardSnippet({
 
   if (status === "error") {
     return (
-      <section aria-label={title} className="board-snippet board-error">
+      <section aria-label={title} className="board-snippet board-snippet--compact board-error">
         <h3>{title}</h3>
         <p className="error-banner" role="alert">Couldn&apos;t load this board.</p>
         {onRetry ? (
@@ -159,7 +160,7 @@ export default function BoardSnippet({
 
   if (status === "loading") {
     return (
-      <section aria-label={title} className="board-snippet">
+      <section aria-label={title} className="board-snippet board-snippet--compact">
         <h3>{title}</h3>
         <StagedLoadingNotice active onRetry={onRetry} pendingLabel="Loading board…" />
         {children}
@@ -169,7 +170,7 @@ export default function BoardSnippet({
 
   if (rows.length === 0) {
     return (
-      <section aria-label={title} className="board-snippet">
+      <section aria-label={title} className="board-snippet board-snippet--compact">
         <h3>{title}</h3>
         <p className="muted">{emptyLabel}</p>
         {emptyStateNotice}
@@ -221,7 +222,7 @@ export default function BoardSnippet({
       : [{ type: "rows" as const, rows: topN }];
 
   return (
-    <section aria-label={title} className="board-snippet">
+    <section aria-label={title} className="board-snippet board-snippet--compact">
       <h3>{title}</h3>
       {!unlocked ? (
         <p className="board-snippet-lock-note muted">

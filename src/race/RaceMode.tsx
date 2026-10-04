@@ -244,6 +244,7 @@ export const WikipediaArticlePanel = memo(function WikipediaArticlePanel({
   onPointerDown,
   pendingNavigationTitle,
   navigationRetrying,
+  focusOnArticleChange = true,
 }: {
   article: Article;
   acceptedPageId: number | undefined;
@@ -258,14 +259,16 @@ export const WikipediaArticlePanel = memo(function WikipediaArticlePanel({
   // retrospective summary never has a navigation (let alone a retry) in
   // flight.
   navigationRetrying: boolean;
+  focusOnArticleChange?: boolean;
 }) {
   const articleHeadingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
+    if (!focusOnArticleChange) return;
     const heading = articleHeadingRef.current;
     heading?.scrollIntoView?.({ behavior: "auto", block: "start" });
     heading?.focus({ preventScroll: true });
-  }, [acceptedPageId]);
+  }, [acceptedPageId, focusOnArticleChange]);
 
   return (
     <article

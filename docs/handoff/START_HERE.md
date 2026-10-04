@@ -4,7 +4,9 @@
 The dated runtime identifiers below describe the preceding release and are
 superseded by that receipt. Product invariants and historical decisions remain.
 
-**Latest implementation:**
+**Interface and player journey:** [`atlas-ui-login.md`](atlas-ui-login.md) covers the approved expressive shell and login-first implementation. The full journey state map and release checks are in [`player-journey.md`](player-journey.md). Publication is authorized; verify the served artifact against the release commit. This supersedes guest-first entry guidance below.
+
+**Latest published implementation:**
 [`2026-10-03-daily-path-validation.md`](2026-10-03-daily-path-validation.md)
 documents the automatic Daily rendered-route gate;
 [`dependency-toolchain-maintenance.md`](dependency-toolchain-maintenance.md)
@@ -88,17 +90,18 @@ friend's bug report.
   player table.
 - A VGames username is the canonical public display name and is unique.
 - A guest is a VGames ghost. Its device credential persists locally and its
-  server-side stats can follow a later claim or account merge. **Guest-first
-  identity is the default for everyone** (owner ruling, 2026-07-19, "b is
-  fine, easy") — not just returning ghosts.
-- Identity is requested before Start or Create, not merely to browse the
-  site. Signed-in players are not prompted again. The one exception is
+  server-side stats can follow a later claim. **Login-first is the current
+  ordinary identity entry**; explicit Guest remains available. This supersedes
+  the historical guest-first default. Account merges require separate authority.
+- Identity is required before Start or Create; browsing stays open. Home also
+  offers explicit Log in and Create account actions. Signed-in players are not prompted again. The one exception is
   active-run recovery on app load, which resolves before any identity prompt
   or mode shell renders — see "Recovery gate" in the companion doc's
   invariants (§3.3).
-- `Create New` is the default identity tab, with one username/display-name
-  field and password confirmation. `Guest` is first; `Log In / Existing` is
-  the other VGames account path.
+- `Log in` is the default identity tab. `Create account` offers a unique
+  username and password confirmation. `Guest` is an explicit secondary path.
+  Fresh-name switching still opens Guest intentionally. Cookie restoration
+  resolves before the shell exposes identity or start controls.
 - Every accepted run is server-tracked from game 0. localStorage is not the
   source of truth for scores, paths, challenges, or stats.
 - Challenge links are stable: `/?challenge=challenge-000N`. The URL policy is

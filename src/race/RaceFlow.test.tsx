@@ -50,6 +50,10 @@ function renderRaceFlow(overrides: Partial<Parameters<typeof RaceFlow>[0]> = {})
 }
 
 describe("RaceFlow: RC-06 (one honest loading/error system)", () => {
+  it("focuses the target when the pre-race screen opens", () => {
+    renderRaceFlow({ screen: { kind: "race-preview" }, previewChallenge });
+    expect(screen.getByRole("heading", { name: "Gravity" })).toHaveFocus();
+  });
   describe("'race-preview' with no previewChallenge yet (Judge A: the ONE genuinely retry-less interstitial)", () => {
     it("shows nothing before 300ms, honest 'Loading challenge...' at 300ms, and no Retry before stalling", () => {
       vi.useFakeTimers();
@@ -157,6 +161,7 @@ function buildProps(overrides: Partial<Parameters<typeof RaceFlow>[0]>): Paramet
     onStartFromPreview: vi.fn(),
     onPlayAgain: vi.fn(),
     onShowLeaderboard: vi.fn(),
+    onShowStats: vi.fn(),
     onShowChallenges: vi.fn(),
     onClaimIdentity: vi.fn(),
     onGoHome: vi.fn(),

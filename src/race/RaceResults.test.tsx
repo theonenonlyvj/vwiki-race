@@ -79,6 +79,7 @@ function renderResults(overrides: Partial<Parameters<typeof RaceResults>[0]> = {
     onOpenChallenge,
     onPlayAgain: vi.fn(),
     onShowLeaderboard: vi.fn(),
+    onShowStats: vi.fn(),
     onShowChallenges: vi.fn(),
     onClaimIdentity: vi.fn(),
     onGoHome: vi.fn(),
@@ -91,6 +92,26 @@ function renderResults(overrides: Partial<Parameters<typeof RaceResults>[0]> = {
 }
 
 describe("RaceResults: saved result, guest continuity, and sharing hierarchy", () => {
+  it.each(["completed", "dnf"] as const)("offers personal stats before sharing a %s result", async (status) => {
+    const onShowStats = vi.fn();
+    const onPlayAgain = vi.fn();
+    const user = userEvent.setup();
+    renderResults({ outcome: status === "completed" ? completedOutcome() : dnfOutcome(), onShowStats, onPlayAgain });
+    const stats = screen.getByRole("button", { name: "Your stats" });
+    const share = screen.getByRole("region", { name: "Challenge a friend" });
+    expect(stats.compareDocumentPosition(share) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(stats);
+    expect(onShowStats).toHaveBeenCalledOnce();
+    expect(onPlayAgain).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: status === "completed" ? "Play again" : "Try again" }));
+    expect(onPlayAgain).toHaveBeenCalledOnce();
+  });
+
+  it("lands keyboard focus on the completed result summary", () => {
+    renderResults({ outcome: completedOutcome() });
+    expect(screen.getByRole("heading", { name: "Gravity" })).toHaveFocus();
+  });
+
   it("shows a persisted-account receipt and makes the existing result share the friend challenge action", () => {
     renderResults({ outcome: completedOutcome() });
 
@@ -99,6 +120,11 @@ describe("RaceResults: saved result, guest continuity, and sharing hierarchy", (
     expect(within(invitation).getByText(/share your result and the challenge link/i)).toBeVisible();
     expect(within(invitation).getByRole("button", { name: "Share result" })).toBeVisible();
     expect(screen.queryByRole("region", { name: /keep your name and stats/i })).toBeNull();
+  });
+
+  it("explains a saved but uncounted short DNF", () => {
+    renderResults({ outcome: dnfOutcome({ clicks: 1 }) });
+    expect(screen.getByText("Run saved, but not counted as an attempt.")).toBeVisible();
   });
 
   it("does not claim persistence when the result has no persisted run id", () => {

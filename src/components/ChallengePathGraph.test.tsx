@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import ChallengePathGraph, { type ChallengePathRun } from "./ChallengePathGraph";
 
 // GR-1 smoke test: this component's own layout math (x/y placement, label
@@ -43,6 +43,47 @@ const runs: ChallengePathRun[] = [
 ];
 
 describe("ChallengePathGraph", () => {
+  it("keeps one mobile disclosure bar while expanding players and preserving selection", async () => {
+    vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
+      matches: query.includes("max-width"), media: query,
+      addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    })));
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(320);
+    try {
+      const user = userEvent.setup();
+      const { container } = render(<ChallengePathGraph runs={runs} />);
+      const bar = screen.getByRole("button", { name: "Show 3 players" });
+      expect(bar).toHaveAttribute("aria-expanded", "false");
+      expect(document.getElementById(bar.getAttribute("aria-controls")!)).toHaveAttribute("hidden");
+      bar.focus();
+      await user.keyboard("{Enter}");
+      expect(screen.getByRole("button", { name: "Hide 3 players" })).toBe(bar);
+      expect(bar).toHaveFocus();
+      expect(bar).toHaveAttribute("aria-expanded", "true");
+      expect(screen.queryByRole("button", { name: "Hide names" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /^Slow/ }));
+      expect(screen.getByRole("button", { name: /^Slow/ })).toHaveAttribute("aria-pressed", "true");
+      await user.click(bar);
+      expect(screen.getByRole("button", { name: "Show 3 players" })).toBe(bar);
+      expect(screen.queryByRole("button", { name: /^Slow/ })).not.toBeInTheDocument();
+      expect(container.querySelectorAll(".cpg-edge.is-dimmed").length).toBeGreaterThan(0);
+      await user.click(bar);
+      await user.click(screen.getByRole("button", { name: /^Slow/ }));
+      expect(screen.getByRole("button", { name: /^Slow/ })).toHaveAttribute("aria-pressed", "false");
+      expect(container.querySelectorAll(".cpg-edge.is-dimmed")).toHaveLength(0);
+    } finally {
+      cleanup();
+      width.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("preserves the palette's contrast surface independently of the shell theme", () => {
+    const { container } = render(<ChallengePathGraph runs={runs} />);
+    expect(getComputedStyle(container.querySelector(".cpg-root")!).getPropertyValue("--ink").trim()).toBe("#061014");
+  });
+
   it("renders the merged SVG graph with one legend entry per run", () => {
     render(<ChallengePathGraph runs={runs} />);
 
@@ -50,6 +91,31 @@ describe("ChallengePathGraph", () => {
     expect(screen.getByRole("button", { name: /fast/i })).toBeVisible();
     expect(screen.getByRole("button", { name: /slow/i })).toBeVisible();
     expect(screen.getByRole("button", { name: /quitter/i })).toBeVisible();
+  });
+
+  it("exposes every player's ordered article path and result as screen-reader text", () => {
+    render(<ChallengePathGraph runs={runs} />);
+
+    const textPaths = screen.getByRole("region", { name: "Player paths as text" });
+    expect(textPaths).toHaveClass("cpg-visually-hidden");
+
+    const fastPath = within(textPaths).getByRole("article", { name: "Fast path" });
+    expect(within(fastPath).getByText("Finished · 0:03 · 2 clk")).toBeInTheDocument();
+    expect(
+      within(fastPath).getAllByRole("listitem").map((item) => item.textContent),
+    ).toEqual(["Start", "Middle", "Target"]);
+
+    const slowPath = within(textPaths).getByRole("article", { name: "Slow path" });
+    expect(within(slowPath).getByText("Finished · 0:09 · 3 clk")).toBeInTheDocument();
+    expect(
+      within(slowPath).getAllByRole("listitem").map((item) => item.textContent),
+    ).toEqual(["Start", "Other", "Middle", "Target"]);
+
+    const quitterPath = within(textPaths).getByRole("article", { name: "Quitter path" });
+    expect(within(quitterPath).getByText("Did not finish · 0:05 · 2 clk")).toBeInTheDocument();
+    expect(
+      within(quitterPath).getAllByRole("listitem").map((item) => item.textContent),
+    ).toEqual(["Start", "Other", "Dead End"]);
   });
 
   it("draws one strand per hop across every run - a 2-hop + 3-hop + 2-hop fixture draws 7 strands", () => {

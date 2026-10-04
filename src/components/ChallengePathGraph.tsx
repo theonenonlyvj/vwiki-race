@@ -950,19 +950,6 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
   // Declared above the measurement effect because expanding the legend moves
   // the canvas's top edge, so the effect depends on it.
   const [legendOpen, setLegendOpen] = useState(false);
-  // Toggling the legend UNMOUNTS the button that was just activated, which
-  // drops keyboard focus to <body> - a keyboard user loses their place and has
-  // to tab in from the top of the dialog again. Move focus onto the control
-  // that replaced it.
-  const legendToggleRef = useRef<HTMLButtonElement | null>(null);
-  const legendHideRef = useRef<HTMLButtonElement | null>(null);
-  const [focusLegendControl, setFocusLegendControl] = useState<"show" | "hide" | null>(null);
-  useEffect(() => {
-    if (!focusLegendControl) return;
-    const target = focusLegendControl === "hide" ? legendHideRef.current : legendToggleRef.current;
-    target?.focus();
-    setFocusLegendControl(null);
-  }, [focusLegendControl, legendOpen]);
   useEffect(() => {
     if (!isNarrow) {
       setSheet(null);
@@ -1124,7 +1111,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
         width: graph.svgWidth,
         height: graph.svgHeight,
         background: INK,
-        fontFamily: '"Merriweather", ui-serif, Georgia, serif',
+        fontFamily: '"Manrope Variable", system-ui, sans-serif',
         caption: isPortrait
           ? "down = % through each player's own path"
           : "position = % through each player's own path — not click count",
@@ -1231,7 +1218,8 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
     <div className={`cpg-root${isPortrait ? " is-portrait" : ""}`}>
       <style>{`
         .cpg-root {
-          font-family: var(--viota-ui-font, "Merriweather", ui-serif, Georgia, serif);
+          --ink: #061014; /* calibrated strand contrast, independent of shell */
+          font-family: var(--viota-ui-font, "Manrope Variable", system-ui, sans-serif);
           color: var(--text, #eef7f8);
           background: var(--ink, #061014);
           border: 1px solid var(--line, #295159);
@@ -1321,11 +1309,17 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
           white-space: nowrap;
           border: 0;
         }
+        .cpg-legend-disclosure {
+          border: 1px solid var(--line, #295159);
+          border-radius: 16px;
+          margin-bottom: 10px;
+        }
+        .cpg-legend[hidden] { display: none; }
         .cpg-legend-bar {
           display: flex;
           align-items: center;
           gap: 8px;
-          margin: 0 0 10px;
+          margin: 0;
         }
         .cpg-legend-toggle {
           display: flex;
@@ -1339,8 +1333,8 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
           font-size: 0.78rem;
           color: var(--text-bright, #dffbfb);
           background: none;
-          border: 1px solid var(--line, #295159);
-          border-radius: 999px;
+          border: 0;
+          border-radius: 16px;
           cursor: pointer;
         }
         .cpg-legend-swatches {
@@ -1364,11 +1358,15 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
           margin-left: auto;
           color: var(--muted, #9fb8bd);
         }
+        .cpg-legend-toggle[aria-expanded="true"]::after {
+          content: "▴";
+        }
         /* Expanded on a phone: one player per row reads far better than the
            desktop's wrap-as-you-go flow at 390px. */
         .cpg-root.is-portrait .cpg-legend {
           gap: 2px 10px;
-          margin-bottom: 10px;
+          margin: 0;
+          padding: 0 10px 10px;
           max-height: 46vh;
           overflow-y: auto;
         }
@@ -1613,23 +1611,16 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
         }
       `}</style>
 
-      {/* GR-2: on a phone the full legend measured 638px of an 844px viewport
-          - 76% of the screen, pushing the graph itself below the fold. It
-          collapses to a one-row strip of strand swatches that still says who
-          is here and still resets focus; the full list is one tap away, and
-          the shared PNG always carries the complete legend regardless of what
-          is expanded on screen. */}
-      {isPortrait && !legendOpen ? (
+      {/* Keep the mobile disclosure mounted so expansion preserves its position
+          and keyboard focus. The exported graph always includes every player. */}
+      <div className={isPortrait ? "cpg-legend-disclosure" : undefined}>
+      {isPortrait ? (
         <div className="cpg-legend-bar">
           <button
             type="button"
             className="cpg-legend-toggle"
-            ref={legendToggleRef}
-            onClick={() => {
-              setLegendOpen(true);
-              setFocusLegendControl("hide");
-            }}
-            aria-expanded={false}
+            onClick={() => setLegendOpen((open) => !open)}
+            aria-expanded={legendOpen}
             aria-controls={LEGEND_LIST_ID}
           >
             <span className="cpg-legend-swatches" aria-hidden="true">
@@ -1650,41 +1641,21 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                 swatch strip beside it is decorative (aria-hidden) - it repeats
                 colours the list already carries. */}
             <span className="cpg-legend-count">
-              Show {orderedRuns.length} {orderedRuns.length === 1 ? "player" : "players"}
+              {legendOpen ? "Hide" : "Show"} {orderedRuns.length} {orderedRuns.length === 1 ? "player" : "players"}
             </span>
           </button>
-          {activePlayer ? (
-            <button type="button" className="cpg-reset-chip" onClick={clearFocus}>
-              Show all
-            </button>
-          ) : null}
         </div>
-      ) : (
-      <ul className="cpg-legend" id={LEGEND_LIST_ID}>
-        <li className="cpg-legend-item">
-          <button
-            type="button"
-            className="cpg-reset-chip"
-            onClick={clearFocus}
-            aria-pressed={activePlayer === null}
-          >
-            Show all
-          </button>
-        </li>
-        {isPortrait ? (
+      ) : null}
+      <ul className="cpg-legend" id={LEGEND_LIST_ID} hidden={isPortrait && !legendOpen}>
+        {!isPortrait ? (
           <li className="cpg-legend-item">
             <button
               type="button"
               className="cpg-reset-chip"
-              ref={legendHideRef}
-              onClick={() => {
-                setLegendOpen(false);
-                setFocusLegendControl("show");
-              }}
-              aria-expanded
-              aria-controls={LEGEND_LIST_ID}
+              onClick={clearFocus}
+              aria-pressed={activePlayer === null}
             >
-              Hide names
+              Show all
             </button>
           </li>
         ) : null}
@@ -1705,7 +1676,11 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                 onPointerLeave={() => hoverOff(run.player)}
                 onFocus={() => hoverOn(run.player)}
                 onBlur={() => hoverOff(run.player)}
-                onClick={() => togglePin(run.player)}
+                onClick={() => {
+                  togglePin(run.player);
+                  // A touch can leave hover/focus active after unpinning.
+                  if (isPortrait) setHoveredPlayer(null);
+                }}
               >
                 {/* GR-2: the chip is the only thing mapping a name to a
                     strand, so past the 7 distinct hues it has to carry the
@@ -1735,7 +1710,34 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
           );
         })}
       </ul>
-      )}
+      </div>
+
+      {/* The SVG intentionally behaves as one image, so its pointer-only node
+          tooltips cannot be the only way to read a route. Keep a complete
+          semantic transcript in the same graph disclosure without adding a
+          second visible control on narrow screens. */}
+      <section className="cpg-visually-hidden" aria-label="Player paths as text">
+        <h2>Player paths as text</h2>
+        {orderedRuns.map((run) => {
+          const articleTitles = run.steps.length > 0
+            ? [run.steps[0].from, ...run.steps.map((step) => step.to)]
+            : [];
+          return (
+            <article key={run.player} aria-label={`${run.player} path`}>
+              <h3>{run.player}</h3>
+              <p>
+                {run.status === "completed" ? "Finished" : "Did not finish"}
+                {` · ${formatTimeAndClicks(run.elapsedMs, run.clicks)}`}
+              </p>
+              <ol>
+                {articleTitles.map((title, index) => (
+                  <li key={`${index}-${title}`}>{title}</li>
+                ))}
+              </ol>
+            </article>
+          );
+        })}
+      </section>
 
       <div className="cpg-scroll-wrap" ref={shellRef}>
         <div className="cpg-scroll" ref={scrollRef} onScroll={scrollMode ? handleScroll : undefined}>
@@ -1878,7 +1880,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                         // (--viota-ui-font), not the display font.
                         fontWeight={600}
                         fill="var(--ink, #061014)"
-                        fontFamily="var(--viota-ui-font, Merriweather, ui-serif, Georgia, serif)"
+                        fontFamily="var(--viota-ui-font, Manrope Variable, system-ui, sans-serif)"
                         pointerEvents="none"
                       >
                         {node.visitorCount}
@@ -1892,7 +1894,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                         textAnchor="middle"
                         fontSize={12}
                         fill="var(--ink, #061014)"
-                        fontFamily="var(--viota-ui-font, Merriweather, ui-serif, Georgia, serif)"
+                        fontFamily="var(--viota-ui-font, Manrope Variable, system-ui, sans-serif)"
                         // NV-1: capped at 600 (was 700).
                         fontWeight={600}
                         pointerEvents="none"
@@ -1938,7 +1940,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                       textAnchor="middle"
                       fontSize={node.fontSize}
                       fontWeight={node.isStart || isTarget ? 600 : 500}
-                      fontFamily="var(--viota-ui-font, Merriweather, ui-serif, Georgia, serif)"
+                      fontFamily="var(--viota-ui-font, Manrope Variable, system-ui, sans-serif)"
                       fill={labelColor}
                       paintOrder="stroke"
                       stroke="var(--ink, #061014)"
@@ -2028,7 +2030,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
                         textAnchor="middle"
                         fontSize={13}
                         fill="var(--text-bright, #dffbfb)"
-                        fontFamily="var(--viota-ui-font, Merriweather, ui-serif, Georgia, serif)"
+                        fontFamily="var(--viota-ui-font, Manrope Variable, system-ui, sans-serif)"
                       >
                         {calloutText}
                       </text>
@@ -2049,7 +2051,7 @@ export default function ChallengePathGraph({ runs }: { runs: ChallengePathRun[] 
               fontSize={11}
               fill="var(--muted, #9fb8bd)"
               opacity={0.8}
-              fontFamily="var(--viota-ui-font, Merriweather, ui-serif, Georgia, serif)"
+              fontFamily="var(--viota-ui-font, Manrope Variable, system-ui, sans-serif)"
             >
               {isPortrait
                 ? "down = % through each player's own path"

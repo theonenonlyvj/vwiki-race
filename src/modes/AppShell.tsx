@@ -376,6 +376,7 @@ export default function AppShell({
       <section className="content-shell">
         {visibleMode === "home" ? (
           <Home
+            onClaimIdentity={onClaimIdentity}
             accountStats={accountStats}
             apiClient={apiClient}
             catalogStatus={catalogStatus}
