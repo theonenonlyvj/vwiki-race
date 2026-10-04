@@ -7,7 +7,7 @@ artwork and turquoise accent remain. “Somewhere” uses the real italic font.
 Font licenses are retained in `public/licenses/`.
 
 Home explains the game once. The redundant teaching strip remains available on
-Challenge Detail; full rules remain accessible from the permanent footer. The
+Challenge Detail; full rules are accessible inline after the Home explanation and from the permanent footer. The
 footer labels are How to play, Feedback and More games, with larger text and
 comfortable touch targets. External destinations are unchanged.
 
@@ -22,6 +22,20 @@ the actual destination.
 The graph retains Manrope locally so its measured labels and PNG export remain
 consistent. Article typography, scoring, timing, session recovery, disclosure
 rules, challenge generation and backend contracts are unchanged.
+
+## Detailed rules entry
+
+The inline How to play control follows “Fastest time wins.” in the same
+paragraph. It opens the shared rules dialog without starting a run. The dialog
+covers goals, allowed links, decision-time scoring, fair play, DNF finality,
+recovery, dailies, identity and solution disclosure. Confirming I give up can
+reveal routes after an eligible unfinished attempt and makes future runs on that
+challenge unranked; finishing is not the only disclosure path.
+
+The dialog retains the shared focus trap, Escape dismissal and return focus.
+Its content region is keyboard-focusable and scrolls independently, with the
+heading and close control kept visible. The permanent footer and Challenge
+Detail teaching entry reuse the same rules.
 
 ## Verification and limits
 

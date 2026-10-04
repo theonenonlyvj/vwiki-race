@@ -84,6 +84,7 @@ export default function Home({
   onRaceChallenge,
   onRetryCatalog,
   onShowChallenges,
+  onShowHowToPlay,
   playAnotherSuggestion,
   raceBusy,
   randomChallengeBusy,
@@ -114,6 +115,7 @@ export default function Home({
   identitySession: VGamesIdentitySession | null;
   // GR-1 ("View graph"): the bearer token `ChallengePathGraphButton` needs.
   identityToken: string | null;
+  onShowHowToPlay: (trigger: HTMLButtonElement) => void;
   onClaimIdentity?: (mode: "login" | "create") => void;
   onGoToBoards: () => void;
   // RC-05 (Judge B amendment 1): distinct from onGoToBoards (which lands on
@@ -392,7 +394,13 @@ export default function Home({
       <div className="atlas-introduction">
         <div className="atlas-introduction-copy">
           <h2>Every link leads <em>somewhere.</em></h2>
-          <p>Follow Wikipedia links from the start article to the target. Fastest time wins.</p>
+          <p>
+            Follow Wikipedia links from the start article to the target. Fastest time wins.{" "}
+            <button className="link-button home-rules-link" type="button" aria-haspopup="dialog"
+              onClick={(event) => onShowHowToPlay(event.currentTarget)}>
+              How to play
+            </button>
+          </p>
         </div>
         <ConnectionAtlas />
       </div>

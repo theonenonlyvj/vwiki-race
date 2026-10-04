@@ -231,11 +231,8 @@ export default function AppShell({
   // unresolved; only the destructive-path guard (App.tsx) fails safe.
   const showAtRiskDot = guestHasStakes(identitySession, accountStats);
 
-  // QF-05: the footer's permanent "How to play" link - the rules strip
-  // above (TeachingGate) stops rendering for good once the account has a
-  // completed race, so this is the only re-accessible way back to them
-  // afterward. Reuses TeachingGatePopup verbatim rather than forking a
-  // second copy of the rules copy.
+  // Home and the permanent footer share one rules dialog and return focus
+  // to whichever control opened it.
   const [howToPlayOpen, setHowToPlayOpen] = useState(false);
   const howToPlayTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -376,6 +373,10 @@ export default function AppShell({
       <section className="content-shell">
         {visibleMode === "home" ? (
           <Home
+            onShowHowToPlay={(trigger) => {
+              howToPlayTriggerRef.current = trigger;
+              setHowToPlayOpen(true);
+            }}
             onClaimIdentity={onClaimIdentity}
             accountStats={accountStats}
             apiClient={apiClient}

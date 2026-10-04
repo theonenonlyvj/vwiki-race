@@ -68,15 +68,8 @@ export function TeachingGatePopup({
 }) {
   return (
     <ModalDialog
-      // PKG-12 (council 2026-07-19, judge A/owner-proxy): this used to also
-      // carry `identity-dialog` so it could borrow that class's box styling
-      // - but `.modal-backdrop:has(.identity-dialog)` (styles.css) is an
-      // iOS-keyboard-bug fix scoped to the real "Save your stats" dialog,
-      // and matching it here top-anchored this 3-line quick-dismiss popup
-      // with a half-viewport dead zone below it on mobile (mockup-02-howto
-      // vs mobile-02-howto). `.teaching-gate-dialog` now has its own,
-      // lighter rules (styles.css, modeled on `.recovery-notice`) instead
-      // of wearing the signup-form dialog's full chrome.
+      // Keep rules separate from the identity form; the body scrolls while
+      // the heading and close control remain available.
       className="teaching-gate-dialog"
       onClose={onClose}
       returnFocusRef={returnFocusRef}
@@ -94,27 +87,68 @@ export function TeachingGatePopup({
         </button>
       </div>
 
-      {pairChallenge ? (
-        <p>
-          e.g. get from <strong>{pairChallenge.start.title}</strong> to{" "}
-          <strong>{pairChallenge.target.title}</strong>.
-        </p>
-      ) : null}
-      <p>Only links inside the article count — no search, no back button cheese.</p>
-      <p>Fastest time wins; fewest clicks breaks ties.</p>
-      {/* PKG-07 (council 2026-07-19, owner-proxy ruling (b)): the popup
-          never established cadence at all - a first-time reader had no way
-          to learn there even IS a daily rhythm to keep up with, distinct
-          from the already-shipped Results-screen ritual hook (RaceResults'
-          "Day 1 · New daily drops 5:00 AM — come defend your spot", a
-          first-finish-only trigger, not persistent teaching copy). */}
-      <p>A new pair drops every day at 5:00 AM Central — keep your streak alive.</p>
-      {/* QF-05: the flavor badge ("Recognizable"/"Weird"/"Hard") shows up
-          everywhere a daily does (Home, Boards, Browse, Preview, in-race/
-          Results kicker) with zero explanation of what it means until now -
-          wording matches `dailyFlavorLabel`'s actual output
-          (domain/dailyEditorial.ts), not a synonym. */}
-      <p>Recognizable picks Monday–Friday, Hard weekends — the badge tells you which.</p>
+      <div className="rules-content" role="region" aria-label="Game rules" tabIndex={0}>
+        <section>
+          <h3>The goal</h3>
+          {pairChallenge ? (
+            <p>Get from <strong>{pairChallenge.start.title}</strong> to{" "}
+              <strong>{pairChallenge.target.title}</strong> by following article links.</p>
+          ) : <p>Get from the start article to the target by following article links.</p>}
+          <p>Preview the target before you start. Browsing and previews do not start the clock.
+            Choose Start race when you are ready. You finish when you click through to the target;
+            spotting its name on a page is not enough. A link that redirects to the target counts.</p>
+        </section>
+        <section>
+          <h3>Allowed moves</h3>
+          <p>Use the clickable Wikipedia article links shown inside the game: the lead, main text,
+            infoboxes, and tables or lists within the article. Each accepted article-to-article
+            move adds a click, including a redirect.</p>
+          <p>No search, browser Back or Forward, or typing a different article address.
+            You may revisit an article only by following a valid link from your current page.</p>
+          <p>External links, categories, language links, files, citations, navigation boxes,
+            and the See also, References, Further reading, and External links sections are
+            outside the playable surface. Jumping to a heading within your current article
+            does not count as a move.</p>
+        </section>
+        <section>
+          <h3>Time and ranking</h3>
+          <p>Fastest time wins; fewest clicks breaks ties. If both match, the earlier accepted
+            finish ranks first. The challenge board uses your best eligible finish. Players can
+            start at different times.</p>
+          <p>The clock measures time spent choosing your next link. It starts when the start
+            article is ready and pauses while a move is processed. Loading and saving moves
+            do not count. The next article resumes the clock; reaching the target stops it.</p>
+        </section>
+        <section>
+          <h3>Fair play</h3>
+          <p>Fair play uses the honor system. Find the route yourself. During a run, do not
+            use browser Find, search engines,
+            other Wikipedia tabs, outside help, AI hints, scripts, or developer tools.
+            Do not edit Wikipedia to create a shortcut. Opening a source article in another tab
+            does not count as a race move or pause your clock.</p>
+        </section>
+        <section>
+          <h3>Ending a run</h3>
+          <p>Stuck at a dead end? There is no free jump or backtrack. Keep looking for a valid
+            link, or choose End Run. An ended run is a DNF (did not finish) and cannot be resumed.
+            Try again starts a fresh attempt with a new clock. If you end before making two
+            accepted clicks, it does not count as an attempt or appear on the board.</p>
+          <p>If you reload, the game can recover a still-active run from its last saved move.
+            A failed move adds no accepted click. You can retry a challenge and compare your
+            attempts in your history.</p>
+        </section>
+        <section>
+          <h3>Dailies and results</h3>
+          <p>The daily is scheduled for 5:00 AM Central. Recognizable picks run Monday through
+            Friday, with Hard picks on weekends. You can also play older challenges or create
+            a start-and-target pair to share.</p>
+          <p>Rankings and names remain visible before you finish. Times, clicks, and other players'
+            routes unlock when you finish the challenge.
+            After an eligible unfinished attempt, you can instead confirm I give up to reveal
+            the solution and routes. That choice makes your future runs on that challenge unranked. Log in to keep your history across devices, or
+            choose Guest and secure that guest account later to keep its history.</p>
+        </section>
+      </div>
     </ModalDialog>
   );
 }

@@ -364,14 +364,14 @@ ol {
   line-height: 0.9;
 }
 
-/* PKG-12 (council 2026-07-19): the how-to-play popup's own box - deliberately
-   not `.identity-dialog` (see TeachingGate.tsx's comment). Modeled on
-   `.recovery-notice`'s already-lighter treatment (no shadow, smaller clip,
-   ui-font) rather than a second competing "lightweight dialog" pattern, so a
-   3-line tip stops wearing signup-form chrome (spec calls this a
-   "quick-dismiss popup"). */
+/* Shared detailed rules: fixed heading, independently scrolling content. */
 .teaching-gate-dialog {
-  width: min(440px, 100%);
+  width: min(620px, 100%);
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--line);
   background: var(--ink-raised);
   color: var(--text);
@@ -4571,3 +4571,10 @@ button.trend-row-toggle:not(:disabled):focus-visible {
     transform: scaleX(1);
   }
 }
+
+.teaching-gate-dialog .identity-dialog-heading { flex-shrink: 0; padding-bottom: 12px; }
+.rules-content { overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+.rules-content section + section { margin-top: 20px; }
+.rules-content h3 { font-size: 1.1rem; margin: 0 0 8px; }
+.rules-content p { line-height: 1.5; margin: 0 0 10px; }
+.home-rules-link { font: inherit; white-space: nowrap; }

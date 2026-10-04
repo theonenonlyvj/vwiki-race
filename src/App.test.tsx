@@ -7333,6 +7333,33 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
     expect(screen.queryByText(/two articles\. links only\. beat the clock\./i)).toBeNull();
   });
 
+  it("opens detailed rules inline without starting a race and returns keyboard focus", async () => {
+    const user = userEvent.setup();
+    const fetchImpl = createFetchMock({ challenges: twoChallenges() });
+    render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+    await screen.findByRole("button", { name: /▶ race/i });
+    const intro = document.querySelector(".atlas-introduction-copy") as HTMLElement;
+    const trigger = within(intro).getByRole("button", { name: "How to play" });
+    expect(trigger.parentElement).toHaveTextContent(
+      "Follow Wikipedia links from the start article to the target. Fastest time wins. How to play",
+    );
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    const dialog = await screen.findByRole("dialog", { name: "How to play" });
+    for (const name of ["The goal", "Allowed moves", "Time and ranking", "Fair play", "Ending a run", "Dailies and results"]) {
+      expect(within(dialog).getByRole("heading", { name })).toBeVisible();
+    }
+    expect(within(dialog).getByText(/loading and saving moves do not count/i)).toBeVisible();
+    expect(within(dialog).getByText(/cannot be resumed/i)).toBeVisible();
+    expect(within(dialog).getByText(/future runs on that challenge unranked/i)).toBeVisible();
+    await user.keyboard("{Tab}");
+    expect(within(dialog).getByRole("region", { name: "Game rules" })).toHaveFocus();
+    expect(fetchImpl.mock.calls.some(([url]) => String(url).includes("/runs/start"))).toBe(false);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "How to play" })).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
   it("opens the teaching gate's how-to-play popup with today's real pair, links-only definition, and tie-break, and dismisses it", async () => {
     const todayChallenge = dailyChallenge("challenge-0001", {
       dailyDate: "2026-07-17",
@@ -7357,13 +7384,13 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
     const dialog = await screen.findByRole("dialog", { name: /how to play/i });
     expect(within(dialog).getByText(/get from/i)).toHaveTextContent(/apple/i);
     expect(within(dialog).getByText(/fruit/i)).toBeVisible();
-    expect(within(dialog).getByText(/no search, no back button cheese/i)).toBeVisible();
+    expect(within(dialog).getByText(/no search, browser Back or Forward/i)).toBeVisible();
     expect(within(dialog).getByText(/fastest time wins; fewest clicks breaks ties/i)).toBeVisible();
     // QF-05: the flavor-badge legend - wording matches `dailyFlavorLabel`'s
     // actual on-screen output ("Recognizable"/"Weird"/"Hard"), not a
     // synonym.
     expect(
-      within(dialog).getByText(/recognizable picks monday.{1,3}friday, hard weekends/i),
+      within(dialog).getByText(/Recognizable picks run Monday through Friday, with Hard picks on weekends/i),
     ).toBeVisible();
 
     await user.click(within(dialog).getByRole("button", { name: /close how to play/i }));
@@ -7382,7 +7409,7 @@ describe("Home v2: stateful daily hub + teaching gate (Increment 2 Task 2)", () 
     const footer = document.querySelector(".site-footer") as HTMLElement;
     await user.click(within(footer).getByRole("button", { name: /how to play/i }));
     const dialog = await screen.findByRole("dialog", { name: /how to play/i });
-    expect(within(dialog).getByText(/no search, no back button cheese/i)).toBeVisible();
+    expect(within(dialog).getByText(/no search, browser Back or Forward/i)).toBeVisible();
 
     await user.click(within(dialog).getByRole("button", { name: /close how to play/i }));
     expect(screen.queryByRole("dialog", { name: /how to play/i })).toBeNull();
@@ -7886,7 +7913,7 @@ describe("PKG-07 (council 2026-07-19, owner-proxy ruling): daily ritual identity
     await user.click(within(strip).getByRole("button", { name: /how to play/i }));
     const dialog = await screen.findByRole("dialog", { name: /how to play/i });
     expect(
-      within(dialog).getByText(/a new pair drops every day at 5:00 am central.*keep your streak alive/i),
+      within(dialog).getByText(/the daily is scheduled for 5:00 am central/i),
     ).toBeVisible();
   });
 });
