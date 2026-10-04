@@ -4653,6 +4653,33 @@ describe("VWiki Race app", () => {
   });
 
   describe("Bottom-nav mode shell (Increment 2)", () => {
+    it("returns Home from Stats when the wordmark is clicked", async () => {
+      const user = userEvent.setup();
+      const fetchImpl = createFetchMock();
+      render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={claimedStorage()} />);
+      const nav = await screen.findByRole("navigation", { name: /vwiki race views/i });
+      await user.click(within(nav).getByRole("button", { name: "Stats" }));
+      const logo = screen.getByRole("link", { name: "VWiki Race home" });
+      expect(logo).toHaveAttribute("href", "/");
+      await user.click(logo);
+      expect(within(nav).getByRole("button", { name: "Home" })).toHaveAttribute("aria-pressed", "true");
+      expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
+      expect(fetchImpl.mock.calls.some(([url]) => String(url).includes("/runs/start"))).toBe(false);
+    });
+
+    it("returns Home by keyboard from a shared challenge and clears its URL", async () => {
+      window.history.replaceState({}, "", "/?challenge=challenge-0002");
+      const user = userEvent.setup();
+      render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock({ challenges: twoChallenges() })} storage={claimedStorage()} />);
+      await screen.findByRole("region", { name: /challenge detail/i });
+      const logo = screen.getByRole("link", { name: "VWiki Race home" });
+      logo.focus();
+      await user.keyboard("{Enter}");
+      expect(window.location.search).toBe("");
+      expect(screen.queryByRole("region", { name: /challenge detail/i })).toBeNull();
+      expect(await screen.findByRole("button", { name: /▶ race/i })).toBeVisible();
+    });
+
     it("renders exactly the four modes and switches between them", async () => {
       const user = userEvent.setup();
       render(<App apiOrigin={apiOrigin} fetchImpl={createFetchMock()} storage={claimedStorage()} />);

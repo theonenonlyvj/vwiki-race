@@ -287,10 +287,19 @@ export default function AppShell({
             nested) to match the identity-dialog / admin-heading kicker
             pattern elsewhere, so the h1's accessible name stays "VWiki
             Race" unchanged. */}
-        <div className="brand-lockup" aria-label="VWiki Race">
+        <a
+          className="brand-lockup brand-home-link"
+          href="/"
+          aria-label="VWiki Race home"
+          onClick={(event) => {
+            if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            onSelectMode("home");
+          }}
+        >
           <span className="vwiki-mark">VGames</span>
           <h1>VWiki Race</h1>
-        </div>
+        </a>
 
         {/* Desktop pass (FIX 2): ONE nav element for both breakpoints.
             Below 880px CSS pins it fixed to the viewport bottom (the
