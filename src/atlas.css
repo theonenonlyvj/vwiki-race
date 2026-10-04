@@ -221,3 +221,20 @@ input, select, textarea { border-radius: 8px; }
 @media (min-width: 481px) and (max-width: 879px) and (min-height: 501px) and (max-height: 700px) {
   .home-layout .daily-hero .player-gate { order: 0; }
 }
+
+/* Challenge arrival carries the same article-led typography as Home. */
+.challenge-detail .challenge-hero { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(240px, .8fr); padding: clamp(18px, 3vw, 32px); border: 1px solid var(--line); border-radius: 20px; background: var(--ink-raised); gap: 28px; }
+.challenge-journey { display: grid; grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr); gap: 16px; align-items: center; }
+.challenge-journey > div { display: grid; gap: 8px; min-width: 0; }
+.challenge-journey .muted { font-size: .85rem; }
+.challenge-detail .challenge-journey strong { font-family: var(--display-font); font-size: clamp(1.45rem, 3vw, 2.25rem); font-weight: 500; line-height: 1.15; overflow-wrap: anywhere; }
+.challenge-intent h2 { font-size: 1.15rem; margin: 0; }
+.challenge-intent > p { margin: 0; max-width: 44ch; }
+.challenge-detail .challenge-intent { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 12px; }
+.challenge-intent .graph-trigger { background: var(--cyan); color: #000; padding: 12px 20px; border-radius: 10px; font-weight: 700; }
+.challenge-best { font-weight: 600; }
+.board-awaiting-daily { padding-block: 24px; }
+@media (max-width: 600px) {
+  .challenge-detail .challenge-hero { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .challenge-journey { gap: 10px; }
+}

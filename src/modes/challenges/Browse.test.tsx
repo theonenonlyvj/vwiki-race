@@ -298,7 +298,7 @@ describe("Browse: full card spec (Increment 5)", () => {
     expect(within(card).queryByText(/best 0:38/i)).toBeNull();
     expect(within(card).getByText("5 players")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: /^past dailies$/i }));
+    await user.selectOptions(screen.getByRole("combobox", { name: /^daily date$/i }), "2026-07-17");
     const archive = screen.getByRole("region", { name: /past daily archive/i });
     expect(within(archive).queryByText(/not played|unfinished|completed/i)).toBeNull();
   });
@@ -468,29 +468,18 @@ describe("Browse: past daily archive", () => {
   const july17 = pastDaily("daily-0717", "2026-07-17", "Moon", "Tide");
   const today = pastDaily("daily-0718", "2026-07-18", "Coffee", "Flood");
 
-  it("shows only past dailies newest-first and navigates to a selected date", async () => {
+  it("has one catalog with an optional Daily date lookup, without All/Dailies tabs", async () => {
     const user = userEvent.setup();
-    renderBrowse({
-      challenges: [july15, challengeOne, today, july17, july16],
-      heroSelection: { challenge: today, kind: "today-daily" },
-    });
-
-    await user.click(screen.getByRole("button", { name: /^past dailies$/i }));
-
+    renderBrowse({ challenges: [july15, challengeOne, today, july17, july16], heroSelection: { challenge: today, kind: "today-daily" } });
+    expect(screen.queryByRole("navigation", { name: "Challenge filters" })).toBeNull();
+    expect(screen.getByRole("button", { name: /apple.*fruit/i })).toBeVisible();
+    await user.selectOptions(screen.getByRole("combobox", { name: /^daily date$/i }), "2026-07-15");
     const archive = screen.getByRole("region", { name: /past daily archive/i });
-    expect(within(archive).getByText("Pick a date to race or revisit.")).toBeVisible();
-    const cards = within(archive).getAllByRole("button", { name: /→/ });
-    expect(cards.map((card) => card.textContent)).toEqual([
-      expect.stringContaining("Moon"),
-      expect.stringContaining("Oak"),
-      expect.stringContaining("Saturn"),
-    ]);
-    expect(within(archive).queryByText("Coffee")).toBeNull();
-    expect(within(archive).queryByText("Apple")).toBeNull();
-
-    await user.selectOptions(screen.getByRole("combobox", { name: /past daily date/i }), "2026-07-15");
     expect(within(archive).getByRole("button", { name: /saturn.*rings/i })).toBeVisible();
-    expect(within(archive).queryByRole("button", { name: /moon.*tide/i })).toBeNull();
+    expect(within(archive).getByText("Daily 7/15/26")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /moon.*tide|apple.*fruit|coffee.*flood/i })).toBeNull();
+    await user.selectOptions(screen.getByRole("combobox", { name: /^daily date$/i }), "all");
+    expect(screen.getByRole("button", { name: /apple.*fruit/i })).toBeVisible();
   });
 
   it("uses explicit completed, unfinished, and not-played states", async () => {
@@ -507,10 +496,12 @@ describe("Browse: past daily archive", () => {
       identityToken: "jwt-claimed",
     });
 
-    await user.click(screen.getByRole("button", { name: /^past dailies$/i }));
+    await user.selectOptions(screen.getByRole("combobox", { name: /^daily date$/i }), "2026-07-17");
 
     expect(await screen.findByText("Completed · 0:42 · 6 clk")).toBeVisible();
+    await user.selectOptions(screen.getByRole("combobox", { name: /^daily date$/i }), "2026-07-16");
     expect(screen.getByText("Unfinished")).toBeVisible();
+    await user.selectOptions(screen.getByRole("combobox", { name: /^daily date$/i }), "2026-07-15");
     expect(screen.getByText("Not played")).toBeVisible();
   });
 
@@ -518,7 +509,7 @@ describe("Browse: past daily archive", () => {
     const user = userEvent.setup();
     const { onOpenChallenge } = renderBrowse({ challenges: [july17] });
 
-    await user.click(screen.getByRole("button", { name: /^past dailies$/i }));
+    await user.selectOptions(screen.getByRole("combobox", { name: /^daily date$/i }), "2026-07-17");
     await user.click(screen.getByRole("button", { name: /moon.*tide/i }));
 
     expect(onOpenChallenge).toHaveBeenCalledWith(july17.id);

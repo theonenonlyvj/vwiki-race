@@ -5,6 +5,7 @@ import LeaderboardList from "../../components/LeaderboardList";
 import StagedLoadingNotice from "../../components/StagedLoadingNotice";
 import TheSolution from "../../components/TheSolution";
 import WinningPathChain from "../../components/WinningPathChain";
+import { challengeHeading, humanChallengeCreator } from "../../domain/challengePresentation";
 import { dailyBadgeLabel } from "../../domain/challengeSelection";
 import { formatTimeAndClicks } from "../../domain/formatting";
 import { pathStepsToChain } from "../../domain/winningPath";
@@ -155,25 +156,26 @@ export default function ChallengeDetail({
   // already-fully-rendered screen, not load-bearing content - a failed
   // fetch just means neither renders this pass, same as `outcome`
   // defaulting to `undefined` (unauthenticated, or never touched).
-  const [outcome, setOutcome] = useState<ChallengeOutcomeEntry | undefined>(undefined);
+  const [outcomeLoad, setOutcomeLoad] = useState<{
+    token: string; challengeId: string; outcome?: ChallengeOutcomeEntry; failed?: boolean;
+  } | null>(null);
   const [outcomeRefreshToken, setOutcomeRefreshToken] = useState(0);
   useEffect(() => {
-    if (!identityToken) {
-      setOutcome(undefined);
-      return;
-    }
+    if (!identityToken) { setOutcomeLoad(null); return; }
     let cancelled = false;
-    void apiClient.getAccountChallengeOutcomes(identityToken)
+    const token = identityToken;
+    const challengeId = challenge.id;
+    setOutcomeLoad(null);
+    void apiClient.getAccountChallengeOutcomes(token)
       .then((outcomes) => {
-        if (!cancelled) {
-          setOutcome(outcomes.find((entry) => entry.challengeId === challenge.id));
-        }
+        if (!cancelled) setOutcomeLoad({ token, challengeId, outcome: outcomes.find(entry => entry.challengeId === challengeId) });
       })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
+      .catch(() => { if (!cancelled) setOutcomeLoad({ token, challengeId, failed: true }); });
+    return () => { cancelled = true; };
   }, [apiClient, identityToken, challenge.id, outcomeRefreshToken]);
+  // Account and challenge keys prevent stale progress or reveal access on navigation.
+  const currentOutcome = outcomeLoad?.token === identityToken && outcomeLoad?.challengeId === challenge.id ? outcomeLoad : null;
+  const outcome = currentOutcome?.outcome;
   const peeked = Boolean(outcome?.peeked);
   const showGiveUp = Boolean(outcome?.giveUpEligible) && !peeked;
 
@@ -194,7 +196,13 @@ export default function ChallengeDetail({
   // path"/"View graph" - "before I finish the race, I shouldn't be able to
   // see how long or # clicks on the leaderboard, just rankings and
   // usernames."
-  const pathsUnlocked = yourRows.some((row) => row.status === "completed") || peeked;
+  const finished = yourRows.some((row) => row.status === "completed") || outcome?.outcome === "completed";
+  const pathsUnlocked = finished || peeked;
+  const unfinished = outcome?.outcome === "dnf" || yourRows.some(row => row.status === "abandoned");
+  const progressPending = Boolean(identityToken) && (!currentOutcome || leaderboardStatus === "loading");
+  const progressFailed = Boolean(currentOutcome?.failed) || leaderboardStatus === "error";
+  const intentTitle = peeked ? "The routes are open." : finished ? "You found your way." : progressPending ? "Checking your progress…" : progressFailed ? "Choose your next move." : unfinished ? "A different path might get you there." : "Find your way there.";
+  const raceLabel = peeked ? "Practice this race" : finished ? "Race again" : unfinished ? "Try again" : "Preview this race";
   // DT-1 (owner-proxy ruling, "anything else" (b)): a lone completed
   // attempt that's ALSO this account's placement on the main board above is
   // pure duplication - same rank/time/clicks shown twice, once per panel.
@@ -226,58 +234,31 @@ export default function ChallengeDetail({
         ← Challenges
       </button>
 
-      {/* PKG-09: title block + Race CTA co-wrapped in one `.route-header`
-          grid parent (mirroring Home's `.daily-hero` + `.daily-hero-copy`
-          structure) - before this, the two were bare siblings, so the CTA
-          had nothing to dock beside and just floated in dead space below
-          the title at desktop widths. */}
-      <div className="route-header">
+      <div className="route-header challenge-hero">
         <div className="challenge-route" aria-label="Current challenge">
           <div className="challenge-meta">
-            <span>{challenge.label ?? challenge.id}</span>
-            {dailyBadge ? <span className="daily-badge">{dailyBadge}</span> : null}
+            <span>{challengeHeading(challenge)}</span>
+            {humanChallengeCreator(challenge) ? <span>Created by {humanChallengeCreator(challenge)}</span> : null}
           </div>
-          <strong>
-            {challenge.start.title} {"→"} {challenge.target.title}
-          </strong>
-          {challenge.createdBy ? (
-            <em>Created by {challenge.createdBy.displayName}</em>
-          ) : null}
+          <div className="challenge-journey" aria-label={`Start article: ${challenge.start.title}. Target article: ${challenge.target.title}.`}>
+            <div><span className="muted">Start</span><strong>{challenge.start.title}</strong></div>
+            <span className="route-arrow" aria-hidden="true">→</span>
+            <div><span className="muted">Target</span><strong>{challenge.target.title}</strong></div>
+          </div>
           {isPastDaily && onPlayTodaysDaily ? (
-            <button
-              className="link-button"
-              onClick={onPlayTodaysDaily}
-              type="button"
-            >
-              Play today&apos;s daily ›
-            </button>
+            <button className="link-button" onClick={onPlayTodaysDaily} type="button">Play today&apos;s daily ›</button>
           ) : null}
         </div>
-
-        <div className="player-gate">
-          {/* PKG-04 (owner-proxy ruling): opening the preview is non-committal
-              (invariant 3 - no run exists until Start), same action Home's
-              hero and Boards' CTA trigger (App.tsx's openRacePreviewFor) - so
-              it shares their teal `.race-preview-button` class, never coral. */}
-          <button
-            className="race-preview-button"
-            type="button"
-            disabled={raceDisabled}
-            onClick={onRaceThis}
-          >
-            {"▶"} Race
-          </button>
-          {/* "I gave up" (owner spec, 2026-08-02): no in-race button - this
-              muted link-button is the ENTIRE affordance, next to the retry
-              CTA above, gated on a qualifying DNF and not yet peeked. */}
+        <div className="player-gate challenge-intent">
+          <h2>{intentTitle}</h2>
+          <p className="muted">{peeked ? "Explore the paths. Future attempts here are unranked." : finished ? "See how everyone got there, or find another route yourself." : progressPending ? "You can still preview the route." : progressFailed ? "Your progress is unavailable. You can still preview this race." : unfinished ? (showGiveUp ? "Start fresh, or reveal the routes when you're ready to give up your ranked attempts." : "Start fresh and try a different route. Your next attempt can still rank.") : "Follow the links from the start article to the target. Your clock starts only when you press Start."}</p>
+          {finished && outcome?.best ? <p className="challenge-best">Your best: {formatTimeAndClicks(outcome.best.elapsedMs, outcome.best.clickCount)}</p> : null}
+          {pathsUnlocked ? (
+            <ChallengePathGraphButton apiClient={apiClient} challengeId={challenge.id} errorReporter={errorReporter} identityToken={identityToken} unlocked={pathsUnlocked} />
+          ) : null}
+          <button className={pathsUnlocked ? "link-button" : "race-preview-button"} type="button" disabled={raceDisabled} onClick={onRaceThis}>{raceLabel}</button>
           {showGiveUp ? (
-            <GiveUpAffordance
-              apiClient={apiClient}
-              challengeId={challenge.id}
-              errorReporter={errorReporter}
-              identityToken={identityToken}
-              onPeeked={() => setOutcomeRefreshToken((value) => value + 1)}
-            />
+            <GiveUpAffordance apiClient={apiClient} challengeId={challenge.id} errorReporter={errorReporter} identityToken={identityToken} onPeeked={() => setOutcomeRefreshToken(value => value + 1)} />
           ) : null}
         </div>
       </div>
@@ -298,19 +279,7 @@ export default function ChallengeDetail({
       <section className="leaderboard-panel" aria-label="Challenge leaderboard">
         <div className="leaderboard-heading">
           <h2>Leaderboard</h2>
-          {/* DT-1 ("anything else" (a)): docked into the heading row,
-              right-aligned, rather than dangling below the DNF section -
-              still the one shared `ChallengePathGraphButton` (unmodified;
-              its own portal-to-body modal is out of scope here). */}
-          {pathsUnlocked ? (
-            <ChallengePathGraphButton
-              apiClient={apiClient}
-              challengeId={challenge.id}
-              errorReporter={errorReporter}
-              identityToken={identityToken}
-              unlocked={pathsUnlocked}
-            />
-          ) : null}
+
         </div>
         <LeaderboardList
           dnfs={board.dnfs}
@@ -324,7 +293,7 @@ export default function ChallengeDetail({
         />
         {!pathsUnlocked ? (
           <p className="muted board-footnote">
-            Times, clicks, and paths hidden until you&apos;ve played (or given up).
+            Times, clicks, and paths stay hidden until you finish or confirm a reveal.
           </p>
         ) : null}
       </section>

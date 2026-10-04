@@ -107,6 +107,19 @@ function renderBoards(overrides: Partial<Parameters<typeof Boards>[0]> = {}) {
   return { onDisclosePath, onOpenChallenge, onRaceChallenge, onShowChallenges };
 }
 
+describe("Stats calendar periods", () => {
+  it("keeps Today empty before its Daily arrives and opens the prior board only under Yesterday", async () => {
+    const apiClient = mockApiClient();
+    renderBoards({ apiClient, heroSelection: { challenge: yesterdaysDaily, kind: "yesterday-daily" } });
+    expect(screen.getByText(/today's daily hasn't arrived yet/i)).toBeVisible();
+    expect(screen.queryByText(/coffee/i)).toBeNull();
+    expect(apiClient.getChallengeBoard).not.toHaveBeenCalled();
+    await userEvent.setup().click(screen.getByRole("button", { name: /see yesterday/i }));
+    expect(await screen.findByText(/coffee.*great molasses flood/i)).toBeVisible();
+    expect(apiClient.getChallengeBoard).toHaveBeenCalledWith(yesterdaysDaily.id, { closed: false });
+  });
+});
+
 describe("Boards: Today shares Home's honest hero selection (PKG-01)", () => {
   it("lets an unplayed Yesterday daily open its own race preview", async () => {
     const user = userEvent.setup();
@@ -157,27 +170,6 @@ describe("Boards: Today shares Home's honest hero selection (PKG-01)", () => {
     expect(onRaceChallenge).toHaveBeenCalledWith(todaysDaily.id, "today");
   });
 
-  it("kind yesterday-daily (pre-drop): Today mirrors Home's honest framing - no unqualified TODAY label, bare 'Race' CTA", async () => {
-    renderBoards({
-      heroSelection: { challenge: yesterdaysDaily, kind: "yesterday-daily" },
-    });
-
-    const header = await waitFor(() => {
-      const el = document.querySelector<HTMLElement>(".board-segment-header");
-      if (!el) throw new Error("header not rendered yet");
-      return el;
-    });
-    // The honest combined badge, exactly Home's copy - never a bare "Today"
-    // kicker alongside it.
-    expect(within(header).getByText("Yesterday's daily · Weird")).toBeVisible();
-    expect(within(header).queryByText("Today")).toBeNull();
-
-    // CTA downgrades to a bare "Race" - "Race today's daily" would be a lie
-    // about a challenge that isn't actually today's.
-    expect(screen.getByRole("button", { name: /^▶ race$/i })).toBeVisible();
-    expect(screen.queryByRole("button", { name: /race today's daily/i })).toBeNull();
-  });
-
   it("kind default (no daily anywhere): Today shows an explicit empty state, never the arbitrary fallback challenge under TODAY", async () => {
     const apiClient = mockApiClient();
     renderBoards({
@@ -193,53 +185,6 @@ describe("Boards: Today shares Home's honest hero selection (PKG-01)", () => {
     expect(screen.queryByText("TODAY")).toBeNull();
     expect(screen.queryByRole("button", { name: /race/i })).toBeNull();
     await waitFor(() => expect(apiClient.getChallengeBoard).not.toHaveBeenCalled());
-  });
-
-  it("the board query follows the honest selection: fetches yesterday's-daily id, not the old activeChallenges[0] fallback", async () => {
-    const apiClient = mockApiClient();
-    renderBoards({
-      apiClient,
-      heroSelection: { challenge: yesterdaysDaily, kind: "yesterday-daily" },
-    });
-
-    await waitFor(() =>
-      // RC-03: "Today" always passes `{ closed: false }` - this is the
-      // pre-drop case where the live daily genuinely IS yesterday's, so it
-      // must keep the short open-board TTL, not the permanent closed one.
-      expect(apiClient.getChallengeBoard).toHaveBeenCalledWith(yesterdaysDaily.id, { closed: false }),
-    );
-    expect(apiClient.getChallengeBoard).not.toHaveBeenCalledWith(
-      randomUserChallenge.id,
-      expect.anything(),
-    );
-  });
-
-  it("Today and Yesterday intentionally render the identical board pre-drop (owner-proxy ruling: accepted duplication, not a bug)", async () => {
-    const board: ChallengeBoardResponse = {
-      challengeId: yesterdaysDaily.id,
-      placements: [
-        { accountId: "acc-1", displayName: "FranTheGreat", placement: 1, elapsedMs: 62_000, clickCount: 8 },
-      ],
-      dnfs: [],
-    };
-    const apiClient = mockApiClient({
-      getChallengeBoard: vi.fn(async () => board),
-    });
-    const user = userEvent.setup();
-    renderBoards({
-      apiClient,
-      heroSelection: { challenge: yesterdaysDaily, kind: "yesterday-daily" },
-    });
-
-    await screen.findByText("FranTheGreat");
-    const todayHeader = document.querySelector<HTMLElement>(".board-segment-header")?.textContent;
-    expect(todayHeader).toContain("Coffee");
-
-    await user.click(screen.getByRole("tab", { name: "Yesterday" }));
-
-    await screen.findByText("FranTheGreat");
-    const yesterdayHeader = document.querySelector<HTMLElement>(".board-segment-header")?.textContent;
-    expect(yesterdayHeader).toContain("Coffee");
   });
 
   it("RC-03 (was QF-02): passes the correct open/closed hint per segment - the api client, not Boards, now owns not-refetching a closed board", async () => {
@@ -606,6 +551,7 @@ describe("Boards: FB-4 path comparison (council 2026-07-19, owner decision 10)",
       apiClient,
       identityAccountId: "acc-1",
       heroSelection: { challenge: yesterdaysDaily, kind: "yesterday-daily" },
+      initialSegment: "yesterday",
     });
 
     await screen.findByText("Ari");
@@ -631,6 +577,7 @@ describe("Boards: FB-4 path comparison (council 2026-07-19, owner decision 10)",
       apiClient,
       identityAccountId: "acc-1",
       heroSelection: { challenge: yesterdaysDaily, kind: "yesterday-daily" },
+      initialSegment: "yesterday",
     });
 
     await screen.findByText("Ari");
@@ -659,6 +606,7 @@ describe("Boards: FB-4 path comparison (council 2026-07-19, owner decision 10)",
       apiClient,
       identityAccountId: "acc-1",
       heroSelection: { challenge: yesterdaysDaily, kind: "yesterday-daily" },
+      initialSegment: "yesterday",
     });
 
     expect(await screen.findByText("0:20 · 3 clk")).toBeVisible();
@@ -675,6 +623,7 @@ describe("Boards: FB-4 path comparison (council 2026-07-19, owner decision 10)",
       apiClient,
       identityAccountId: "acc-1",
       heroSelection: { challenge: yesterdaysDaily, kind: "yesterday-daily" },
+      initialSegment: "yesterday",
     });
 
     expect(await screen.findByText("Ari")).toBeVisible();
@@ -696,4 +645,11 @@ describe("Boards: FB-4 path comparison (council 2026-07-19, owner decision 10)",
     expect(within(dnfSection).getByText("Sam")).toBeVisible();
     expect(within(dnfSection).queryByText(/view path/i)).toBeNull();
   });
+});
+
+it("keeps the pre-drop board open when first loaded through personal trend history", async () => {
+  const apiClient = mockApiClient({ getBoardsTrends: vi.fn(async () => ({ window: "7" as const, guard: 3, ranked: [{accountId:"me", displayName:"Atlas", avgPlacement:1, beatRate:1, gradedCount:3, racersBeaten:3, score:1, playedCount:3, avgElapsedMs:1000, avgClicks:3, prevAvgPlacement:null}], unranked:[] })) });
+  renderBoards({ apiClient, initialSegment: "7d", identityAccountId: "me", heroSelection: { challenge:yesterdaysDaily,kind:"yesterday-daily" } });
+  await userEvent.setup().click(await screen.findByRole("button", {name:"Your recent dailies"}));
+  await waitFor(() => expect(apiClient.getChallengeBoard).toHaveBeenCalledWith(yesterdaysDaily.id, {closed:false}));
 });

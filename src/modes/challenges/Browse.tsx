@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { challengeHeading, humanChallengeCreator } from "../../domain/challengePresentation";
 import StateChip from "../../components/StateChip";
 import { formatChallengeCardMeta } from "../../domain/challengeCard";
 import {
@@ -20,7 +21,6 @@ export interface CreateChallengeInput {
   nominateForDaily: boolean;
 }
 
-type BrowseView = "all" | "past-dailies";
 
 type OutcomesLoadState =
   | { token: string; status: "loading" }
@@ -151,7 +151,6 @@ export default function ChallengeBrowser({
   const [nominateForDaily, setNominateForDaily] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [createPanelOpen, setCreatePanelOpen] = useState(false);
-  const [browseView, setBrowseView] = useState<BrowseView>("all");
   const [pastDailyDate, setPastDailyDate] = useState("all");
   // QF-07: `isCreating` alone (an async state setter) has a real window
   // before re-render where a second tap/Enter fires a second create
@@ -260,15 +259,15 @@ export default function ChallengeBrowser({
   // `visibleChallenges` too duplicated it onto the screen twice.
   const visibleChallenges = useMemo(
     () => {
-      const candidates = browseView === "past-dailies"
+      const candidates = pastDailyDate !== "all"
         ? pastDailies.filter((challenge) =>
             pastDailyDate === "all" || dailyDateForChallenge(challenge) === pastDailyDate)
         : challenges;
       return filterChallengesByQuery(candidates, searchQuery).filter(
-        (challenge) => challenge.id !== pinnedDaily?.id,
+        (challenge) => pastDailyDate !== "all" || challenge.id !== pinnedDaily?.id,
       );
     },
-    [browseView, challenges, pastDailies, pastDailyDate, searchQuery, pinnedDaily],
+    [challenges, pastDailies, pastDailyDate, searchQuery, pinnedDaily],
   );
 
   function handleSearchChange(value: string) {
@@ -376,22 +375,15 @@ export default function ChallengeBrowser({
         <p className="error-banner" role="alert">{randomChallengeError}</p>
       ) : null}
 
-      <nav className="browse-filter-control" aria-label="Challenge filters">
-        <button
-          aria-pressed={browseView === "all"}
-          onClick={() => setBrowseView("all")}
-          type="button"
-        >
-          All challenges
-        </button>
-        <button
-          aria-pressed={browseView === "past-dailies"}
-          onClick={() => setBrowseView("past-dailies")}
-          type="button"
-        >
-          Past dailies
-        </button>
-      </nav>
+      {pastDailyDates.length ? (
+        <label className="name-control browse-date-control">
+          <span>Daily date</span>
+          <select aria-label="Daily date" value={pastDailyDate} onChange={(event) => setPastDailyDate(event.target.value)}>
+            <option value="all">All challenges</option>
+            {pastDailyDates.map(date => <option key={date} value={date}>{formatArchiveDate(date)}</option>)}
+          </select>
+        </label>
+      ) : null}
 
       {historyUnavailable ? (
         <p className="browse-history-status muted" role="status">
@@ -426,7 +418,7 @@ export default function ChallengeBrowser({
         </label>
       </div>
 
-      {pinnedDaily ? (
+      {pinnedDaily && pastDailyDate === "all" ? (
         // PKG-01/spec ("The daily pinned at top but pointing to Home"):
         // wrapped in its own `.challenge-list`-classed list (reusing that
         // class's existing card styling, incl. state-chip/daily-badge
@@ -462,27 +454,8 @@ export default function ChallengeBrowser({
         </ol>
       ) : null}
 
-      {browseView === "past-dailies" ? (
+      {pastDailyDate !== "all" ? (
         <section className="browse-archive" aria-label="Past daily archive">
-          <div className="browse-archive-controls">
-            <div>
-              <h3>Past dailies</h3>
-              <p className="muted">Pick a date to race or revisit.</p>
-            </div>
-            <label className="name-control browse-date-control">
-              <span>Past daily date</span>
-              <select
-                aria-label="Past daily date"
-                onChange={(event) => setPastDailyDate(event.target.value)}
-                value={pastDailyDate}
-              >
-                <option value="all">All dates</option>
-                {pastDailyDates.map((date) => (
-                  <option key={date} value={date}>{formatArchiveDate(date)}</option>
-                ))}
-              </select>
-            </label>
-          </div>
           {visibleChallenges.length ? (
             <ol className="challenge-list browse-archive-list">
               {visibleChallenges.map((challenge) => {
@@ -503,13 +476,14 @@ export default function ChallengeBrowser({
                       type="button"
                     >
                       <span className="challenge-meta">
-                        <time dateTime={dailyDate}>{formatArchiveDate(dailyDate)}</time>
+                        <time dateTime={dailyDate}>{challengeHeading(challenge)}</time>
                       </span>
                       <span className="browse-card-title-row">
                         <BrowseCardRoute challenge={challenge} />
                         {hasSession ? <ArchiveState outcome={outcome} /> : null}
                       </span>
                       {meta ? <span className="browse-card-meta muted">{meta}</span> : null}
+                      {humanChallengeCreator(challenge) ? <em>Created by {humanChallengeCreator(challenge)}</em> : null}
                     </button>
                   </li>
                 );
@@ -541,12 +515,8 @@ export default function ChallengeBrowser({
                     type="button"
                   >
                     <span className="challenge-meta">
-                      <span>{challenge.label ?? challenge.id}</span>
-                      {dailyBadgeLabel(challenge, todayCentral) ? (
-                        <span className="daily-badge">
-                          {dailyBadgeLabel(challenge, todayCentral)}
-                        </span>
-                      ) : null}
+                      <span>{challengeHeading(challenge)}</span>
+
                     </span>
                     <span className="browse-card-title-row">
                       <BrowseCardRoute challenge={challenge} />
@@ -555,8 +525,8 @@ export default function ChallengeBrowser({
                       ) : null}
                     </span>
                     {meta ? <span className="browse-card-meta muted">{meta}</span> : null}
-                    {challenge.createdBy ? (
-                      <em>Created by {challenge.createdBy.displayName}</em>
+                    {humanChallengeCreator(challenge) ? (
+                      <em>Created by {humanChallengeCreator(challenge)}</em>
                     ) : null}
                   </button>
                 </li>

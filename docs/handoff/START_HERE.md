@@ -1,5 +1,7 @@
 # VWiki Race: Start Here
 
+**Latest local challenge and Stats refinement:** [`challenge-arrival.md`](challenge-arrival.md) covers calendar-correct Stats, a single challenge catalog, Daily labels and progress-aware landings. It supersedes the earlier pre-drop Today-board reuse policy. Confirm publication separately.
+
 **Latest local interface refinement:** [`landing-typography.md`](landing-typography.md) covers the selected editorial typography, black palette, concise landing and footer, and CTA clearance. Confirm publication separately.
 
 **Read `maintenance-release.md` first for the current maintenance release.**

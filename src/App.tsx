@@ -927,7 +927,9 @@ export default function App({
     // many drops the tab happens to survive.
     let dropTimer: ReturnType<typeof window.setTimeout> | null = null;
     const scheduleNextDrop = () => {
-      const delay = Math.max(0, msUntilNextCentralDrop(new Date()));
+      const now = new Date();
+      // Stats labels follow calendar dates even before the next Daily drops.
+      const delay = Math.max(0, Math.min(msUntilNextCentralDrop(now), msUntilNextCentralDrop(now, 0)));
       dropTimer = window.setTimeout(() => {
         queueCatalogRefresh();
         scheduleNextDrop();

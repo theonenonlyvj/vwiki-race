@@ -123,27 +123,10 @@ function isTrendSegment(segment: BoardsSegment): segment is TrendSegment {
  * an error banner + Retry (F6), never the "no one has cleared the guard" empty
  * state - that empty state is reserved for a real zero-ranked response.
  *
- * "Today" reuses `heroSelection` - AppShell's `homeHero` (PKG-01), the exact
- * same kind-aware selection Home's hero and Browse's pinned row read - not a
- * separately-derived "today's daily." Before PKG-01, Today kept its own
- * `selectDefaultChallenge` call, whose fallback chain silently ends at
- * `activeChallenges[0]` (an arbitrary catalog entry); pre-drop or on a
- * broken-generation day that meant Today badged a random challenge "TODAY"
- * with a "Race today's daily" CTA while Home correctly showed yesterday's
- * still-playable daily. Today now branches on `heroSelection.kind`: real
- * today's daily post-drop (unchanged "TODAY" framing); yesterday's
- * still-playable daily pre-drop mirrors Home's exact honest framing (the
- * "Yesterday's daily · <flavor>" badge, the "New daily drops 5:00 AM
- * Central" line, and a downgraded bare "Race" CTA - never "Race today's
- * daily" when it isn't); and the "default" kind (no daily anywhere in the
- * catalog) renders its own explicit empty state rather than ever showing the
- * fallback challenge as if it were a daily. Owner-proxy ruling (2026-07-19
- * council): Today and Yesterday briefly rendering the identical board
- * pre-drop is intentional, not a redundancy bug - pre-drop, the current
- * daily genuinely IS yesterday's, so the two tabs agreeing is correct.
- * Yesterday keeps its own independent `yesterdaysDaily` lookup (no fallback
- * of its own): a genuine daily catalog gap there is expected (spec: "can
- * happen; not a stub") and renders its own graceful empty state.
+ * Stats uses calendar periods. Today shows only the actual current-date Daily,
+ * otherwise a waiting state; Yesterday selects the prior calendar date.
+ * Home may still offer the prior Daily before the next release. That board
+ * remains open and must retain the short cache lifetime, even in Yesterday.
  *
  * FB-4 (council 2026-07-19, owner decision 10, "path comparison": Yes) -
  * Today/Yesterday's daily board now DOES disclose a per-run path, same rule
@@ -319,15 +302,9 @@ export default function Boards({
   const activeChallenge = isTrendSegment(segment)
     ? null
     : segment === "today"
-      ? (todayHeroKind && todayHeroKind !== "default" ? heroSelection!.challenge : null)
+      ? (todayHeroKind === "today-daily" ? heroSelection!.challenge : null)
       : yesterdaysDaily;
-  // Owner-proxy ruling (2026-07-19 council): pre-drop, Today mirrors Home's
-  // honest yesterday-daily framing rather than getting its own empty state -
-  // Today and Yesterday briefly showing the identical board is intentional
-  // (the current daily genuinely IS yesterday's pre-drop), not a redundancy
-  // bug.
-  const todayShowsYesterdayFraming = segment === "today" && todayHeroKind === "yesterday-daily";
-
+  // Stats calendar periods stay distinct; Home can still offer the prior Daily.
   // RC-03: the component-local `yesterdayBoardCache` (a `useRef` Map that
   // died on unmount) that used to live here is gone - the underlying cache
   // now lives in vwikiRaceApiClient.ts itself (shared across every caller,
@@ -440,11 +417,10 @@ export default function Boards({
     );
     void Promise.all(
       recentDailyChallenges.map(({ challenge, dailyDate }) =>
-        // RC-03: a strictly-past dailyDate is always closed (once a
-        // dated daily exists in the catalog at all, it dropped that day and
-        // is only "today's live one" when the date matches todayCentral
-        // exactly) - safe to cache permanently, unlike the equal-dates case.
-        apiClient.getChallengeBoard(challenge.id, { closed: dailyDate < todayCentral })
+        // A prior-date Daily is still open while Home offers it pre-drop.
+        apiClient.getChallengeBoard(challenge.id, {
+          closed: dailyDate < todayCentral && !(todayHeroKind === "yesterday-daily" && heroSelection?.challenge.id === challenge.id),
+        })
           .then((response): RecentDailyDetail => {
             const placement = identityAccountId
               ? response.placements.find((row) => row.accountId === identityAccountId)
@@ -484,7 +460,7 @@ export default function Boards({
     return () => {
       cancelled = true;
     };
-  }, [apiClient, identityAccountId, ownRowExpanded, recentDailyChallenges]);
+  }, [apiClient, identityAccountId, ownRowExpanded, recentDailyChallenges, todayCentral, todayHeroKind, heroSelection?.challenge.id]);
 
   const boardMatchesActiveChallenge = Boolean(activeChallenge) && board.challengeId === activeChallenge?.id;
   const placements = boardMatchesActiveChallenge ? board.placements : [];
@@ -501,12 +477,8 @@ export default function Boards({
   // matching (RC-04's "never blank live UI" stays intact for this segment).
   const boardIsLoading = Boolean(activeChallenge) && !boardMatchesActiveChallenge && !boardHasError;
 
-  // Zero-finisher escape hatch (owner ask, 2026-07-26): scoped to TODAY's
-  // daily specifically - never Yesterday, never a trend window. Pre-drop,
-  // "Today" mirrors Home's honest yesterday-daily framing
-  // (`todayShowsYesterdayFraming` above) - that's genuinely yesterday's
-  // daily wearing the Today tab, not today's, so it's excluded here too.
-  const isTodayDailySurface = segment === "today" && !todayShowsYesterdayFraming;
+  // Only an actual current-date Daily can show the zero-finisher suggestion.
+  const isTodayDailySurface = segment === "today" && todayHeroKind === "today-daily";
   const emptyLabel = emptyPlacementsLabel(placements.length, dnfs.length);
   const showsZeroFinisherSuggestion = isTodayDailySurface && emptyLabel === ZERO_FINISHER_LABEL;
 
@@ -556,14 +528,8 @@ export default function Boards({
   // path" - "before I finish the race, I shouldn't be able to see how long
   // or # clicks on the leaderboard, just rankings and usernames."
   const pathsUnlocked = Boolean(ownPlacement);
-  // PKG-01: pre-drop, Today's badge mirrors Home's exact "Yesterday's
-  // daily · <flavor>" prefix (never a bare flavor pill that reads as if
-  // today's real daily) - see Home.tsx's identically-shaped `flavorBadge`.
-  // PKG-07: both branches now go through the same shared
-  // `dailyFlavorBadgeText` Home/Preview also use, so the "Daily #N" suffix
-  // can't independently drift between screens.
   const flavorBadge = activeChallenge?.dailyFeature
-    ? dailyFlavorBadgeText(activeChallenge.dailyFeature, todayShowsYesterdayFraming ? "yesterday" : "today")
+    ? dailyFlavorBadgeText(activeChallenge.dailyFeature, segment === "yesterday" ? "yesterday" : "today")
     : null;
 
   const trendWindow = isTrendSegment(segment) ? TREND_WINDOW_PARAM[segment] : null;
@@ -821,6 +787,12 @@ export default function Boards({
             ) : null}
           </>
         )
+      ) : segment === "today" && todayHeroKind === "yesterday-daily" ? (
+        <div className="board-awaiting-daily">
+          <h3>Today's daily hasn't arrived yet.</h3>
+          <p className="muted">Dailies arrive at 5:00 AM Central. Yesterday's race is still open.</p>
+          <button type="button" className="link-button" onClick={() => setSegment("yesterday")}>See yesterday's race</button>
+        </div>
       ) : segment === "today" && todayHeroKind === "default" ? (
         // PKG-01: the "default" kind means no daily exists anywhere in the
         // catalog (neither today's nor yesterday's) - Today says so
@@ -857,19 +829,8 @@ export default function Boards({
         <>
           <div className="board-segment-header challenge-route">
             <div className="challenge-meta">
-              {todayShowsYesterdayFraming ? (
-                // Owner-proxy ruling: pre-drop, Today mirrors Home's exact
-                // honest framing - the combined "Yesterday's daily ·
-                // <flavor>" badge stands alone, never alongside an
-                // unqualified "Today" kicker (see Home.tsx's identically-
-                // shaped badge).
-                flavorBadge ? <span className="daily-badge">{flavorBadge}</span> : null
-              ) : (
-                <>
-                  <span>{segment === "today" ? "Today" : "Yesterday"}</span>
-                  {flavorBadge ? <span className="daily-badge">{flavorBadge}</span> : null}
-                </>
-              )}
+              <span>{segment === "today" ? "Today" : "Yesterday"}</span>
+              {flavorBadge ? <span className="daily-badge">{flavorBadge}</span> : null}
             </div>
             <strong>
               {activeChallenge.start.title} <span className="route-arrow">{"→"}</span>{" "}
@@ -877,13 +838,10 @@ export default function Boards({
             </strong>
           </div>
 
-          {todayShowsYesterdayFraming ? (
-            <p className="ritual-line muted">New daily drops 5:00 AM Central.</p>
-          ) : null}
 
           <section
             className="board-snippet"
-            aria-label={`${segment === "today" && !todayShowsYesterdayFraming ? "Today's" : "Yesterday's"} board`}
+            aria-label={`${segment === "today" && todayHeroKind === "today-daily" ? "Today's" : "Yesterday's"} board`}
           >
             {placements.length ? (
               <ol>
@@ -1017,7 +975,7 @@ export default function Boards({
                 onClick={() => onRaceChallenge(activeChallenge.id, segment)}
                 type="button"
               >
-                {segment === "yesterday" ? "▶ Race yesterday's daily" : todayShowsYesterdayFraming ? "▶ Race" : "▶ Race today's daily"}
+                {segment === "yesterday" ? "▶ Race yesterday's daily" : "▶ Race today's daily"}
               </button>
             </div>
           ) : null}

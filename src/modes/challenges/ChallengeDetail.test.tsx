@@ -72,8 +72,8 @@ function renderDetail(overrides: Partial<Parameters<typeof ChallengeDetail>[0]> 
     todayCentral: "2026-07-19",
     ...overrides,
   };
-  render(<ChallengeDetail {...props} />);
-  return { onBack, onDisclosePath, onRaceThis, onRetryLeaderboard };
+  const view = render(<ChallengeDetail {...props} />);
+  return { ...view, props, onBack, onDisclosePath, onRaceThis, onRetryLeaderboard };
 }
 
 describe("ChallengeDetail: RC-06 (one honest loading/error system)", () => {
@@ -234,7 +234,7 @@ describe("ChallengeDetail: pre-finish spoiler mask (time/clicks)", () => {
     expect(screen.queryByText("0:08 · 2 clk")).toBeNull();
     const historyPanel = screen.getByRole("region", { name: "Your history" });
     expect(within(historyPanel).getByText("—")).toHaveClass("muted");
-    expect(screen.getByText(/times, clicks, and paths hidden until you've played \(or given up\)/i))
+    expect(screen.getByText(/times, clicks, and paths stay hidden until you finish or confirm a reveal/i))
       .toBeVisible();
   });
 
@@ -408,4 +408,57 @@ describe("\"I gave up\" affordance + solution view (owner spec, 2026-08-02)", ()
       expect(await screen.findByText(/no one.*human or machine.*cracked this one yet/i)).toBeVisible();
     });
   });
+});
+
+describe("Challenge landing intent", () => {
+  it("invites an unplayed visitor to preview without starting a run", async () => {
+    const { onRaceThis } = renderDetail();
+    expect(screen.getByText("Find your way there.")).toBeVisible();
+    await userEvent.setup().click(screen.getByRole("button", { name: /preview this race/i }));
+    expect(onRaceThis).toHaveBeenCalledOnce();
+  });
+  it("leads a finished player to the graph and makes replay secondary", async () => {
+    renderDetail({ identityAccountId: "me", identityToken: "token", apiClient: mockApiClient({
+      getAccountChallengeOutcomes: vi.fn(async () => [{ challengeId: challenge.id, outcome: "completed" as const, best: { elapsedMs: 20000, clickCount: 3 } }]),
+    }) });
+    expect(await screen.findByText("You found your way.")).toBeVisible();
+    expect(screen.getByRole("button", { name: /view graph/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /race again/i })).toHaveClass("link-button");
+  });
+  it("acknowledges DNF and preserves the explicit reveal confirmation", async () => {
+    renderDetail({ identityAccountId: "me", identityToken: "token", apiClient: mockApiClient({
+      getAccountChallengeOutcomes: vi.fn(async () => [{ challengeId: challenge.id, outcome: "dnf" as const, best: null, giveUpEligible: true }]),
+    }) });
+    expect(await screen.findByText("A different path might get you there.")).toBeVisible();
+    expect(screen.getByRole("button", { name: /try again/i })).toBeVisible();
+    await userEvent.setup().click(screen.getByRole("button", { name: /i give up/i }));
+    expect(screen.getByRole("group", { name: /give up confirmation/i })).toBeVisible();
+  });
+});
+
+describe("Challenge progress isolation", () => {
+  it("drops revealed-route access immediately on an account switch", async () => {
+    const apiClient = mockApiClient({ getAccountChallengeOutcomes: vi.fn(async token => token === "first" ? [{ challengeId: challenge.id, outcome: "dnf" as const, best: null, peeked: true }] : []) });
+    const view = renderDetail({ identityToken: "first", identityAccountId: "first", apiClient });
+    expect(await screen.findByRole("button", { name: "View graph" })).toBeVisible();
+    view.rerender(<ChallengeDetail {...view.props} identityToken="second" identityAccountId="second" />);
+    expect(screen.queryByRole("button", { name: "View graph" })).toBeNull();
+    expect(screen.queryByText("The routes are open.")).toBeNull();
+    expect(await screen.findByText("Find your way there.")).toBeVisible();
+  });
+  it("offers explicitly unranked practice after a reveal", async () => {
+    const { onRaceThis } = renderDetail({ identityToken: "first", identityAccountId: "first", apiClient: mockApiClient({
+      getAccountChallengeOutcomes: vi.fn(async () => [{ challengeId: challenge.id, outcome: "dnf" as const, best: null, peeked: true }]),
+    }) });
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Practice this race" }));
+    expect(screen.getByText(/future attempts here are unranked/i)).toBeVisible();
+    expect(onRaceThis).toHaveBeenCalledOnce();
+  });
+});
+
+it("does not offer route reveal before an unfinished player is eligible", async () => {
+  renderDetail({ identityToken: "token", identityAccountId: "me", apiClient: mockApiClient({ getAccountChallengeOutcomes: vi.fn(async () => [{challengeId:challenge.id,outcome:"dnf" as const,best:null,giveUpEligible:false}]) }) });
+  expect(await screen.findByText("Start fresh and try a different route. Your next attempt can still rank.")).toBeVisible();
+  expect(screen.queryByRole("button",{name:/i give up/i})).toBeNull();
+  expect(screen.queryByText(/reveal the routes when/i)).toBeNull();
 });
