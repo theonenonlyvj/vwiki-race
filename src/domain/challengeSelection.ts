@@ -25,6 +25,38 @@ export function centralDateKey(value: Date): string {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
+/** The Central wall-clock hour at which a new Daily drops and the game day turns over. */
+export const DAILY_DROP_HOUR_CENTRAL = 5;
+
+const CENTRAL_HOUR_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Chicago",
+  hour: "2-digit",
+  hourCycle: "h23",
+});
+
+/**
+ * The game-day key: which Daily is "today's". The day does NOT turn over at
+ * Central midnight - it turns over when the new Daily drops at 5:00 AM
+ * Central (owner ruling 2026-10-05: "'today' doesn't swap until 5am CST when
+ * the new challenge drops. so none of this 'yesterday' nonsense"). Between
+ * midnight and the drop, the current Daily is still the previous calendar
+ * date's, so that date is "today" everywhere a surface labels Today/
+ * Yesterday or computes a streak/trend window. `centralDateKey` remains the
+ * plain calendar date for things genuinely keyed to the calendar (e.g. the
+ * drop scheduler's own date stamp, which runs at 5:00 AM anyway).
+ */
+export function centralGameDayKey(value: Date, dropHour = DAILY_DROP_HOUR_CENTRAL): string {
+  const calendarDate = centralDateKey(value);
+  const hourPart = CENTRAL_HOUR_FORMATTER.formatToParts(value).find((part) => part.type === "hour");
+  if (!hourPart) {
+    throw new Error("Could not read the Central hour.");
+  }
+  // Some ICU builds emit "24" for midnight even under h23; that is hour 0,
+  // which must NOT read as post-drop.
+  const hour = Number(hourPart.value) % 24;
+  return hour < dropHour ? previousCentralDate(calendarDate) : calendarDate;
+}
+
 export function dailyBadgeLabel(challenge: Challenge, todayCentral: string): string | null {
   const dailyDate = dailyDateForChallenge(challenge);
   if (!dailyDate) return null;

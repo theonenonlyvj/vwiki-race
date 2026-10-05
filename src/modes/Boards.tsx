@@ -123,10 +123,12 @@ function isTrendSegment(segment: BoardsSegment): segment is TrendSegment {
  * an error banner + Retry (F6), never the "no one has cleared the guard" empty
  * state - that empty state is reserved for a real zero-ranked response.
  *
- * Stats uses calendar periods. Today shows only the actual current-date Daily,
- * otherwise a waiting state; Yesterday selects the prior calendar date.
- * Home may still offer the prior Daily before the next release. That board
- * remains open and must retain the short cache lifetime, even in Yesterday.
+ * Stats uses game days, which turn over at the 5:00 AM Central drop - NOT at
+ * Central midnight (owner ruling 2026-10-05). Today shows the current game
+ * day's Daily, otherwise a waiting state (only reachable after 5:00 AM when
+ * generation is late/failed); Yesterday selects the prior game day. Home may
+ * still offer the prior Daily in that late window. That board remains open
+ * and must retain the short cache lifetime, even in Yesterday.
  *
  * FB-4 (council 2026-07-19, owner decision 10, "path comparison": Yes) -
  * Today/Yesterday's daily board now DOES disclose a per-run path, same rule

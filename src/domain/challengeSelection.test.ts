@@ -4,6 +4,7 @@ import type { Challenge } from "./types";
 import {
   centralDateDaysBefore,
   centralDateKey,
+  centralGameDayKey,
   dailyBadgeLabel,
   isDailyToday,
   previousCentralDate,
@@ -33,6 +34,39 @@ describe("default challenge selection", () => {
   it("uses the Central calendar date across UTC midnight", () => {
     expect(centralDateKey(new Date("2026-07-16T00:30:00.000Z"))).toBe("2026-07-15");
     expect(centralDateKey(new Date("2026-01-16T05:30:00.000Z"))).toBe("2026-01-15");
+  });
+
+  it("turns the game day over at the 5:00 AM Central drop, not at midnight", () => {
+    // 2:18 AM CDT on Oct 5 is still Oct 4's game day (owner ruling 2026-10-05).
+    expect(centralGameDayKey(new Date("2026-10-05T07:18:00.000Z"))).toBe("2026-10-04");
+    // 4:59:59 AM CDT - one second before the drop.
+    expect(centralGameDayKey(new Date("2026-10-05T09:59:59.000Z"))).toBe("2026-10-04");
+    // 5:00:00 AM CDT - the drop itself starts the new day.
+    expect(centralGameDayKey(new Date("2026-10-05T10:00:00.000Z"))).toBe("2026-10-05");
+    // 11:59 PM CDT - still the same game day as the afternoon.
+    expect(centralGameDayKey(new Date("2026-10-06T04:59:00.000Z"))).toBe("2026-10-05");
+    // CST (UTC-6): 4:30 AM CST on Jan 16 is still Jan 15; 5:00 AM CST is Jan 16.
+    expect(centralGameDayKey(new Date("2026-01-16T10:30:00.000Z"))).toBe("2026-01-15");
+    expect(centralGameDayKey(new Date("2026-01-16T11:00:00.000Z"))).toBe("2026-01-16");
+    // Month boundary walks back correctly.
+    expect(centralGameDayKey(new Date("2026-11-01T06:00:00.000Z"))).toBe("2026-10-31");
+    // Exactly Central midnight is hour 0 (never "24"), so still the prior game day.
+    expect(centralGameDayKey(new Date("2026-10-06T05:00:00.000Z"))).toBe("2026-10-05");
+    expect(centralGameDayKey(new Date("2026-01-17T06:00:00.000Z"))).toBe("2026-01-16");
+  });
+
+  it("turns over at 5:00 AM wall-clock on Chicago DST transition days", () => {
+    // Spring forward 2026-03-08: 2:00 AM CST jumps to 3:00 AM CDT. 5:00 AM CDT = 10:00Z.
+    expect(centralGameDayKey(new Date("2026-03-08T09:59:59.000Z"))).toBe("2026-03-07");
+    expect(centralGameDayKey(new Date("2026-03-08T10:00:00.000Z"))).toBe("2026-03-08");
+    // 1:30 AM CST (07:30Z) and 3:30 AM CDT (08:30Z) are both pre-drop.
+    expect(centralGameDayKey(new Date("2026-03-08T07:30:00.000Z"))).toBe("2026-03-07");
+    expect(centralGameDayKey(new Date("2026-03-08T08:30:00.000Z"))).toBe("2026-03-07");
+    // Fall back 2026-11-01: 1:00 AM happens twice. 5:00 AM CST = 11:00Z.
+    expect(centralGameDayKey(new Date("2026-11-01T06:30:00.000Z"))).toBe("2026-10-31"); // 1:30 AM CDT
+    expect(centralGameDayKey(new Date("2026-11-01T07:30:00.000Z"))).toBe("2026-10-31"); // 1:30 AM CST
+    expect(centralGameDayKey(new Date("2026-11-01T10:59:59.000Z"))).toBe("2026-10-31");
+    expect(centralGameDayKey(new Date("2026-11-01T11:00:00.000Z"))).toBe("2026-11-01");
   });
 
   it("distinguishes today's daily from historical daily challenges", () => {

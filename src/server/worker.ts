@@ -1,7 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 
 import type { AuthorizedAccount, Challenge } from "../domain/types";
-import { centralDateKey } from "../domain/challengeSelection";
+import { centralGameDayKey } from "../domain/challengeSelection";
 import { dailyFlavorForCentralDate, type DailyFlavor } from "../domain/dailyEditorial";
 import { createApiHandlers, type ApiHandlers } from "./apiHandlers";
 import { createD1TrackingRepository } from "./d1TrackingRepository";
@@ -396,7 +396,7 @@ async function dispatchV2(
     const account = await tracking.authorize(request);
     await enforceAccountReadRateLimit(env, account.accountId, "suggestion");
     return json(
-      await tracking.handlers.getPlayAnotherSuggestion(account, centralDateKey(now)),
+      await tracking.handlers.getPlayAnotherSuggestion(account, centralGameDayKey(now)),
       { headers: noStoreHeaders() },
       corsHeaders,
     );
@@ -645,7 +645,7 @@ async function dispatchV2(
 
   if (request.method === "GET" && url.pathname === "/api/v2/boards/trends") {
     return json(
-      await tracking.handlers.getBoardsTrends(url.searchParams.get("window"), centralDateKey(now)),
+      await tracking.handlers.getBoardsTrends(url.searchParams.get("window"), centralGameDayKey(now)),
       { headers: noStoreHeaders() },
       corsHeaders,
     );

@@ -9,7 +9,7 @@ import type {
 import { dailyFlavorForCentralDate } from "../domain/dailyEditorial";
 import {
   centralDateDaysBefore,
-  centralDateKey,
+  centralGameDayKey,
   previousCentralDate,
 } from "../domain/challengeSelection";
 import {
@@ -3601,7 +3601,9 @@ export function createD1TrackingRepository(options: {
       // than a bespoke single-account query) so Boards' 30d segment and this
       // "my stats" number can never disagree - it's the exact same
       // computation, just read for one account instead of rendered for all.
-      const todayCentral = centralDateKey(now());
+      // Game day, not calendar day: the streak/30d window turns over at the
+      // 5:00 AM Central drop, matching the client's own `todayUtc`.
+      const todayCentral = centralGameDayKey(now());
       const [dailyStreak, trend] = await Promise.all([
         repository.getAccountDailyStreak(account.accountId, todayCentral),
         repository.listDailyTrends(30, todayCentral),

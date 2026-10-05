@@ -10,7 +10,7 @@ import {
 import ModalDialog from "./components/ModalDialog";
 import { getSortedChallenges } from "./domain/challenges";
 import {
-  centralDateKey,
+  centralGameDayKey,
   isDailyToday,
   selectDefaultChallenge,
 } from "./domain/challengeSelection";
@@ -147,7 +147,8 @@ interface GhostGuardState {
 
 const defaultFetch: typeof fetch = (input, init) => globalThis.fetch(input, init);
 const defaultNow = () => performance.now();
-const defaultTodayUtc = () => centralDateKey(new Date());
+// The game day turns over at the 5:00 AM Central drop, not at midnight.
+const defaultTodayUtc = () => centralGameDayKey(new Date());
 const unavailableBrowserStorage: StorageLike = {
   getItem: () => null,
   setItem: () => undefined,
@@ -927,9 +928,10 @@ export default function App({
     // many drops the tab happens to survive.
     let dropTimer: ReturnType<typeof window.setTimeout> | null = null;
     const scheduleNextDrop = () => {
-      const now = new Date();
-      // Stats labels follow calendar dates even before the next Daily drops.
-      const delay = Math.max(0, Math.min(msUntilNextCentralDrop(now), msUntilNextCentralDrop(now, 0)));
+      // Only the 5:00 AM drop turns the game day over - never Central
+      // midnight (owner ruling 2026-10-05; the midnight refresh that briefly
+      // lived here made Stats say "today's daily hasn't arrived" overnight).
+      const delay = Math.max(0, msUntilNextCentralDrop(new Date()));
       dropTimer = window.setTimeout(() => {
         queueCatalogRefresh();
         scheduleNextDrop();

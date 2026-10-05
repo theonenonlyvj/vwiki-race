@@ -2,7 +2,7 @@
 
 **Reveal and personal stats:** [`reveal-and-personal-stats.md`](reveal-and-personal-stats.md) documents reveal confirmation, personal measurement visibility, persistent End Run and existing error-reporting coverage. This supersedes the scrolling End Run and personal time/click masking descriptions below. Verify publication from the current deployment.
 
-**Latest local challenge and Stats refinement:** [`challenge-arrival.md`](challenge-arrival.md) covers calendar-correct Stats, a single challenge catalog, Daily labels and progress-aware landings. It supersedes the earlier pre-drop Today-board reuse policy. Confirm publication separately.
+**Latest local challenge and Stats refinement:** [`challenge-arrival.md`](challenge-arrival.md) covers game-day Stats (Today turns over at the 5:00 AM drop, not midnight), a single challenge catalog, Daily labels and progress-aware landings. It supersedes the earlier pre-drop Today-board reuse policy. Confirm publication separately.
 
 **Latest local interface refinement:** [`landing-typography.md`](landing-typography.md) covers the selected editorial typography, black palette, concise landing and footer, and CTA clearance. Confirm publication separately.
 

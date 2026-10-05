@@ -397,10 +397,32 @@ describe("VWiki Race app", () => {
     await waitFor(() => expect(challengeCatalogCalls(fetchImpl)).toBe(2));
   });
 
-  it("refreshes calendar periods at Central midnight without focus or navigation", async () => {
+  it("keeps Stats Today on the current daily across Central midnight - the game day only turns over at the 5:00 AM drop", async () => {
+    // Owner ruling 2026-10-05: "'today' doesn't swap until 5am CST when the
+    // new challenge drops. so none of this 'yesterday' nonsense."
     vi.useFakeTimers();
     try {
+      // 11:59:50 PM CDT on Jul 17.
       vi.setSystemTime(new Date("2026-07-18T04:59:50.000Z"));
+      const fetchImpl = createFetchMock({ challenges: [dailyChallenge("challenge-0001", { dailyDate: "2026-07-17" })] });
+      render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={memoryStorage()} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      fireEvent.click(screen.getByRole("button", { name: "Stats" }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(screen.getByRole("button", { name: /race today's daily/i })).toBeVisible();
+      // Cross midnight and sit at 2:00 AM CDT on Jul 18: still Jul 17's game day.
+      await act(async () => { await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000 + 9000); });
+      expect(screen.queryByText(/today's daily hasn't arrived yet/i)).toBeNull();
+      expect(screen.getByRole("button", { name: /race today's daily/i })).toBeVisible();
+      expect(challengeCatalogCalls(fetchImpl)).toBe(1); // No midnight refresh.
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("flips Stats Today to the waiting state only once the 5:00 AM drop passes without a new daily", async () => {
+    vi.useFakeTimers();
+    try {
+      // 4:59:50 AM CDT on Jul 18, catalog still holds only Jul 17's daily.
+      vi.setSystemTime(new Date("2026-07-18T09:59:50.000Z"));
       const fetchImpl = createFetchMock({ challenges: [dailyChallenge("challenge-0001", { dailyDate: "2026-07-17" })] });
       render(<App apiOrigin={apiOrigin} fetchImpl={fetchImpl} storage={memoryStorage()} />);
       await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
@@ -459,9 +481,9 @@ describe("VWiki Race app", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(19 * 60 * 60 * 1000 - 1000);
       });
-      expect(challengeCatalogCalls(fetchImpl)).toBe(3); // Calendar midnight.
+      expect(challengeCatalogCalls(fetchImpl)).toBe(2); // Central midnight: no refresh, the game day hasn't turned.
       await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60 * 60 * 1000 + 1000); });
-      expect(challengeCatalogCalls(fetchImpl)).toBe(4); // Next Daily drop.
+      expect(challengeCatalogCalls(fetchImpl)).toBe(3); // Next Daily drop.
     } finally {
       vi.useRealTimers();
     }

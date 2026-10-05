@@ -1,15 +1,18 @@
-# Challenge arrival and calendar-correct Stats
+# Challenge arrival and game-day Stats
 
 Local implementation; publication must be verified separately.
 
 ## Behavior
 
-Stats Today represents the current Central calendar date. Before its Daily
-arrives, show a waiting state with a route to Yesterday instead of displaying
-the same challenge under both labels. This supersedes the earlier deliberate
-pre-drop reuse policy. Refresh the catalog at both Central midnight and the
-Daily drop. The still-open preceding Daily must not enter the permanent board
-cache, including when trend history reads it first.
+Stats Today represents the current game day, which turns over at the 5:00 AM
+Central Daily drop, not at Central midnight (owner ruling 2026-10-05: "'today'
+doesn't swap until 5am CST when the new challenge drops"). The shared
+`centralGameDayKey` helper is the single source for this on both the client
+(`todayUtc`) and the Worker (trends, streak, suggestion). If the drop passes
+without a new Daily, show a waiting state with a route to Yesterday instead of
+displaying the same challenge under both labels. Refresh the catalog at the
+Daily drop only. The still-open preceding Daily must not enter the permanent
+board cache, including when trend history reads it first.
 
 Challenges uses one catalog with an optional Daily-date lookup. Daily cards
 and detail headings use the featured date. Hide system creator attribution
@@ -41,7 +44,7 @@ changed.
 ## Verification and limits
 
 Client and Worker suites passed, as did the production build and bundle
-verification. Regression tests cover mounted calendar rollover, pre-drop
+verification. Regression tests cover the midnight non-rollover and 5:00 AM rollover, pre-drop
 cache hints, system-versus-human provenance, account isolation, and landing
 actions. Local browser checks cover mobile and desktop for each progress
 state, archive lookup, graph dismissal, and cancelled reveal without mutation.
